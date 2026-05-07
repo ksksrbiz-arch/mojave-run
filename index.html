@@ -287,9 +287,9 @@
       p.touchFire = false;
     }
     for (const rec of activePointers.values()) {
-      const idx = clamp(rec.player, 0, playerCount() - 1);
-      input.players[idx].touchTargetX = rec.x;
-      input.players[idx].touchFire = true;
+      if (rec.player < 0 || rec.player >= playerCount()) continue;
+      input.players[rec.player].touchTargetX = rec.x;
+      input.players[rec.player].touchFire = true;
     }
   }
   cvs.addEventListener('pointerdown', onPointerDown);
@@ -562,6 +562,18 @@
     }
   }
 
+  function firePlayerBullet(player, xOffset) {
+    game.bullets.push({
+      x: player.x + xOffset,
+      y: player.y - 26,
+      w: 4,
+      h: 12,
+      vy: -780,
+      owner: player.id,
+      color: player.color.glow,
+    });
+  }
+
   function update(dt) {
     game.t += dt;
 
@@ -609,8 +621,8 @@
       p.fireCooldown -= dt;
       if (pi.fire && p.fireCooldown <= 0) {
         const spread = game.mode === 'pvp' ? PVP_BULLET_SPREAD : DEFAULT_BULLET_SPREAD;
-        game.bullets.push({ x: p.x - spread, y: p.y - 26, w: 4, h: 12, vy: -780, owner:p.id, color:p.color.glow });
-        game.bullets.push({ x: p.x + spread, y: p.y - 26, w: 4, h: 12, vy: -780, owner:p.id, color:p.color.glow });
+        firePlayerBullet(p, -spread);
+        firePlayerBullet(p, spread);
         p.fireCooldown = 0.18;
         SFX.shoot();
         emitParticles(p.x, p.y - 30, 3, { color:p.color.glow, speed: 80, life: 0.18, size: 2, spread: Math.PI/3 });
@@ -691,11 +703,12 @@
       e.fireT -= dt;
       if (e.fireT <= 0 && e.y > 0 && e.y < H * 0.7) {
         const target = nearestPlayer(e.x, e.y);
-        if (!target) continue;
-        const dx = target.x - e.x, dy = target.y - e.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        const sp = 360;
-        game.enemyBullets.push({ x: e.x, y: e.y + 20, w: 5, h: 10, vx: dx/dist*sp, vy: dy/dist*sp });
+        if (target) {
+          const dx = target.x - e.x, dy = target.y - e.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const sp = 360;
+          game.enemyBullets.push({ x: e.x, y: e.y + 20, w: 5, h: 10, vx: dx/dist*sp, vy: dy/dist*sp });
+        }
         e.fireT = rand(1.2, 2.2);
       }
 
@@ -792,7 +805,6 @@
   function damagePlayer(amt, player, attacker = null) {
     if (!player || !player.alive) return;
     player.health -= amt;
-    game.health = Math.max(0, ...game.players.slice(0, playerCount()).map(p => p.health));
     game.flash = 1;
     SFX.hit();
     if (player.health <= 0) {
@@ -1272,7 +1284,10 @@
 
     ctx.fillStyle = '#f5d76e';
     ctx.font = 'bold 18px "Courier New", monospace';
-    const headline = game.mode === 'pvp' && game.winner ? `${game.winner.color.name} WINS` : 'SCORE   ' + String(Math.floor(game.score)).padStart(6, '0');
+    const finalScore = String(Math.floor(game.score)).padStart(6, '0');
+    const headline = game.mode === 'pvp' && game.winner
+      ? `${game.winner.color.name} WINS`
+      : 'SCORE   ' + finalScore;
     ctx.fillText(headline, W/2, H * 0.5);
     ctx.fillStyle = 'rgba(245,215,110,0.8)';
     ctx.font = 'bold 14px "Courier New", monospace';
