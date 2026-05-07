@@ -320,6 +320,12 @@ const SFX = {
   levelUp:() => { [659,880].forEach((f,i)=>setTimeout(()=>blip(f,0.12,'triangle',0.08),i*100)); },
   boss:   () => { blip(110,0.4,'sawtooth',0.12,-30); setTimeout(()=>blip(82,0.4,'sawtooth',0.12,-20),200); },
   click:  () => blip(550, 0.04, 'square', 0.04),
+  powerUp:() => { [523,659,880,1175].forEach((f,i)=>setTimeout(()=>blip(f,0.09,'triangle',0.08),i*60)); },
+  shieldOn:() => { blip(330,0.18,'sine',0.1); setTimeout(()=>blip(660,0.22,'sine',0.08),80); },
+  nitroOn:() => { noise(0.35,0.18,2200); blip(180,0.25,'sawtooth',0.1,400); },
+  combo:  (tier) => { const f = 440 + Math.min(tier,12) * 80; blip(f, 0.08, 'square', 0.06); blip(f*1.5, 0.05, 'triangle', 0.04); },
+  mortar: () => { blip(60,0.5,'sawtooth',0.08,-20); noise(0.35,0.12,500); },
+  rocket: () => { blip(140,0.35,'square',0.07,-60); noise(0.22,0.1,1800); },
 };
 
 // ============================================================
@@ -357,6 +363,124 @@ function emit(x, y, n, opts = {}) {
 
 function shockwave(x, y, color = 'rgba(255,180,80,0.6)', maxR = 80) {
   Game.shockwaves.push({ x, y, r: 8, maxR, life: 0.4, max: 0.4, color });
+}
+
+// ============================================================
+// POWER-UPS, COMBOS, WEAPON MODES
+// ============================================================
+// Power-up definitions: id -> { name, color, dur, glyph }
+const POWERUPS = {
+  shield: { name:'SHIELD',     color:'#7aaaff', dur:6.0,  glyph:'◉' },
+  triple: { name:'TRIPLE FIRE',color:'#ff8a3d', dur:9.0,  glyph:'⊻' },
+  rapid:  { name:'RAPID FIRE', color:'#ffe07a', dur:9.0,  glyph:'»' },
+  nitro:  { name:'NITRO',      color:'#7af0ff', dur:3.5,  glyph:'»»' },
+  magnet: { name:'MAGNET',     color:'#f070ff', dur:8.0,  glyph:'⌒' },
+  x2:     { name:'SCORE x2',   color:'#7af07a', dur:10.0, glyph:'×2' },
+};
+const POWERUP_KEYS = Object.keys(POWERUPS);
+
+const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
+const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
+const COMBO_MULTS      = [1, 2, 3, 4, 5, 7, 10];
+
+function comboMult() {
+  const c = Game.combo | 0;
+  let m = 1;
+  for (let i = 0; i < COMBO_THRESHOLDS.length; i++) {
+    if (c >= COMBO_THRESHOLDS[i]) m = COMBO_MULTS[i];
+  }
+  return m;
+}
+
+function applyKill(x, y, baseScore) {
+  const prev = comboMult();
+  Game.combo = (Game.combo | 0) + 1;
+  Game.comboT = COMBO_WINDOW;
+  Game.kills += 1;
+  if (Game.combo > Game.comboBest) Game.comboBest = Game.combo;
+  const mult = comboMult();
+  const x2 = isPowerupActive('x2') ? 2 : 1;
+  const score = Math.round(baseScore * mult * x2);
+  Game.score += score;
+  // tier-up effects
+  if (mult > prev) {
+    SFX.combo(mult);
+    addPopup('×' + mult + ' COMBO!', W * 0.5, H * 0.32, '#ffe07a', 22);
+    Game.shake = Math.max(Game.shake, 0.4);
+  }
+  const label = (x2 > 1 ? 'x2 ' : '') + '+' + score + (mult > 1 ? ' ×' + mult : '');
+  addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
+}
+
+function isPowerupActive(id) {
+  const p = Game.powerups[id];
+  return p && p.t > 0;
+}
+
+function activatePowerup(id, src) {
+  const def = POWERUPS[id]; if (!def) return;
+  Game.powerups[id] = { t: def.dur, max: def.dur };
+  if (id === 'shield')      SFX.shieldOn();
+  else if (id === 'nitro')  SFX.nitroOn();
+  else                      SFX.powerUp();
+  if (src) {
+    addPopup(def.name, src.x, src.y - 16, def.color, 14);
+    emit(src.x, src.y, 14, { color: def.color, speed: 220, life: 0.5, size: 3 });
+    shockwave(src.x, src.y, hexToRgba(def.color, 0.55), 60);
+  }
+}
+
+function hexToRgba(hex, a) {
+  // expects #rrggbb or #rgb
+  const h = hex.replace('#','');
+  const f = h.length === 3
+    ? h.split('').map(c => parseInt(c+c, 16))
+    : [0,2,4].map(i => parseInt(h.substr(i,2), 16));
+  return `rgba(${f[0]},${f[1]},${f[2]},${a})`;
+}
+
+function updatePowerups(dt) {
+  for (const id of POWERUP_KEYS) {
+    const p = Game.powerups[id];
+    if (p && p.t > 0) {
+      p.t -= dt;
+      if (p.t <= 0) {
+        Game.powerups[id] = null;
+        // visual cue when shield drops
+        if (id === 'shield') {
+          shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.4)', 90);
+        }
+      }
+    }
+  }
+  // combo decay
+  if (Game.combo > 0) {
+    Game.comboT -= dt;
+    if (Game.comboT <= 0) { Game.combo = 0; Game.comboT = 0; }
+  }
+}
+
+// Magnet: pull pickups toward player when active
+function applyMagnet(dt) {
+  if (!isPowerupActive('magnet')) return;
+  const p = Game.player;
+  const range = 240;
+  for (const pk of Game.pickups) {
+    const dx = p.x - pk.x, dy = p.y - pk.y;
+    const d = Math.hypot(dx, dy);
+    if (d < range && d > 1) {
+      const pull = 600 * (1 - d / range);
+      pk.x += (dx / d) * pull * dt;
+      pk.y += (dy / d) * pull * dt;
+    }
+  }
+}
+
+// Pick a random non-active power-up id (or any if all are active)
+function rollPowerup() {
+  const inactive = POWERUP_KEYS.filter(k => !isPowerupActive(k));
+  const pool = inactive.length ? inactive : POWERUP_KEYS;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // ============================================================
@@ -512,6 +636,22 @@ const Game = {
   victorySeq: null,       // { t, dur, kind }
   // background fly-ins
   bgScroll: 0,
+  // combo system
+  combo: 0,
+  comboT: 0,
+  comboBest: 0,
+  // power-ups: id -> { t, max } | null
+  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null },
+  // tire skid marks (drawn under road decals)
+  skidMarks: [],
+  // far parallax peaks (deepest layer)
+  farPeaks: [],
+  // dust devils / weather embellishments
+  dustDevils: [],
+  // lightning timer (storm)
+  lightning: 0,
+  // muzzle-flash timer
+  muzzleT: 0,
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -577,7 +717,25 @@ function startRun(mode, level) {
   Game.bossDeathSeq = null;
   Game.victorySeq = null;
   Game.bgScroll = 0;
+  Game.combo = 0;
+  Game.comboT = 0;
+  Game.comboBest = 0;
+  for (const k of POWERUP_KEYS) Game.powerups[k] = null;
+  Game.skidMarks.length = 0;
+  Game.farPeaks.length = 0;
+  Game.dustDevils.length = 0;
+  Game.lightning = 0;
+  Game.muzzleT = 0;
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
+  // seed parallax peaks across the horizon
+  for (let i = 0; i < 6; i++) {
+    Game.farPeaks.push({
+      x: rand(0, 1), // normalized 0..1, scrolls slowly
+      w: rand(0.18, 0.32),
+      h: rand(0.08, 0.16),
+      tone: rand(0.6, 1.0),
+    });
+  }
   // loading sequence — vehicle drives in, level info displays
   Game.loadingT = 0;
   Game.loadingDur = 1.7;
@@ -668,7 +826,18 @@ function spawnEnemy() {
   const margin = 32;
   const r = Math.random();
   const lvlMul = Game.levelData ? Game.levelData.diff : 1;
-  if (r < 0.45) {
+  // unlock new enemies as difficulty increases
+  const unlockBike   = lvlMul >= 1.1 || Game.distance > 800;
+  const unlockMortar = lvlMul >= 1.4 || Game.distance > 2400;
+  // pick spawn type
+  let pick;
+  if (unlockMortar && r < 0.10) pick = 'mortar';
+  else if (unlockBike && r < 0.30) pick = 'bikes';
+  else if (r < 0.55) pick = 'buggy';
+  else if (r < 0.85) pick = 'wreck';
+  else pick = 'barrels';
+
+  if (pick === 'buggy') {
     Game.enemies.push({
       kind:'buggy',
       x: rand(x0+margin, x1-margin),
@@ -677,7 +846,33 @@ function spawnEnemy() {
       vy: rand(60, 110) * Math.min(1.5, 1 + (lvlMul-1)*0.3),
       hp: 2, fireT: rand(0.8, 1.6),
     });
-  } else if (r < 0.8) {
+  } else if (pick === 'bikes') {
+    // 1-2 weaving bikes side by side
+    const n = Math.random() < 0.6 ? 2 : 1;
+    const cx = rand(x0 + margin + 30, x1 - margin - 30);
+    for (let i = 0; i < n; i++) {
+      Game.enemies.push({
+        kind:'bike',
+        x: cx + (i - (n-1)/2) * 50 + rand(-6, 6),
+        y: -50 - i * 30, w:24, h:38,
+        vx: 0, vy: rand(40, 80) * Math.min(1.4, 1 + (lvlMul-1)*0.2),
+        hp: 1, fireT: rand(1.4, 2.4),
+        wave: rand(0, Math.PI * 2), waveSpeed: rand(2.6, 4.0), waveAmp: rand(40, 80),
+        baseX: cx + (i - (n-1)/2) * 50,
+      });
+    }
+  } else if (pick === 'mortar') {
+    // stationary roadside emplacement that arcs shells
+    const side = Math.random() < 0.5 ? 'L' : 'R';
+    const x = side === 'L'
+      ? rand(8, Math.max(12, x0 - 12))
+      : rand(x1 + 12, W - 12);
+    Game.enemies.push({
+      kind:'mortar', x, y: -40, w: 30, h: 30,
+      vx: 0, vy: 0, hp: 3, fireT: rand(1.4, 2.4),
+      stationary: true,
+    });
+  } else if (pick === 'wreck') {
     Game.obstacles.push({
       kind:'wreck',
       x: rand(x0+margin, x1-margin),
@@ -698,8 +893,18 @@ function spawnEnemy() {
 
 function spawnPickup() {
   const { x0, x1 } = roadBounds();
-  const kind = Math.random() < 0.78 ? 'scrap' : 'repair';
-  Game.pickups.push({ kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 });
+  const r = Math.random();
+  // 8% power-up, 16% repair, 76% scrap
+  let kind;
+  if (r < 0.08) kind = 'powerup';
+  else if (r < 0.24) kind = 'repair';
+  else kind = 'scrap';
+  const pk = { kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 };
+  if (kind === 'powerup') {
+    pk.power = rollPowerup();
+    pk.w = 26; pk.h = 26;
+  }
+  Game.pickups.push(pk);
 }
 
 // ============================================================
@@ -782,9 +987,7 @@ function updateBoss(dt) {
         shockwave(b.x, b.y, 'rgba(255,180,80,0.7)', 200);
         Game.shake = 1.4;
         const bossScore = 1500 * (Game.levelData ? Game.levelData.diff : 1);
-        Game.score += bossScore;
-        Game.kills += 1;
-        addPopup('+' + Math.floor(bossScore), b.x, b.y - 20, '#ffd86b', 22);
+        applyKill(b.x, b.y - 20, Math.floor(bossScore));
         const isBossLevel = !!(Game.levelData && Game.levelData.obj === 'boss');
         Game.bossDeathSeq = {
           t: 0, dur: isBossLevel ? 2.0 : 1.4,
@@ -1060,12 +1263,65 @@ function update(dt) {
   if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.hitFlash > 0) Game.hitFlash -= dt;
 
-  Game.distance += Game.speed * dt;
-  Game.score += Game.speed * dt * 0.05;
-  Game.laneOffset = (Game.laneOffset + Game.speed * dt) % 60;
-  Game.bgScroll += Game.speed * dt * 0.3;
+  // ---- power-ups & combo decay ----
+  updatePowerups(dt);
+  applyMagnet(dt);
+
+  // nitro modifies effective scroll & score gain
+  const nitroMul = isPowerupActive('nitro') ? 1.6 : 1.0;
+  Game.distance += Game.speed * dt * nitroMul;
+  Game.score += Game.speed * dt * 0.05 * nitroMul;
+  Game.laneOffset = (Game.laneOffset + Game.speed * dt * nitroMul) % 60;
+  Game.bgScroll += Game.speed * dt * 0.3 * nitroMul;
   Game.shake = Math.max(0, Game.shake - dt * 2.4);
   Game.flash = Math.max(0, Game.flash - dt * 3);
+  if (Game.muzzleT > 0) Game.muzzleT -= dt;
+
+  // ---- skid marks: emitted when steering hard ----
+  const ph = Game.player;
+  const steerHard = ph && Math.abs(ph.vx) > 220;
+  if (steerHard && Math.random() < 0.85) {
+    Game.skidMarks.push({ x: ph.x - 13, y: ph.y + ph.h/2 - 4, w: 4, h: 6, life: 1.4, max: 1.4 });
+    Game.skidMarks.push({ x: ph.x + 13, y: ph.y + ph.h/2 - 4, w: 4, h: 6, life: 1.4, max: 1.4 });
+  }
+  // age skid marks (they scroll with road)
+  for (let i = Game.skidMarks.length - 1; i >= 0; i--) {
+    const s = Game.skidMarks[i];
+    s.y += Game.speed * dt * nitroMul;
+    s.life -= dt;
+    if (s.life <= 0 || s.y > H + 30) Game.skidMarks.splice(i, 1);
+  }
+
+  // ---- weather: dust devils + lightning ----
+  if (Game.isStorm) {
+    if (Math.random() < dt * 0.45 && Game.dustDevils.length < 4) {
+      const { x0, x1 } = roadBounds();
+      const side = Math.random() < 0.5 ? 'L' : 'R';
+      const dx = side === 'L' ? rand(0, x0) : rand(x1, W);
+      Game.dustDevils.push({ x: dx, y: -20, t: 0, life: rand(2.5, 4.5) });
+    }
+    Game.lightning -= dt;
+    if (Game.lightning < -rand(2.5, 6)) {
+      Game.lightning = rand(0.18, 0.32);
+    }
+  }
+  for (let i = Game.dustDevils.length - 1; i >= 0; i--) {
+    const d = Game.dustDevils[i];
+    d.y += Game.speed * dt * nitroMul;
+    d.t += dt;
+    d.life -= dt;
+    if (d.life <= 0 || d.y > H + 60) Game.dustDevils.splice(i, 1);
+  }
+
+  // ---- nitro speed-line particles ----
+  if (isPowerupActive('nitro') && Math.random() < 0.7) {
+    const sx = rand(20, W - 20);
+    const sy = rand(40, H - 40);
+    Game.particles.push({
+      x: sx, y: sy, vx: 0, vy: 1100,
+      life: 0.18, max: 0.18, size: 2, color: 'rgba(122,240,255,0.7)',
+    });
+  }
 
   // difficulty ramp (classic: by distance; gauntlet: fixed per level; timeattack: aggressive)
   if (Game.mode === 'classic') {
@@ -1109,18 +1365,21 @@ function update(dt) {
   Game.fireCooldown -= dt;
   if (input.fire && Game.fireCooldown <= 0) {
     fireGuns();
-    Game.fireCooldown = stats.fireRate;
+    Game.fireCooldown = stats.fireRate * (isPowerupActive('rapid') ? 0.5 : 1);
   }
 
   // ---- bullets ----
   for (let i = Game.bullets.length - 1; i >= 0; i--) {
     const b = Game.bullets[i];
     b.y += b.vy * dt;
-    if (b.y < -20 || b.y > H + 20) Game.bullets.splice(i,1);
+    if (b.vx) b.x += b.vx * dt;
+    if (b.y < -20 || b.y > H + 20 || b.x < -20 || b.x > W + 20) Game.bullets.splice(i,1);
   }
   for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
     const b = Game.enemyBullets[i];
     b.y += b.vy * dt; b.x += (b.vx || 0) * dt;
+    if (b.gravity) b.vy += b.gravity * dt;
+    if (b.telegraph) b.telegraph.t -= dt;
     if (b.y < -20 || b.y > H + 20 || b.x < -20 || b.x > W + 20) Game.enemyBullets.splice(i,1);
   }
 
@@ -1162,18 +1421,51 @@ function update(dt) {
   // ---- enemies ----
   for (let i = Game.enemies.length - 1; i >= 0; i--) {
     const e = Game.enemies[i];
-    e.y += (e.vy + Game.speed * 0.15) * dt;
-    e.x += e.vx * dt;
-    const { x0:rx0, x1:rx1 } = roadBounds();
-    if (e.x < rx0 + 24) { e.x = rx0 + 24; e.vx = Math.abs(e.vx); }
-    if (e.x > rx1 - 24) { e.x = rx1 - 24; e.vx = -Math.abs(e.vx); }
+    // movement per kind
+    if (e.kind === 'bike') {
+      e.wave += e.waveSpeed * dt;
+      e.baseX += e.vx * dt;
+      e.x = e.baseX + Math.sin(e.wave) * e.waveAmp;
+      e.y += (e.vy + Game.speed * 0.18) * dt;
+    } else if (e.kind === 'mortar') {
+      // stationary roadside; scrolls with road
+      e.y += Game.speed * dt;
+    } else {
+      e.y += (e.vy + Game.speed * 0.15) * dt;
+      e.x += e.vx * dt;
+    }
+    // road clamp (skipped for mortar which sits off-road)
+    if (e.kind !== 'mortar') {
+      const { x0:rx0, x1:rx1 } = roadBounds();
+      if (e.x < rx0 + 24) { e.x = rx0 + 24; if (e.vx) e.vx = Math.abs(e.vx); }
+      if (e.x > rx1 - 24) { e.x = rx1 - 24; if (e.vx) e.vx = -Math.abs(e.vx); }
+    }
     e.fireT -= dt;
-    if (e.fireT <= 0 && e.y > 0 && e.y < H * 0.7) {
-      const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const sp = 360;
-      Game.enemyBullets.push({ x:e.x, y:e.y+20, w:5, h:10, vx:dx/dist*sp, vy:dy/dist*sp, dmg:8 });
-      e.fireT = rand(1.2, 2.2);
+    if (e.fireT <= 0 && e.y > 0 && e.y < H * 0.85) {
+      if (e.kind === 'mortar') {
+        // arcing shell — spawn with gravity, telegraphed
+        const dx = Game.player.x - e.x;
+        const sp = 320;
+        Game.enemyBullets.push({
+          x: e.x, y: e.y + 6, w: 8, h: 8,
+          vx: clamp(dx * 0.7, -260, 260) / 1.4,
+          vy: -160,
+          dmg: 14, gravity: 480, mortar: true,
+          telegraph: { x: Game.player.x, t: 1.0 },
+        });
+        SFX.mortar();
+        e.fireT = rand(2.4, 3.6);
+      } else if (e.kind === 'bike') {
+        // light side-shots
+        Game.enemyBullets.push({ x:e.x, y:e.y+12, w:4, h:8, vx: rand(-30,30), vy: 360, dmg: 6 });
+        e.fireT = rand(1.4, 2.4);
+      } else {
+        const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sp = 360;
+        Game.enemyBullets.push({ x:e.x, y:e.y+20, w:5, h:10, vx:dx/dist*sp, vy:dy/dist*sp, dmg:8 });
+        e.fireT = rand(1.2, 2.2);
+      }
     }
 
     for (let j = Game.bullets.length - 1; j >= 0; j--) {
@@ -1184,14 +1476,22 @@ function update(dt) {
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
         if (e.hp <= 0) {
           SFX.explode();
-          emit(e.x, e.y, 28, { color:'#ff6a2b', speed:360, life:0.8, size:4 });
+          const isBike = e.kind === 'bike';
+          const isMortar = e.kind === 'mortar';
+          const baseScore = isBike ? 200 : isMortar ? 250 : 150;
+          emit(e.x, e.y, isMortar ? 36 : 28, { color:'#ff6a2b', speed:360, life:0.8, size:4 });
           emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
-          shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', 70);
-          Game.score += 150;
-          Game.kills += 1;
-          Game.shake = Math.max(Game.shake, 0.5);
-          addPopup('+150', e.x, e.y - 16, '#ffd86b', 14);
-          if (Math.random() < 0.4) Game.pickups.push({ kind:'scrap', x:e.x, y:e.y, w:22, h:22, t:0 });
+          shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', isMortar ? 110 : 70);
+          if (isMortar) Game.shake = Math.max(Game.shake, 0.7);
+          else Game.shake = Math.max(Game.shake, 0.5);
+          applyKill(e.x, e.y, baseScore);
+          // drops
+          const dropR = Math.random();
+          if (isMortar && dropR < 0.5) {
+            Game.pickups.push({ kind:'powerup', power: rollPowerup(), x:e.x, y:e.y, w:26, h:26, t:0 });
+          } else if (dropR < 0.4) {
+            Game.pickups.push({ kind:'scrap', x:e.x, y:e.y, w:22, h:22, t:0 });
+          }
           Game.enemies.splice(i,1);
           break;
         } else { SFX.hit(); }
@@ -1200,20 +1500,51 @@ function update(dt) {
     if (!Game.enemies[i]) continue;
 
     if (aabb(e, Game.player)) {
-      damagePlayer(40);
-      SFX.explode();
-      emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
-      Game.enemies.splice(i,1);
-      Game.shake = Math.max(Game.shake, 0.7);
+      // shield blocks contact damage but breaks the enemy
+      if (isPowerupActive('shield')) {
+        emit(e.x, e.y, 24, { color:'#7aaaff', speed: 280, life: 0.5, size: 3 });
+        shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 80);
+        applyKill(e.x, e.y, e.kind === 'bike' ? 200 : 150);
+        Game.enemies.splice(i,1);
+        Game.shake = Math.max(Game.shake, 0.5);
+      } else {
+        damagePlayer(e.kind === 'bike' ? 28 : 40);
+        SFX.explode();
+        emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
+        Game.enemies.splice(i,1);
+        Game.shake = Math.max(Game.shake, 0.7);
+      }
     } else if (e.y > H + 60) Game.enemies.splice(i,1);
   }
 
   // ---- enemy bullets vs player ----
   for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
     const b = Game.enemyBullets[i];
+    // mortar shells detonate on ground impact (telegraph hits 0 ~ground)
+    if (b.mortar && b.telegraph && b.telegraph.t <= 0) {
+      const ex = b.x, ey = b.y;
+      emit(ex, ey, 30, { color:'#ff8a3d', speed: 320, life: 0.7, size: 4 });
+      shockwave(ex, ey, 'rgba(255,140,60,0.45)', 110);
+      SFX.explode();
+      Game.shake = Math.max(Game.shake, 0.6);
+      // splash radius
+      const r = 80;
+      if (Math.hypot(Game.player.x - ex, Game.player.y - ey) < r) {
+        if (isPowerupActive('shield')) {
+          shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 70);
+        } else damagePlayer(b.dmg);
+      }
+      Game.enemyBullets.splice(i,1);
+      continue;
+    }
     if (aabb(b, Game.player)) {
-      damagePlayer(b.dmg || 8);
-      emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2 });
+      if (isPowerupActive('shield')) {
+        emit(b.x, b.y, 8, { color:'#7aaaff', speed: 220, life: 0.4, size: 3 });
+        shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.4)', 50);
+      } else {
+        damagePlayer(b.dmg || 8);
+        emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2 });
+      }
       Game.enemyBullets.splice(i,1);
     }
   }
@@ -1226,15 +1557,19 @@ function update(dt) {
     if (pk.y > H + 40) { Game.pickups.splice(i,1); continue; }
     if (aabb(pk, Game.player)) {
       if (pk.kind === 'scrap') {
-        Game.score += 75;
+        const x2 = isPowerupActive('x2') ? 2 : 1;
+        const score = 75 * x2;
+        Game.score += score;
         emit(pk.x, pk.y, 12, { color:'#f5d76e', speed:220, life:0.5, size:3 });
-        addPopup('+75', pk.x, pk.y - 12, '#f5d76e', 13);
+        addPopup((x2 > 1 ? 'x2 ' : '') + '+' + score, pk.x, pk.y - 12, '#f5d76e', 13);
         SFX.scrap();
-      } else {
+      } else if (pk.kind === 'repair') {
         Game.health = Math.min(Game.maxHealth, Game.health + Game.maxHealth * 0.3);
         emit(pk.x, pk.y, 14, { color:'#7af07a', speed:220, life:0.5, size:3 });
         addPopup('+HULL', pk.x, pk.y - 12, '#7af07a', 13);
         SFX.pickup();
+      } else if (pk.kind === 'powerup') {
+        activatePowerup(pk.power, pk);
       }
       Game.pickups.splice(i,1);
     }
@@ -1319,31 +1654,58 @@ function fireGuns() {
   const dmg = stats.dmg;
   const bigShot = v.base.bigShot;
   const muzzleColor = v.color.glow;
+  const triple = isPowerupActive('triple');
+  Game.muzzleT = 0.08;
   if (bigShot) {
     Game.bullets.push({ x:p.x, y:p.y - 30, w:8, h:18, vy:-720, owner:'p', dmg, big:true });
+    if (triple) {
+      Game.bullets.push({ x:p.x - 10, y:p.y - 26, w:5, h:14, vx:-160, vy:-700, owner:'p', dmg: dmg * 0.7 });
+      Game.bullets.push({ x:p.x + 10, y:p.y - 26, w:5, h:14, vx: 160, vy:-700, owner:'p', dmg: dmg * 0.7 });
+    }
     SFX.bigShot();
     emit(p.x, p.y - 32, 6, { color:muzzleColor, speed:120, life:0.2, size:3, spread:Math.PI/3 });
     return;
   }
   if (guns === 1) {
     Game.bullets.push({ x:p.x, y:p.y - 30, w:5, h:14, vy:-780, owner:'p', dmg });
+    if (triple) {
+      Game.bullets.push({ x:p.x - 8, y:p.y - 28, w:4, h:12, vx:-220, vy:-740, owner:'p', dmg });
+      Game.bullets.push({ x:p.x + 8, y:p.y - 28, w:4, h:12, vx: 220, vy:-740, owner:'p', dmg });
+    }
   } else if (guns === 2) {
     Game.bullets.push({ x:p.x - 10, y:p.y - 26, w:4, h:12, vy:-780, owner:'p', dmg });
     Game.bullets.push({ x:p.x + 10, y:p.y - 26, w:4, h:12, vy:-780, owner:'p', dmg });
+    if (triple) {
+      Game.bullets.push({ x:p.x - 14, y:p.y - 24, w:4, h:12, vx:-260, vy:-720, owner:'p', dmg });
+      Game.bullets.push({ x:p.x + 14, y:p.y - 24, w:4, h:12, vx: 260, vy:-720, owner:'p', dmg });
+      Game.bullets.push({ x:p.x,      y:p.y - 30, w:5, h:14, vy:-820, owner:'p', dmg });
+    }
   } else if (guns === 4) {
     [-16,-6,6,16].forEach(dx =>
       Game.bullets.push({ x:p.x + dx, y:p.y - 26, w:3, h:10, vy:-820, owner:'p', dmg })
     );
+    if (triple) {
+      Game.bullets.push({ x:p.x - 22, y:p.y - 22, w:3, h:10, vx:-280, vy:-720, owner:'p', dmg });
+      Game.bullets.push({ x:p.x + 22, y:p.y - 22, w:3, h:10, vx: 280, vy:-720, owner:'p', dmg });
+    }
   }
   SFX.shoot();
-  emit(p.x, p.y - 30, 3, { color:muzzleColor, speed:80, life:0.18, size:2, spread:Math.PI/3 });
+  emit(p.x, p.y - 30, triple ? 6 : 3, { color:muzzleColor, speed:120, life:0.2, size:2, spread:Math.PI/3 });
 }
 
 function damagePlayer(amt) {
   if (Game.state !== 'playing') return;
+  if (isPowerupActive('shield')) {
+    // shield absorbs hit fully — visual cue only
+    shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 70);
+    return;
+  }
   Game.health -= amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
+  // taking damage breaks the combo
+  Game.combo = 0;
+  Game.comboT = 0;
   if (Game.health <= 0) {
     Game.health = 0;
     triggerPlayerDeath();
@@ -1377,9 +1739,7 @@ function splashDamage(x, y, r, dmg) {
       if (e.hp <= 0) {
         SFX.explode();
         emit(e.x, e.y, 22, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
-        Game.score += 120;
-        Game.kills += 1;
-        addPopup('+120', e.x, e.y - 16, '#ff8a3d', 13);
+        applyKill(e.x, e.y, e.kind === 'bike' ? 200 : e.kind === 'mortar' ? 250 : 120);
         Game.enemies.splice(i,1);
       }
     }
@@ -1405,19 +1765,39 @@ function splashDamage(x, y, r, dmg) {
 // RENDER
 // ============================================================
 function drawBackground() {
-  // sky / ground gradient — different at night vs day
+  // sky / ground gradient — different at night vs day, with storm tint
   const g = ctx.createLinearGradient(0, 0, 0, H);
+  const storm = Game.isStorm;
   if (Game.isNight) {
-    g.addColorStop(0, '#0a0a1a');
-    g.addColorStop(0.35, '#1a1530');
+    g.addColorStop(0, storm ? '#1a0a1a' : '#0a0a1a');
+    g.addColorStop(0.35, storm ? '#2a1530' : '#1a1530');
     g.addColorStop(1, '#2a1f1a');
   } else {
-    g.addColorStop(0, '#3a230f');
-    g.addColorStop(0.4, '#5a3818');
+    g.addColorStop(0, storm ? '#2a1a18' : '#3a230f');
+    g.addColorStop(0.4, storm ? '#4a2a18' : '#5a3818');
     g.addColorStop(1, '#6e4621');
   }
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+
+  // lightning flash (drawn over the gradient before parallax)
+  if (Game.isStorm && Game.lightning > 0) {
+    ctx.fillStyle = `rgba(220,225,255,${0.20 + Game.lightning * 0.7})`;
+    ctx.fillRect(0, 0, W, H * 0.55);
+    // bolt
+    ctx.strokeStyle = 'rgba(245,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let bx = (Game.t * 99) % W;
+    let by = 0;
+    ctx.moveTo(bx, by);
+    while (by < H * 0.4) {
+      bx += rand(-22, 22);
+      by += rand(14, 28);
+      ctx.lineTo(bx, by);
+    }
+    ctx.stroke();
+  }
 
   // stars at night (parallax-light)
   if (Game.isNight) {
@@ -1431,6 +1811,25 @@ function drawBackground() {
       ctx.fillRect(sx, sy, 1, 1);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // FAR mesas (deepest parallax, scrolls slowly)
+  const farScroll = (Game.bgScroll * 0.0008) % 1;
+  ctx.fillStyle = Game.isNight ? 'rgba(15,10,28,0.75)' : 'rgba(70,42,18,0.55)';
+  for (const peak of Game.farPeaks) {
+    const x = ((peak.x - farScroll) % 1 + 1) % 1;
+    const px = x * W;
+    const pw = peak.w * W;
+    const ph = peak.h * H;
+    const py = H * 0.30 - ph;
+    ctx.beginPath();
+    ctx.moveTo(px, H * 0.30);
+    ctx.lineTo(px + pw * 0.3, py + ph * 0.4);
+    ctx.lineTo(px + pw * 0.55, py);
+    ctx.lineTo(px + pw * 0.75, py + ph * 0.55);
+    ctx.lineTo(px + pw, H * 0.30);
+    ctx.closePath();
+    ctx.fill();
   }
 
   // distant mountains parallax
@@ -1693,6 +2092,8 @@ function drawObstacle(o) {
 }
 
 function drawEnemy(e) {
+  if (e.kind === 'bike')   { drawBike(e);   return; }
+  if (e.kind === 'mortar') { drawMortar(e); return; }
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -1728,6 +2129,64 @@ function drawEnemy(e) {
   ctx.fillStyle = '#aa3030';
   ctx.fillRect(-e.w/2 + 7, -e.h/2 + 10, 2, 4);
   ctx.fillRect(e.w/2 - 9, -e.h/2 + 10, 2, 4);
+  ctx.restore();
+}
+
+function drawBike(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(-e.w/2 + 2, -e.h/2 + 4, e.w, e.h);
+  // frame
+  ctx.fillStyle = '#3a0a0a';
+  ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
+  // rider torso
+  ctx.fillStyle = '#1a0f08';
+  ctx.fillRect(-e.w/2 + 4, -e.h/2 + 6, e.w - 8, 16);
+  // helmet
+  ctx.fillStyle = '#5a0a0a';
+  ctx.beginPath(); ctx.arc(0, -e.h/2 + 4, 5, 0, Math.PI * 2); ctx.fill();
+  // visor
+  ctx.fillStyle = '#ff5050';
+  ctx.fillRect(-3, -e.h/2 + 3, 6, 2);
+  // wheels
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(-3, -e.h/2 - 3, 6, 8);
+  ctx.fillRect(-3,  e.h/2 - 5, 6, 8);
+  // exhaust spit
+  ctx.fillStyle = 'rgba(255,140,60,0.55)';
+  ctx.fillRect(-e.w/2 - 3, e.h/2 - 8, 3, 6);
+  ctx.fillRect( e.w/2,     e.h/2 - 8, 3, 6);
+  ctx.restore();
+}
+
+function drawMortar(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath(); ctx.ellipse(2, e.h/2, e.w/2 + 2, 5, 0, 0, Math.PI*2); ctx.fill();
+  // sandbags base
+  ctx.fillStyle = '#4a3018';
+  ctx.fillRect(-e.w/2, e.h/2 - 8, e.w, 8);
+  ctx.fillStyle = '#3a2410';
+  for (let i = -1; i <= 1; i++) {
+    ctx.fillRect(i * 10 - 4, e.h/2 - 7, 8, 6);
+  }
+  // mortar tube
+  ctx.fillStyle = '#1a0f08';
+  ctx.fillRect(-5, -e.h/2, 10, e.h - 4);
+  ctx.fillStyle = '#3a2010';
+  ctx.fillRect(-5, -e.h/2, 10, 4);
+  // muzzle glow if recently fired
+  if (e.fireT > 1.6) {
+    ctx.fillStyle = 'rgba(255,180,60,0.5)';
+    ctx.beginPath(); ctx.arc(0, -e.h/2 + 2, 6, 0, Math.PI*2); ctx.fill();
+  }
+  // crew/operator
+  ctx.fillStyle = '#5a0a0a';
+  ctx.beginPath(); ctx.arc(-e.w/2 + 4, e.h/2 - 12, 3, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 }
 
@@ -1794,7 +2253,7 @@ function drawPickup(pk) {
     ctx.fillStyle = '#a8731a';
     ctx.fillRect(-3, -3, 6, 6);
     ctx.restore();
-  } else {
+  } else if (pk.kind === 'repair') {
     ctx.fillStyle = 'rgba(122,240,122,0.2)';
     ctx.beginPath(); ctx.arc(pk.x, pk.y + bob, 16, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#1a3a1a';
@@ -1804,6 +2263,45 @@ function drawPickup(pk) {
     ctx.fillStyle = '#1a3a1a';
     ctx.fillRect(pk.x - 2, pk.y + bob - 7, 4, 14);
     ctx.fillRect(pk.x - 7, pk.y + bob - 2, 14, 4);
+  } else if (pk.kind === 'powerup') {
+    const def = POWERUPS[pk.power] || POWERUPS.shield;
+    const c = def.color;
+    // pulsing aura
+    ctx.save();
+    ctx.translate(pk.x, pk.y + bob);
+    const pulse = 0.5 + 0.5 * Math.sin(pk.t * 5);
+    ctx.globalAlpha = 0.18 + 0.12 * pulse;
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.arc(0, 0, 22 + pulse * 4, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // hex outline
+    const r = 13;
+    ctx.fillStyle = '#1a0f08';
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3 - Math.PI / 6 + pk.t * 0.6;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    // hex inner fill
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3 - Math.PI / 6 + pk.t * 0.6;
+      const px = Math.cos(a) * (r - 3);
+      const py = Math.sin(a) * (r - 3);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    // glyph
+    ctx.fillStyle = '#1a0f08';
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(def.glyph, 0, 1);
+    ctx.restore();
   }
 }
 
@@ -1819,6 +2317,32 @@ function drawBullets() {
     ctx.fillRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4);
   }
   for (const b of Game.enemyBullets) {
+    if (b.mortar) {
+      // mortar shell with telegraph
+      if (b.telegraph) {
+        const t = clamp(b.telegraph.t, 0, 1);
+        const tx = b.telegraph.x;
+        const ty = H - 110;
+        ctx.globalAlpha = 0.55 + 0.45 * Math.sin(Game.t * 22);
+        ctx.strokeStyle = 'rgba(255,80,80,0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(tx, ty, 30 + t * 14, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(tx, ty, 14, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.lineWidth = 1;
+      }
+      ctx.fillStyle = '#3a1010';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ff8a3d';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 3, 0, Math.PI*2); ctx.fill();
+      // smoke trail
+      if (Math.random() < 0.7) {
+        Game.particles.push({
+          x: b.x, y: b.y, vx: rand(-10,10), vy: rand(-10,5),
+          life: 0.5, max: 0.5, size: 4, color: 'rgba(120,100,80,0.5)',
+        });
+      }
+      continue;
+    }
     if (b.big) {
       ctx.fillStyle = 'rgba(255,80,80,0.3)';
       ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI*2); ctx.fill();
@@ -1849,6 +2373,145 @@ function drawShockwaves() {
     ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.globalAlpha = 1; ctx.lineWidth = 1;
+}
+
+function drawSkidMarks() {
+  for (const s of Game.skidMarks) {
+    const a = clamp(s.life / s.max, 0, 1) * 0.5;
+    ctx.fillStyle = `rgba(20,12,6,${a})`;
+    ctx.fillRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h);
+  }
+}
+
+function drawDustDevils() {
+  for (const d of Game.dustDevils) {
+    const a = clamp(d.life / 4.5, 0, 1) * 0.55;
+    ctx.globalAlpha = a;
+    const sway = Math.sin(d.t * 5) * 6;
+    // tall conical dust
+    for (let i = 0; i < 5; i++) {
+      const y = d.y - i * 16;
+      const r = 10 + i * 4;
+      ctx.fillStyle = `rgba(180,140,90,${0.35 - i * 0.05})`;
+      ctx.beginPath();
+      ctx.ellipse(d.x + sway * (1 - i * 0.15), y, r, r * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawShield() {
+  const sh = Game.powerups && Game.powerups.shield;
+  if (!sh || sh.t <= 0 || !Game.player) return;
+  const p = Game.player;
+  const flickering = sh.t < 1.2 && Math.floor(sh.t * 12) % 2 === 0;
+  if (flickering) return;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.globalAlpha = 0.5 + 0.2 * Math.sin(Game.t * 8);
+  ctx.strokeStyle = '#7aaaff';
+  ctx.lineWidth = 2;
+  const r = 38 + Math.sin(Game.t * 6) * 2;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = '#7aaaff';
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  // hex pattern
+  ctx.globalAlpha = 0.28;
+  ctx.lineWidth = 1;
+  for (let a = 0; a < 6; a++) {
+    const ang = a * Math.PI / 3 + Game.t * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(ang) * r, Math.sin(ang) * r);
+    ctx.lineTo(Math.cos(ang + Math.PI/3) * r, Math.sin(ang + Math.PI/3) * r);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1; ctx.lineWidth = 1;
+}
+
+function drawComboMeter() {
+  if (Game.combo < 2) return;
+  const m = comboMult();
+  const txt = '×' + m + '   ' + Game.combo + ' KILLS';
+  const fs = W < 500 ? 14 : 18;
+  // position on the right side, below HUD
+  ctx.save();
+  ctx.font = `bold ${fs}px "Courier New", monospace`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  const x = W - 14;
+  const hudH = W < 500 ? 48 : 56;
+  const y = hudH + 10;
+  // shadow
+  ctx.fillStyle = '#1a0f08';
+  ctx.fillText(txt, x + 2, y + 2);
+  // body
+  const c = m >= 5 ? '#ff8a3d' : m >= 3 ? '#ffe07a' : '#f5d76e';
+  ctx.fillStyle = c;
+  ctx.fillText(txt, x, y);
+  // countdown bar under text
+  const w = 110, h = 3;
+  const pct = Game.comboT / COMBO_WINDOW;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x - w, y + fs + 4, w, h);
+  ctx.fillStyle = c;
+  ctx.fillRect(x - w * pct, y + fs + 4, w * pct, h);
+  ctx.restore();
+}
+
+function drawPowerupStrip() {
+  // small icon strip showing active power-ups, top-left under hudH
+  const active = POWERUP_KEYS.filter(k => isPowerupActive(k));
+  if (active.length === 0) return;
+  const hudH = W < 500 ? 48 : 56;
+  const ix = 14, iy = hudH + 6, sz = W < 500 ? 28 : 34, gap = 6;
+  ctx.save();
+  for (let i = 0; i < active.length; i++) {
+    const id = active[i];
+    const def = POWERUPS[id];
+    const p = Game.powerups[id];
+    const x = ix + i * (sz + gap);
+    // backdrop
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x, iy, sz, sz);
+    ctx.strokeStyle = def.color;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 0.5, iy + 0.5, sz - 1, sz - 1);
+    // glyph
+    ctx.fillStyle = def.color;
+    ctx.font = `bold ${sz - 12}px "Courier New", monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(def.glyph, x + sz/2, iy + sz/2 - 2);
+    // countdown bar
+    const pct = clamp(p.t / p.max, 0, 1);
+    ctx.fillStyle = def.color;
+    ctx.fillRect(x, iy + sz - 3, sz * pct, 3);
+    // flashing border when about to expire
+    if (p.t < 1.5 && Math.floor(p.t * 6) % 2 === 0) {
+      ctx.strokeStyle = '#fff';
+      ctx.strokeRect(x - 0.5, iy - 0.5, sz + 1, sz + 1);
+    }
+  }
+  ctx.lineWidth = 1;
+  ctx.restore();
+}
+
+function drawNitroOverlay() {
+  if (!isPowerupActive('nitro')) return;
+  // chromatic edges + speed lines (lines done via particles in update)
+  ctx.save();
+  ctx.fillStyle = 'rgba(122,240,255,0.06)';
+  ctx.fillRect(0, 0, W, H);
+  // edge vignette
+  const grad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H) * 0.35, W/2, H/2, Math.max(W,H) * 0.7);
+  grad.addColorStop(0, 'rgba(122,240,255,0)');
+  grad.addColorStop(1, 'rgba(122,240,255,0.20)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 }
 
 function drawHUD() {
@@ -2152,7 +2815,9 @@ function render() {
     }
     drawBackground();
     drawRoad();
+    drawSkidMarks();
     drawDecor();
+    drawDustDevils();
 
     for (const o of Game.obstacles) drawObstacle(o);
     for (const e of Game.enemies) drawEnemy(e);
@@ -2173,11 +2838,25 @@ function render() {
                      Game.player.w + 4, Game.player.h + 4);
         ctx.restore();
       }
+      drawShield();
+      // muzzle flash glow on barrel
+      if (Game.muzzleT > 0) {
+        const a = clamp(Game.muzzleT / 0.08, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = a * 0.7;
+        ctx.fillStyle = (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#fff3b0';
+        ctx.beginPath();
+        ctx.arc(Game.player.x, Game.player.y - Game.player.h/2 - 6, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
     }
     drawParticles();
     drawShockwaves();
     drawPopups();
     drawWeather();
+    drawNitroOverlay();
 
     if (Game.flash > 0) {
       ctx.fillStyle = `rgba(255,80,80,${Game.flash * 0.4})`;
@@ -2192,7 +2871,11 @@ function render() {
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
 
-    if (Game.state === 'playing') drawHUD();
+    if (Game.state === 'playing') {
+      drawHUD();
+      drawPowerupStrip();
+      drawComboMeter();
+    }
     if (Game.state === 'playing' && Game.paused) drawPause();
     if (Game.state === 'loading') drawLoadingOverlay();
     if (Game.state === 'playing' && Game.bossWarning > 0) drawBossWarning();
