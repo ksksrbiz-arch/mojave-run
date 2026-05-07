@@ -3500,14 +3500,28 @@ function drawMpGhosts() {
   const inGame = (Game.state === 'playing' || Game.state === 'loading'
     || Game.state === 'dying' || Game.state === 'victory');
   if (!inGame) return;
+  const now = performance.now();
   ctx.save();
   for (const [id, p] of MP.peers) {
     const s = p.s; if (!s || s.inMenu) continue;
     if (typeof s.nx !== 'number' || typeof s.ny !== 'number') continue;
-    const v = VEHICLE_BY_ID[p.vehicleId] || VEHICLE_BY_ID[Game.player && Game.vehicle && Game.vehicle.id] || VEHICLES[0];
-    const x = s.nx * W;
-    const y = s.ny * H;
-    ctx.globalAlpha = 0.45;
+    // Interpolate between previous and current sample to smooth out the
+    // ~15Hz update rate. Fall back to raw position if we have no history.
+    let nx = s.nx, ny = s.ny;
+    if (p.prev && p.prev.s && typeof p.prev.s.nx === 'number') {
+      const span = Math.max(16, p.recvAt - p.prev.t);
+      const k = Math.min(1, (now - p.recvAt) / span + 1); // 0..1 across last span
+      const t = Math.max(0, Math.min(1, k));
+      nx = p.prev.s.nx + (s.nx - p.prev.s.nx) * t;
+      ny = p.prev.s.ny + (s.ny - p.prev.s.ny) * t;
+    }
+    const v = VEHICLE_BY_ID[p.vehicleId] || (Game.vehicle ? VEHICLE_BY_ID[Game.vehicle.id] : null) || VEHICLES[0];
+    const x = nx * W;
+    const y = ny * H;
+    // Fade ghost out as samples grow stale — looks better than freezing in place.
+    const stale = Math.max(0, now - p.recvAt - 250);
+    const alpha = Math.max(0.12, 0.45 - stale / 4000);
+    ctx.globalAlpha = alpha;
     drawVehicle(x, y, v, s.vx || 0);
     ctx.globalAlpha = 1;
     // name tag
@@ -3524,15 +3538,30 @@ function drawMpGhosts() {
   ctx.restore();
 }
 
+function mpStatusText() {
+  if (!window.MP) return 'OFFLINE';
+  if (MP.connected) {
+    const ping = (typeof MP.pingMs === 'number') ? ` · ${MP.pingMs}MS` : '';
+    return `ROOM ${MP.room}${ping}`;
+  }
+  if (MP.joining) return 'JOINING…';
+  if (MP._wantConnected) return 'RECONNECTING…';
+  return 'DISCONNECTED';
+}
+
 function mpRefreshPeerList() {
   const list = document.getElementById('mp-peers');
   if (!list) return;
   const status = document.getElementById('mp-status-bar');
-  if (status) status.textContent = MP.connected ? ('ROOM ' + MP.room) : (MP.joining ? 'JOINING…' : 'DISCONNECTED');
-  document.getElementById('mp-leave-btn').style.display = MP.connected ? '' : 'none';
+  if (status) status.textContent = mpStatusText();
+  const leaveBtn = document.getElementById('mp-leave-btn');
+  if (leaveBtn) leaveBtn.style.display = (MP.connected || MP._wantConnected) ? '' : 'none';
   list.innerHTML = '';
   if (!MP.connected) {
-    list.innerHTML = '<div class="small center" style="padding:12px 0;opacity:.6">JOIN A ROOM TO SEE OTHER DRIVERS</div>';
+    const msg = MP._wantConnected
+      ? 'CHASING SIGNAL THROUGH THE DUST…'
+      : 'JOIN A ROOM TO SEE OTHER DRIVERS';
+    list.innerHTML = `<div class="small center" style="padding:12px 0;opacity:.6">${msg}</div>`;
     return;
   }
   // self
@@ -3554,6 +3583,49 @@ function mpRefreshPeerList() {
   MP.on('open', mpRefreshPeerList);
   MP.on('close', mpRefreshPeerList);
   MP.on('peers', mpRefreshPeerList);
+  MP.on('latency', () => {
+    // Only refresh the status line — avoid rebuilding the full peer list each ping.
+    const status = document.getElementById('mp-status-bar');
+    if (status) status.textContent = mpStatusText();
+  });
+  // Themed status events surfaced as toasts so the user always knows what's
+  // happening with the radio link. Codes are stable; detail is presentation.
+  MP.on('status', (st) => {
+    if (!st) return;
+    const code = st.code;
+    const detail = st.detail || '';
+    // Suppress noise when the player isn't on the MP screen for trivial events.
+    const onMpScreen = (UI.current === 'mp');
+    switch (code) {
+      case 'connecting':
+      case 'reconnecting':
+        if (onMpScreen) UI.toast(detail || 'RECONNECTING…');
+        break;
+      case 'joined':
+        UI.toast(detail || 'LINKED UP');
+        break;
+      case 'dropped':
+        UI.toast(detail || 'SIGNAL LOST');
+        break;
+      case 'error':
+        UI.toast(detail || 'COMMS FAULT');
+        break;
+      case 'giveup':
+        UI.toast(detail || 'RADIO SILENT — STOPPING');
+        break;
+      case 'kicked':
+        UI.toast('BOOTED: ' + detail);
+        break;
+      case 'peer-join':
+      case 'peer-leave':
+        if (onMpScreen) UI.toast(detail);
+        break;
+      case 'disconnected':
+        if (onMpScreen) UI.toast(detail || 'OFF THE GRID');
+        break;
+    }
+    mpRefreshPeerList();
+  });
 })();
 
 // extend UI
