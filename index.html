@@ -144,7 +144,7 @@
     cvs.height = Math.floor(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    if (game && game.player) {
+    if (game && game.player && Array.isArray(game.players)) {
       const { x0, x1 } = roadBounds();
       for (const p of game.players) {
         p.x = clamp(p.x, x0 + p.w/2 + 4, x1 - p.w/2 - 4);
@@ -205,6 +205,17 @@
     solo: 'SOLO RUN',
     coop: 'CO-OP CONVOY',
     pvp: 'PVP DUEL',
+  };
+  const MODE_SELECTOR_HALF_W = 220;
+  const MODE_SELECTOR_W_FRAC = 0.42;
+  const MODE_SELECTOR_Y_FRAC = 0.68;
+  const MODE_SELECTOR_HALF_H = 34;
+  const DEFAULT_BULLET_SPREAD = 10;
+  const PVP_BULLET_SPREAD = 8;
+  const HUD_BAR = {
+    solo: { width: 180, frac: 0.42 },
+    coop: { width: 110, frac: 0.28 },
+    pvp: { width: 110, frac: 0.28 },
   };
   const keys = Object.create(null);
   const input = {
@@ -382,7 +393,7 @@
 
   function nearestPlayer(x, y) {
     const players = activePlayers();
-    if (!players.length) return game.player;
+    if (!players.length) return null;
     let best = players[0], bestD = Infinity;
     for (const p of players) {
       const d = Math.hypot(p.x - x, p.y - y);
@@ -397,7 +408,13 @@
   }
 
   function hitModeSelector(x, y) {
-    return Math.abs(x - W / 2) < Math.min(220, W * 0.42) && Math.abs(y - H * 0.68) < 34;
+    const rect = modeSelectorRect();
+    return Math.abs(x - W / 2) < rect.halfW && Math.abs(y - rect.y) < MODE_SELECTOR_HALF_H;
+  }
+
+  function modeSelectorRect() {
+    const halfW = Math.min(MODE_SELECTOR_HALF_W, W * MODE_SELECTOR_W_FRAC);
+    return { halfW, width: halfW * 2, y: H * MODE_SELECTOR_Y_FRAC };
   }
 
   function cycleMode() {
@@ -587,7 +604,7 @@
 
       p.fireCooldown -= dt;
       if (pi.fire && p.fireCooldown <= 0) {
-        const spread = game.mode === 'pvp' ? 8 : 10;
+        const spread = game.mode === 'pvp' ? PVP_BULLET_SPREAD : DEFAULT_BULLET_SPREAD;
         game.bullets.push({ x: p.x - spread, y: p.y - 26, w: 4, h: 12, vy: -780, owner:p.id, color:p.color.glow });
         game.bullets.push({ x: p.x + spread, y: p.y - 26, w: 4, h: 12, vy: -780, owner:p.id, color:p.color.glow });
         p.fireCooldown = 0.18;
@@ -670,6 +687,7 @@
       e.fireT -= dt;
       if (e.fireT <= 0 && e.y > 0 && e.y < H * 0.7) {
         const target = nearestPlayer(e.x, e.y);
+        if (!target) continue;
         const dx = target.x - e.x, dy = target.y - e.y;
         const dist = Math.hypot(dx, dy) || 1;
         const sp = 360;
@@ -787,7 +805,7 @@
       game.shake = 1.2;
       const alive = activePlayers();
       if (alive.length === 0 || game.mode === 'solo' || game.mode === 'pvp') {
-        game.winner = game.mode === 'pvp' ? (alive[0] || attacker || null) : null;
+        game.winner = game.mode === 'pvp' ? (alive.length === 1 ? alive[0] : null) : null;
         game.state = 'gameover';
         releaseWakeLock();
         fsBtn.classList.remove('hidden');
@@ -1135,7 +1153,8 @@
     ctx.fillText(MODE_LABELS[game.mode], W/2, hudH - 8);
 
     const bars = game.players.slice(0, playerCount());
-    const hbW = Math.min(game.mode === 'solo' ? 180 : 110, W * (game.mode === 'solo' ? 0.42 : 0.28));
+    const barCfg = HUD_BAR[game.mode];
+    const hbW = Math.min(barCfg.width, W * barCfg.frac);
     const hbH = 10;
     const gap = game.mode === 'solo' ? 0 : 12;
     const totalW = bars.length * hbW + (bars.length - 1) * gap;
@@ -1199,11 +1218,12 @@
     let y = H * 0.5;
     for (const l of lines) { ctx.fillText(l, W/2, y); y += 20; }
 
-    const modeY = H * 0.68;
+    const modeRect = modeSelectorRect();
+    const modeY = modeRect.y;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(W/2 - Math.min(220, W*0.42), modeY - 24, Math.min(440, W*0.84), 48);
+    ctx.fillRect(W/2 - modeRect.halfW, modeY - 24, modeRect.width, 48);
     ctx.strokeStyle = '#f5d76e';
-    ctx.strokeRect(W/2 - Math.min(220, W*0.42), modeY - 24, Math.min(440, W*0.84), 48);
+    ctx.strokeRect(W/2 - modeRect.halfW, modeY - 24, modeRect.width, 48);
     ctx.fillStyle = game.mode === 'pvp' ? '#68d9ff' : '#f5d76e';
     ctx.font = 'bold 14px "Courier New", monospace';
     ctx.fillText('MODE: ' + MODE_LABELS[game.mode], W/2, modeY - 4);
