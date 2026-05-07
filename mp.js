@@ -56,6 +56,15 @@
   }
 
   function defaultUrl() {
+    // Priority order:
+    //   1. window.MP_DEFAULT_URL (lets a build/host inject it at runtime)
+    //   2. <meta name="mp-server-url" content="…"> in index.html
+    //   3. same origin as the page (works when server.js serves the site)
+    const fromWindow = (typeof window.MP_DEFAULT_URL === 'string' && window.MP_DEFAULT_URL.trim()) || '';
+    const metaEl = document.querySelector('meta[name="mp-server-url"]');
+    const fromMeta = (metaEl && metaEl.content && metaEl.content.trim()) || '';
+    const configured = fromWindow || fromMeta;
+    if (configured) return configured;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}/ws`;
   }

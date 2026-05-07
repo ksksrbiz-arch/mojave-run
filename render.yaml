@@ -1,0 +1,16 @@
+# Render blueprint for the MOJAVE RUN multiplayer relay.
+# Push this file to GitHub, then in Render: New + → Blueprint → pick this repo.
+# Render injects PORT at runtime; server.js already honors it.
+services:
+  - type: web
+    name: mojave-run
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev || npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MP_ROOM_CAP
+        value: "16"

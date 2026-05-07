@@ -3698,7 +3698,10 @@ UI.showMP = function showMP() {
   }
   const urlEl = document.getElementById('mp-url');
   const roomEl = document.getElementById('mp-room');
-  if (urlEl && !urlEl.value) urlEl.value = '';
+  // Pre-fill with the resolved default URL so the user can see (and override)
+  // exactly which relay we'll connect to. On a static-only host this exposes
+  // the configured wss:// URL instead of leaving the field misleadingly blank.
+  if (urlEl && !urlEl.value && window.MP) urlEl.value = MP.defaultUrl();
   if (roomEl && !roomEl.value) roomEl.value = 'LOBBY';
   this.show('mp');
   mpRefreshPeerList();
