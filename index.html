@@ -148,7 +148,7 @@
       const { x0, x1 } = roadBounds();
       for (const p of game.players) {
         p.x = clamp(p.x, x0 + p.w/2 + 4, x1 - p.w/2 - 4);
-        p.y = H - 110 - (game.mode !== 'solo' ? p.id * 18 : 0);
+        p.y = H - 110 - (game.mode !== 'solo' ? p.id * PLAYER_VERTICAL_SPACING : 0);
       }
     }
   }
@@ -212,6 +212,11 @@
   const MODE_SELECTOR_HALF_H = 34;
   const DEFAULT_BULLET_SPREAD = 10;
   const PVP_BULLET_SPREAD = 8;
+  const PLAYER_VERTICAL_SPACING = 18;
+  const SUN_X_FRAC = 0.72;
+  const SUN_Y_FRAC = 0.18;
+  const SUN_INNER_RADIUS = 8;
+  const SUN_OUTER_RADIUS_FRAC = 0.22;
   const HUD_BAR = {
     solo: { width: 180, frac: 0.42 },
     coop: { width: 110, frac: 0.28 },
@@ -268,7 +273,7 @@
   function onPointerMove(e) {
     if (activePointers.has(e.pointerId)) {
       const rec = activePointers.get(e.pointerId);
-      activePointers.set(e.pointerId, { x:e.clientX, player: rec ? rec.player : pointerPlayerIndex(e.clientX) });
+      activePointers.set(e.pointerId, { x:e.clientX, player: rec.player });
       updateTouchInput();
     }
   }
@@ -430,7 +435,7 @@
       const p = game.players[i];
       const spread = n === 1 ? 0 : (i === 0 ? -0.18 : 0.18);
       p.x = clamp(W * (0.5 + spread), x0 + p.w/2 + 4, x1 - p.w/2 - 4);
-      p.y = H - 110 - (n > 1 ? i * 18 : 0);
+      p.y = H - 110 - (n > 1 ? i * PLAYER_VERTICAL_SPACING : 0);
       p.vx = 0;
     }
   }
@@ -600,7 +605,7 @@
       p.x += p.vx * dt;
       if (p.x - p.w/2 < x0 + 4) { p.x = x0 + 4 + p.w/2; p.vx *= -0.4; }
       if (p.x + p.w/2 > x1 - 4) { p.x = x1 - 4 - p.w/2; p.vx *= -0.4; }
-      p.y = H - 110 - (playerCount() > 1 ? p.id * 18 : 0);
+      p.y = H - 110 - (playerCount() > 1 ? p.id * PLAYER_VERTICAL_SPACING : 0);
 
       p.fireCooldown -= dt;
       if (pi.fire && p.fireCooldown <= 0) {
@@ -785,7 +790,7 @@
     }
   }
 
-  function damagePlayer(amt, player = game.player, attacker = null) {
+  function damagePlayer(amt, player, attacker = null) {
     if (!player || !player.alive) return;
     player.health -= amt;
     game.health = Math.max(0, ...game.players.slice(0, playerCount()).map(p => p.health));
@@ -854,7 +859,9 @@
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    const sun = ctx.createRadialGradient(W * 0.72, H * 0.18, 8, W * 0.72, H * 0.18, Math.min(W,H) * 0.22);
+    const sunX = W * SUN_X_FRAC;
+    const sunY = H * SUN_Y_FRAC;
+    const sun = ctx.createRadialGradient(sunX, sunY, SUN_INNER_RADIUS, sunX, sunY, Math.min(W,H) * SUN_OUTER_RADIUS_FRAC);
     sun.addColorStop(0, 'rgba(255,238,160,0.95)');
     sun.addColorStop(0.45, 'rgba(255,136,58,0.35)');
     sun.addColorStop(1, 'rgba(255,136,58,0)');
