@@ -254,9 +254,16 @@ const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
 
-// Cached gradients — rebuilt on resize so we don't allocate per frame.
+// Cached gradients — rebuilt only when their inputs change (size or sky state)
+// so we don't allocate per frame. The sky/road gradients are also keyed by
+// isNight/isStorm and lazily rebuilt from drawBackground / drawRoad when those
+// flags change mid-run (e.g. day -> night transition between gauntlet sectors).
 let VIGNETTE_PLAY = null;
 let VIGNETTE_MENU = null;
+let SKY_GRAD = null;
+let ROAD_GRAD = null;
+let _skyKey = '';
+let _roadKey = '';
 function rebuildGradients() {
   VIGNETTE_PLAY = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
   VIGNETTE_PLAY.addColorStop(0, 'rgba(0,0,0,0)');
@@ -264,6 +271,40 @@ function rebuildGradients() {
   VIGNETTE_MENU = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
   VIGNETTE_MENU.addColorStop(0, 'rgba(0,0,0,0)');
   VIGNETTE_MENU.addColorStop(1, 'rgba(0,0,0,0.7)');
+  // invalidate sky/road caches so they rebuild against the new W/H
+  _skyKey = ''; _roadKey = '';
+}
+function getSkyGradient() {
+  const key = `${W}x${H}|${Game.isNight?1:0}|${Game.isStorm?1:0}`;
+  if (key === _skyKey && SKY_GRAD) return SKY_GRAD;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  if (Game.isNight) {
+    g.addColorStop(0, Game.isStorm ? '#1a0a1a' : '#0a0a1a');
+    g.addColorStop(0.35, Game.isStorm ? '#2a1530' : '#1a1530');
+    g.addColorStop(1, '#2a1f1a');
+  } else {
+    g.addColorStop(0, Game.isStorm ? '#2a1a18' : '#3a230f');
+    g.addColorStop(0.4, Game.isStorm ? '#4a2a18' : '#5a3818');
+    g.addColorStop(1, '#6e4621');
+  }
+  SKY_GRAD = g; _skyKey = key;
+  return g;
+}
+function getRoadGradient(x0, x1) {
+  const key = `${x0}|${x1}|${Game.isNight?1:0}`;
+  if (key === _roadKey && ROAD_GRAD) return ROAD_GRAD;
+  const rg = ctx.createLinearGradient(x0, 0, x1, 0);
+  if (Game.isNight) {
+    rg.addColorStop(0, '#0a0a08');
+    rg.addColorStop(0.5, '#181410');
+    rg.addColorStop(1, '#0a0a08');
+  } else {
+    rg.addColorStop(0, '#1f1610');
+    rg.addColorStop(0.5, '#2a1d12');
+    rg.addColorStop(1, '#1f1610');
+  }
+  ROAD_GRAD = rg; _roadKey = key;
+  return rg;
 }
 
 function resize() {
@@ -509,6 +550,12 @@ window.addEventListener('keydown', e => {
   ensureAudio();
   if (e.key.toLowerCase() === 'f') toggleFullscreen();
   if (e.key.toLowerCase() === 'p' && Game.state === 'playing') Game.paused = !Game.paused;
+  // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
+  // persists the choice in localStorage. Skipped while typing in the
+  // profile-rename modal so it doesn't hijack the input.
+  if (e.key.toLowerCase() === 'q' && document.activeElement !== document.getElementById('modal-input')) {
+    cycleQualityMode();
+  }
   if (Game.state === 'gameover') {
     if (e.key.toLowerCase() === 'r' || e.key === 'Enter') UI.act('res-again');
   }
@@ -1778,19 +1825,9 @@ function splashDamage(x, y, r, dmg) {
 // RENDER
 // ============================================================
 function drawBackground() {
-  // sky / ground gradient — different at night vs day, with storm tint
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  const storm = Game.isStorm;
-  if (Game.isNight) {
-    g.addColorStop(0, storm ? '#1a0a1a' : '#0a0a1a');
-    g.addColorStop(0.35, storm ? '#2a1530' : '#1a1530');
-    g.addColorStop(1, '#2a1f1a');
-  } else {
-    g.addColorStop(0, storm ? '#2a1a18' : '#3a230f');
-    g.addColorStop(0.4, storm ? '#4a2a18' : '#5a3818');
-    g.addColorStop(1, '#6e4621');
-  }
-  ctx.fillStyle = g;
+  // sky / ground gradient — cached and only rebuilt when size or
+  // night/storm flags change (was: allocated every frame).
+  ctx.fillStyle = getSkyGradient();
   ctx.fillRect(0, 0, W, H);
 
   // lightning flash (drawn over the gradient before parallax)
@@ -1892,18 +1929,8 @@ function drawRoad() {
   ctx.fillRect(0, 0, x0, H);
   ctx.fillRect(x1, 0, W - x1, H);
 
-  // road
-  const rg = ctx.createLinearGradient(x0, 0, x1, 0);
-  if (Game.isNight) {
-    rg.addColorStop(0, '#0a0a08');
-    rg.addColorStop(0.5, '#181410');
-    rg.addColorStop(1, '#0a0a08');
-  } else {
-    rg.addColorStop(0, '#1f1610');
-    rg.addColorStop(0.5, '#2a1d12');
-    rg.addColorStop(1, '#1f1610');
-  }
-  ctx.fillStyle = rg;
+  // road (cached gradient — keyed on road bounds + isNight)
+  ctx.fillStyle = getRoadGradient(x0, x1);
   ctx.fillRect(x0, 0, w, H);
 
   // road texture cracks (subtle)
@@ -3436,7 +3463,53 @@ const PerfMon = {
   quality: 1,
   lastAdjustAt: 0,
   hidden: false,
+  // Frame counter + EWMA-derived FPS for the debug HUD.
+  frames: 0,
+  fps: 60,
+  lastFpsAt: 0,
+  // 'auto' lets the governor adjust quality each second; the named presets
+  // (low/medium/high) pin quality and disable auto-adjustment.
+  mode: 'auto',
 };
+
+const QUALITY_PRESETS = { low: 0, medium: 0.5, high: 1 };
+const QUALITY_KEY = 'mojaverun.quality.v1';
+const DEBUG_HUD = (() => {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('debug') === '1' || p.get('debug') === 'true';
+  } catch (_) { return false; }
+})();
+
+function loadQualityPref() {
+  // URL param wins (handy for testing), then localStorage, else 'auto'.
+  let pref = null;
+  try {
+    const p = new URLSearchParams(window.location.search).get('quality');
+    if (p && (p === 'auto' || p in QUALITY_PRESETS)) pref = p;
+  } catch (_) {}
+  if (!pref) {
+    try {
+      const s = localStorage.getItem(QUALITY_KEY);
+      if (s && (s === 'auto' || s in QUALITY_PRESETS)) pref = s;
+    } catch (_) {}
+  }
+  setQualityMode(pref || 'auto', /*persist*/ false);
+}
+function setQualityMode(mode, persist) {
+  if (mode !== 'auto' && !(mode in QUALITY_PRESETS)) mode = 'auto';
+  PerfMon.mode = mode;
+  if (mode !== 'auto') PerfMon.quality = QUALITY_PRESETS[mode];
+  applyQualityCaps();
+  if (persist) {
+    try { localStorage.setItem(QUALITY_KEY, mode); } catch (_) {}
+  }
+}
+function cycleQualityMode() {
+  const order = ['auto', 'low', 'medium', 'high'];
+  const i = order.indexOf(PerfMon.mode);
+  setQualityMode(order[(i + 1) % order.length], /*persist*/ true);
+}
 function applyQualityCaps() {
   // Scale a few non-essential caps; gameplay-critical ones (enemies, obstacles,
   // pickups) stay fixed so the simulation is identical at any quality level.
@@ -3484,14 +3557,25 @@ function frame(now) {
     render();
     if (window.MP && MP.connected) drawMpGhosts();
     updateHint();
+    if (DEBUG_HUD) drawDebugHud();
   } catch (err) {
     // Never let one bad frame kill the loop. Log + continue.
     console.error('[frame]', err);
   }
-  // EWMA of total frame cost — used by the quality governor below.
+  // EWMA of total frame cost — used by the quality governor below and the
+  // debug HUD overlay.
   const cost = performance.now() - frameStart;
   PerfMon.ewmaMs = PerfMon.ewmaMs * 0.92 + cost * 0.08;
-  if (now - PerfMon.lastAdjustAt > 1000) {
+  // Sliding 1s FPS window for the debug HUD.
+  PerfMon.frames++;
+  if (now - PerfMon.lastFpsAt >= 1000) {
+    PerfMon.fps = PerfMon.frames * 1000 / (now - PerfMon.lastFpsAt);
+    PerfMon.frames = 0;
+    PerfMon.lastFpsAt = now;
+  }
+  // Auto-governor only nudges quality when the user is on 'auto'. Manual
+  // presets pin quality so the player gets a predictable look.
+  if (PerfMon.mode === 'auto' && now - PerfMon.lastAdjustAt > 1000) {
     PerfMon.lastAdjustAt = now;
     // 22ms ≈ 45fps floor. Above it we shed quality; well below it we recover.
     if (PerfMon.ewmaMs > 22 && PerfMon.quality > 0) {
@@ -3503,6 +3587,38 @@ function frame(now) {
     }
   }
   requestAnimationFrame(frame);
+}
+
+// Debug HUD — only attached when the page was opened with `?debug=1`. Shows
+// FPS, the EWMA frame cost (ms), entity counts, current quality preset, and
+// MP peer count. Drawn last so it sits above everything; uses a fixed,
+// monospace block so it's easy to read on a phone.
+function drawDebugHud() {
+  const lines = [
+    `FPS ${PerfMon.fps.toFixed(0)}  ${PerfMon.ewmaMs.toFixed(1)}ms`,
+    `Q ${PerfMon.mode}${PerfMon.mode === 'auto' ? ` (${PerfMon.quality.toFixed(2)})` : ''}  DPR ${DPR}`,
+    `enem ${Game.enemies.length}  obst ${Game.obstacles.length}  pick ${Game.pickups.length}`,
+    `bull ${Game.bullets.length}  ebul ${Game.enemyBullets.length}  part ${Game.particles.length}`,
+    `pop ${Game.popups.length}  sw ${Game.shockwaves.length}` +
+      (window.MP && MP.connected ? `  peers ${MP.peers.size}` : ''),
+  ];
+  ctx.save();
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  let maxW = 0;
+  for (let i = 0; i < lines.length; i++) maxW = Math.max(maxW, ctx.measureText(lines[i]).width);
+  const pad = 6;
+  const x = 8, y = 8;
+  const boxW = maxW + pad * 2;
+  const boxH = lines.length * 14 + pad * 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.fillStyle = PerfMon.ewmaMs > 22 ? '#ff8a8a' : '#7af07a';
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], x + pad, y + pad + i * 14);
+  }
+  ctx.restore();
 }
 
 // Hard caps to prevent unbounded growth from runaway spawns / boss enrage / lag
@@ -3739,6 +3855,7 @@ UI.act = function(action, data) {
 // ============================================================
 function boot() {
   resize();
+  loadQualityPref();
   Profile.load();
   // seed decor for menu backdrop
   Game.player = { x: W * 0.5, y: H - 110, w: 42, h: 64, vx: 0 };
