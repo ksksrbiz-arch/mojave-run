@@ -31,7 +31,7 @@
   .overlay{position:absolute;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:24px;text-align:center;
     pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
-  .hidden{display:none}
+  .overlay.hidden,.hud.hidden,.pause-btn.hidden,.special-btn.hidden{display:none}
   .title{font-size:clamp(32px,9vw,72px);color:var(--blood);
     text-shadow:3px 3px 0 #000,0 0 24px #500;letter-spacing:.1em;
     font-weight:900;margin-bottom:6px;line-height:1}
@@ -297,14 +297,14 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const rndi=(a,b)=>Math.floor(rnd(a,b));
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const choose=(arr)=>arr[rndi(0,arr.length)];
-const SPECIAL_NAMES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
+const SPECIAL_TIER_NAMES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
 const NITRO_SPEED_FLOOR = 340;
 const NITRO_ACTIVATION_BURST = 420;
 const NITRO_PICKUP_BURST = 350;
 const NITRO_DURATION = 2.4;
 const NITRO_PICKUP_DURATION = 1.2;
 const RAM_PLATING_DAMAGE_FACTOR = 0.65;
-function specialName(lvl){ return SPECIAL_NAMES[lvl] || SPECIAL_NAMES[0]; }
+function specialName(lvl){ return SPECIAL_TIER_NAMES[lvl] || SPECIAL_TIER_NAMES[0]; }
 function nitroButtonLabel(p){
   if(p.nitro>0) return 'NITRO ACTIVE';
   if(p.specialCd>0) return 'NITRO '+Math.ceil(p.specialCd)+'S';
@@ -1034,7 +1034,7 @@ const UPGRADES = [
 function upgradeCost(lvl){return 50 + lvl*40;}
 function specialDesc(lvl){
   const current = specialName(lvl);
-  const next = SPECIAL_NAMES[lvl+1];
+  const next = SPECIAL_TIER_NAMES[lvl+1];
   return next ? current+' → '+next : current+' active';
 }
 function renderGarage(){
