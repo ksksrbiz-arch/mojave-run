@@ -32,6 +32,10 @@
     align-items:center;justify-content:center;padding:24px;text-align:center;
     pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
   .overlay.hidden{display:none}
+  .hud.hidden{display:none}
+  .pause-btn.hidden{display:none}
+  .special-btn.hidden{display:none}
+  #comboHud.hidden{display:none}
   .title{font-size:clamp(32px,9vw,72px);color:var(--blood);
     text-shadow:3px 3px 0 #000,0 0 24px #500;letter-spacing:.1em;
     font-weight:900;margin-bottom:6px;line-height:1}
@@ -58,6 +62,11 @@
   .pause-btn{position:absolute;top:calc(8px + var(--safe-t));right:8px;
     background:rgba(0,0,0,.5);border:1px solid var(--sand);color:var(--bone);
     width:36px;height:36px;font-size:14px;cursor:pointer;z-index:6}
+  .special-btn{position:absolute;right:10px;bottom:calc(18px + var(--safe-b));
+    background:rgba(0,0,0,.6);border:2px solid var(--gold);color:var(--gold);
+    min-width:92px;height:44px;font-size:11px;font-family:inherit;font-weight:bold;
+    letter-spacing:.08em;cursor:pointer;z-index:6;text-transform:uppercase}
+  .special-btn:disabled{opacity:.55;cursor:default}
   .row-stats{font-size:12px;color:var(--sand);margin:12px 0;line-height:1.7}
   .row-stats b{color:var(--gold)}
   .panel{background:rgba(20,10,5,.95);border:2px solid var(--sand);
@@ -79,6 +88,16 @@
     background:rgba(0,0,0,.7);border:1px solid var(--gold);padding:6px 12px;
     font-size:11px;color:var(--gold);z-index:8;opacity:0;transition:opacity .3s}
   .toast.show{opacity:1}
+  .combo{color:var(--blood);font-weight:bold;text-shadow:1px 1px 0 #000}
+  .combo b{color:var(--gold)}
+  .combo span{color:var(--good)}
+  .boss-hp{position:absolute;left:50%;top:calc(60px + var(--safe-t));
+    transform:translateX(-50%);width:min(80vw,520px);z-index:5;
+    text-align:center;font-size:11px;color:var(--blood);
+    text-shadow:1px 1px 0 #000;letter-spacing:.18em;font-weight:bold}
+  .boss-hp.hidden{display:none}
+  .boss-hp .bar{width:100%;height:14px;background:#000;border:2px solid var(--blood);margin-top:4px}
+  .boss-hp .bar>i{display:block;height:100%;background:linear-gradient(90deg,#a01818,#ff5050);transition:width .15s}
   .credit{font-size:11px;color:var(--sand);opacity:.6;margin-top:14px;line-height:1.5}
 </style>
 </head>
@@ -87,15 +106,19 @@
   <canvas id="game" width="800" height="1200"></canvas>
   <div class="scan" id="scan"></div>
   <button class="pause-btn hidden" id="pauseBtn">II</button>
+  <button class="special-btn hidden" id="specialBtn">SPECIAL</button>
+  <div class="boss-hp hidden" id="bossHp"><span id="bossName">BOSS</span><div class="bar"><i id="bossHpFill" style="width:100%"></i></div></div>
   <div class="hud hidden" id="hud">
     <div class="left">
       <div>HP <div class="bar hp"><i id="hpFill" style="width:100%"></i></div></div>
       <div>SCRAP <b id="scrapHud">0</b></div>
+      <div>SPECIAL <b id="specialHud">UNKNOWN</b></div>
     </div>
     <div class="right">
       <div>SCORE <b id="scoreHud">0</b></div>
       <div>SECTOR <b id="sectorHud">1</b></div>
       <div>KILLS <b id="killHud">0</b></div>
+      <div id="comboHud" class="combo hidden">COMBO <b id="comboCount">0</b> <span id="comboMult">x1.0</span></div>
     </div>
   </div>
   <div class="toast" id="toast"></div>
@@ -260,7 +283,7 @@ const Audio = (()=>{
 })();
 
 // ---------- Input -----------------------------------------------------
-const Input = { x:null, down:false, lastX:0, dx:0, keys:{} };
+const Input = { x:null, down:false, lastX:0, dx:0, keys:{}, specialKeyDown:false };
 cvs.addEventListener('pointerdown', e=>{
   Audio.resume(); Input.down=true;
   const r=cvs.getBoundingClientRect();
@@ -274,14 +297,49 @@ cvs.addEventListener('pointermove', e=>{
   Input.dx = x - Input.lastX; Input.lastX=x; Input.x=x;
 });
 window.addEventListener('pointerup', ()=>{ Input.down=false; Input.dx=0; });
-window.addEventListener('keydown', e=>{ Input.keys[e.key]=true; if(e.key===' ')Input.down=true; });
-window.addEventListener('keyup', e=>{ Input.keys[e.key]=false; if(e.key===' ')Input.down=false; });
+window.addEventListener('keydown', e=>{
+  Input.keys[e.key]=true; if(e.key===' ')Input.down=true;
+  if((e.key==='n'||e.key==='N') && !Input.specialKeyDown){
+    Input.specialKeyDown=true; tryActivateSpecial();
+  }
+});
+window.addEventListener('keyup', e=>{
+  Input.keys[e.key]=false; if(e.key===' ')Input.down=false;
+  if(e.key==='n'||e.key==='N')Input.specialKeyDown=false;
+});
 
 // ---------- Utility ---------------------------------------------------
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const rndi=(a,b)=>Math.floor(rnd(a,b));
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const choose=(arr)=>arr[rndi(0,arr.length)];
+const SPECIAL_RAM_PLATING = 0;
+const SPECIAL_NITRO = 2;
+const SPECIAL_ABILITIES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
+const NITRO_SPEED_FLOOR = 340;
+const NITRO_ACTIVATION_BURST = 420;
+const NITRO_PICKUP_BURST = 350;
+const NITRO_DURATION = 2.4;
+const NITRO_PICKUP_DURATION = 1.2;
+const RAM_PLATING_DAMAGE_FACTOR = 0.65;
+const COMBO_WINDOW = 2.5;
+const COMBO_MAX_BONUS = 2.0; // cap multiplier at 1 + 2 = 3.0x
+const COMBO_PER_KILL = 0.1;
+const SHIELD_DURATION = 6.0;
+const BOSS_SECTORS = [4, 8, 12];
+function comboMultiplier(combo){
+  return 1 + Math.min(combo*COMBO_PER_KILL, COMBO_MAX_BONUS);
+}
+function specialName(lvl){
+  return Number.isInteger(lvl) && lvl>=0 && lvl<SPECIAL_ABILITIES.length
+    ? SPECIAL_ABILITIES[lvl]
+    : 'UNKNOWN';
+}
+function nitroButtonLabel(p){
+  if(p.nitro>0) return 'NITRO ACTIVE';
+  if(p.specialCd>0) return 'NITRO '+Math.ceil(p.specialCd)+' S';
+  return 'NITRO READY';
+}
 
 // ---------- Particle system + pools ----------------------------------
 class Particle{constructor(){this.alive=false;}
@@ -322,8 +380,9 @@ const Game = {
   modeName:'rust', // rust | gauntlet
   sector:1, sectorTime:0, sectorTarget:30,
   player:null, zombies:[], bullets:[], pickups:[],
-  road:0, speed:380, baseSpeed:380, score:0, scrap:0, kills:0,
+  road:0, speed:380, baseSpeed:380, nitroBoost:0, score:0, scrap:0, kills:0,
   shake:0, dist:0, weather:'clear', visibility:1,
+  combo:0, comboT:0, boss:null, bossLockSector:0,
   mp:null,
 };
 
@@ -342,6 +401,9 @@ class Player{
     this.spd = 1 + d.engine*0.12;
     this.special = d.special; // 0 ramming, 1 piercing, 2 nitro, 3 spreadshot
     this.invuln = 0;
+    this.nitro = 0;
+    this.specialCd = 0;
+    this.specialMaxCd = 8;
   }
   update(dt){
     // Steering: hold-anywhere drag toward x; relative dx influences too
@@ -358,6 +420,14 @@ class Player{
     this.fireT -= dt;
     if((Input.down||Input.keys[' ']) && this.fireT<=0){
       this.fire(); this.fireT = this.fireRate;
+    }
+    if(this.specialCd>0) this.specialCd -= dt;
+    if(this.nitro>0){
+      this.nitro = Math.max(0, this.nitro-dt);
+      Game.nitroBoost = NITRO_SPEED_FLOOR;
+      Game.shake = Math.max(Game.shake, 4);
+    } else {
+      Game.nitroBoost = 0;
     }
     if(this.invuln>0) this.invuln -= dt;
   }
@@ -379,6 +449,7 @@ class Player{
     if(this.invuln>0) return;
     this.hp -= n; this.invuln = 0.6;
     Game.shake = Math.max(Game.shake, 14);
+    Game.combo = 0; Game.comboT = 0;
     Audio.hit();
     burst(this.x,this.y,12,'#ff6644',300,0.4,3);
     if(this.hp<=0){ this.hp=0; gameOver(); }
@@ -414,8 +485,35 @@ class Player{
     c.fillRect(x-w/2-4, y+h/2-30, 8, 22);
     c.fillRect(x+w/2-4, y+h/2-30, 8, 22);
     // headlights cone is drawn separately at night
+    // shield ring (visible when shield pickup duration is active)
+    if(this.invuln>1.0){
+      c.globalAlpha = 0.6;
+      c.strokeStyle = '#b27aff';
+      c.lineWidth = 3;
+      c.beginPath();
+      c.arc(x, y, Math.max(w,h)*0.7, 0, Math.PI*2);
+      c.stroke();
+    }
     c.globalAlpha=1;
   }
+}
+
+function tryActivateSpecial(){
+  const p = Game.player;
+  if(Game.mode!=='play' || !p) return;
+  if(p.special!==SPECIAL_NITRO){
+    toast(`${specialName(p.special)} PASSIVE`);
+    return;
+  }
+  if(p.specialCd>0){
+    toast('NITRO CHARGING');
+    return;
+  }
+  p.nitro = NITRO_DURATION;
+  p.specialCd = p.specialMaxCd;
+  Game.speed += NITRO_ACTIVATION_BURST;
+  Audio.nitro();
+  toast('NITRO BOOST');
 }
 
 // ---------- Zombies ---------------------------------------------------
@@ -426,6 +524,7 @@ const ZTYPES = {
   tank:{hp:120,spd:60,dmg:25,score:60,col:'#444a2a',w:64,h:78},
   screamer:{hp:30,spd:100,dmg:8,score:40,col:'#8a3a3a',w:40,h:52},
   exploder:{hp:24,spd:120,dmg:30,score:50,col:'#aa5500',w:42,h:50},
+  brute:{hp:600,spd:40,dmg:40,score:800,col:'#5a1a1a',w:120,h:140,boss:true,name:'BRUTE'},
 };
 class Zombie{
   constructor(type,x,y){
@@ -447,18 +546,37 @@ class Zombie{
       vy = t.spd;
     } else if(this.type==='exploder' || this.type==='screamer'){
       vx = Math.sign(player.x-this.x)*30;
+    } else if(this.type==='brute'){
+      // Boss: hold near top of screen, weave horizontally, slam down briefly.
+      this.zig += dt*1.5;
+      vx = Math.sin(this.zig)*180 + Math.sign(player.x-this.x)*60;
+      const targetY = H*0.28;
+      // negate road scroll so brute holds station, then add slow descent
+      vy = (this.y < targetY ? 60 : -Game.speed*0.92) + Math.sin(this.zig*0.6)*40;
     }
     // factor in road scroll: zombies are stationary in world but road scrolls,
     // which makes them appear to move down. We add their own forward speed too.
     this.x += vx*dt;
     this.y += (vy + Game.speed)*dt;
+    if(this.type==='brute'){
+      this.x = clamp(this.x, W*0.22, W*0.78);
+    }
     // collision with player
     if(this.alive && Math.abs(this.x-player.x) < (this.w+player.w)/2 - 6 &&
        Math.abs(this.y-player.y) < (this.h+player.h)/2 - 6){
-      player.damage(t.dmg);
-      this.kill(false);
+      const ramPlating = player.special===SPECIAL_RAM_PLATING;
+      player.damage(ramPlating ? Math.ceil(t.dmg*RAM_PLATING_DAMAGE_FACTOR) : t.dmg);
+      if(this.type==='brute'){
+        // Boss survives the collision, just shoves the player back.
+        Game.shake = Math.max(Game.shake, 18);
+      } else {
+        this.kill(false);
+      }
     }
-    if(this.y > H+80) this.alive=false;
+    if(this.y > H+80){
+      this.alive=false;
+      if(Game.boss===this) Game.boss=null;
+    }
   }
   hit(d){
     this.hp -= d;
@@ -468,9 +586,24 @@ class Zombie{
   }
   kill(byShot){
     this.alive=false;
-    Game.kills++; Game.score += this.t.score;
-    SAVE.totalKills++;
-    if(Math.random()<0.3) Game.pickups.push(makePickup(this.x,this.y));
+    Game.kills++; SAVE.totalKills++;
+    // Apply combo multiplier to the score for this kill BEFORE incrementing,
+    // so the first kill of a streak scores at 1.0x, not 1.1x.
+    Game.score += Math.floor(this.t.score * comboMultiplier(Game.combo));
+    if(byShot){
+      Game.combo++;
+      Game.comboT = COMBO_WINDOW;
+    }
+    if(this.t.boss){
+      Game.scrap += 200;
+      Game.shake = Math.max(Game.shake, 30);
+      burst(this.x,this.y,80,'#ff5050',520,1.0,6,300);
+      burst(this.x,this.y,40,'#ffaa44',420,0.8,5);
+      Audio.explode();
+      toast('BOSS DOWN +200 SCRAP');
+      if(Game.boss===this) Game.boss=null;
+    }
+    if(Math.random()<(this.t.boss?1.0:0.3)) Game.pickups.push(makePickup(this.x,this.y));
     burst(this.x,this.y,16,'#a01818',300,0.6,4,400);
     decal(this.x,this.y,16);
     if(this.type==='exploder'){
@@ -502,7 +635,26 @@ class Zombie{
     c.fillStyle='rgba(0,0,0,.4)';
     c.fillRect(x-w/2+3,y+h/2-3,w,6);
     c.fillStyle=this.t.col;
-    if(this.type==='crawler'){
+    if(this.type==='brute'){
+      // hulking torso
+      c.fillRect(x-w/2,y-h/2+h*0.2,w,h*0.7);
+      c.fillStyle='#3a0a0a';
+      c.fillRect(x-w/2+w*0.18,y-h/2,w*0.64,h*0.34); // head
+      c.fillStyle='#f5d76e';
+      c.fillRect(x-w/2+w*0.3,y-h/2+h*0.12,w*0.12,h*0.06);
+      c.fillRect(x-w/2+w*0.58,y-h/2+h*0.12,w*0.12,h*0.06);
+      c.fillStyle='#5a1a1a';
+      // big arms
+      c.fillRect(x-w/2-14,y-h/4,14,h*0.55);
+      c.fillRect(x+w/2,y-h/4,14,h*0.55);
+      // spikes
+      c.fillStyle='#222';
+      for(let i=0;i<5;i++){
+        const sx=x-w/2+w*(i+0.5)/5;
+        c.beginPath(); c.moveTo(sx-6,y-h/2+h*0.18);
+        c.lineTo(sx, y-h/2-8); c.lineTo(sx+6,y-h/2+h*0.18); c.closePath(); c.fill();
+      }
+    } else if(this.type==='crawler'){
       c.fillRect(x-w/2,y-h/2,w,h);
       c.fillStyle='#2a3a1a';
       c.fillRect(x-w/2+4,y-2,w-8,4);
@@ -516,12 +668,14 @@ class Zombie{
       c.fillStyle='#a01818';
       c.fillRect(x-w/2+w*0.35,y-h/2-h*0.05,w*0.3,h*0.04);
     }
-    // arms
-    c.fillStyle=this.t.col;
-    c.fillRect(x-w/2-6,y-h/2+8,6,h*0.5);
-    c.fillRect(x+w/2,y-h/2+8,6,h*0.5);
-    // hp bar
-    if(this.hp<this.maxHp){
+    // arms (skip for brute, drawn above)
+    if(this.type!=='brute'){
+      c.fillStyle=this.t.col;
+      c.fillRect(x-w/2-6,y-h/2+8,6,h*0.5);
+      c.fillRect(x+w/2,y-h/2+8,6,h*0.5);
+    }
+    // hp bar (skip for boss, shown in DOM HUD)
+    if(this.hp<this.maxHp && !this.t.boss){
       c.fillStyle='#400'; c.fillRect(x-w/2,y-h/2-h*0.4,w,3);
       c.fillStyle='#f55'; c.fillRect(x-w/2,y-h/2-h*0.4,w*(this.hp/this.maxHp),3);
     }
@@ -530,11 +684,11 @@ class Zombie{
 
 // ---------- Pickups ---------------------------------------------------
 function makePickup(x,y){
-  const types=['scrap','scrap','scrap','health','nitro','multi'];
+  const types=['scrap','scrap','scrap','health','nitro','multi','shield'];
   return {x,y,t:choose(types),vy:80};
 }
-function pickupCol(t){return {scrap:'#f5d76e',health:'#7af07a',nitro:'#5fb5ff',multi:'#ff8855'}[t];}
-function pickupLabel(t){return {scrap:'$',health:'+',nitro:'N',multi:'x2'}[t];}
+function pickupCol(t){return {scrap:'#f5d76e',health:'#7af07a',nitro:'#5fb5ff',multi:'#ff8855',shield:'#b27aff'}[t];}
+function pickupLabel(t){return {scrap:'$',health:'+',nitro:'N',multi:'x2',shield:'S'}[t];}
 
 // ---------- Road / world ---------------------------------------------
 const Background = {
@@ -639,11 +793,13 @@ function startGame(mode){
   Game.zombies.length=0; Game.bullets.length=0; Game.pickups.length=0;
   Decals.length=0;
   for(const p of PartPool) p.alive=false;
-  Game.speed = Game.baseSpeed = 380;
+  Game.speed = Game.baseSpeed = 380; Game.nitroBoost=0;
   Game.score=0; Game.scrap=0; Game.kills=0; Game.dist=0; Game.shake=0;
+  Game.combo=0; Game.comboT=0; Game.boss=null; Game.bossLockSector=0;
   applySector();
   hudShow(true); Audio.resume();
   toast('SECTOR '+Game.sector+': '+SECTORS[(Game.sector-1)%SECTORS.length].name);
+  maybeSpawnBoss();
 }
 
 function applySector(){
@@ -653,6 +809,8 @@ function applySector(){
 }
 
 function nextSector(){
+  // Block advancement until current boss is defeated.
+  if(Game.boss && Game.boss.alive) return;
   Game.sector++;
   if(Game.modeName==='gauntlet' && Game.sector>SECTORS.length){
     toast('GAUNTLET COMPLETE!'); SAVE.gauntletProgress = SECTORS.length+1; persist();
@@ -661,6 +819,18 @@ function nextSector(){
   Game.sectorTime=0; applySector();
   Game.baseSpeed += 30;
   toast('SECTOR '+Game.sector+': '+SECTORS[(Game.sector-1)%SECTORS.length].name);
+  maybeSpawnBoss();
+}
+
+function maybeSpawnBoss(){
+  if(Game.modeName!=='gauntlet') return;
+  if(!BOSS_SECTORS.includes(Game.sector)) return;
+  if(Game.bossLockSector===Game.sector) return;
+  Game.bossLockSector = Game.sector;
+  const boss = new Zombie('brute', W/2, -120);
+  Game.boss = boss;
+  Game.zombies.push(boss);
+  toast('BOSS INCOMING: '+boss.t.name);
 }
 
 // ---------- Spawning -------------------------------------------------
@@ -744,12 +914,17 @@ function loop(now){
 function update(dt){
   const p = Game.player;
   // speed acceleration
-  Game.speed += (Game.baseSpeed - Game.speed)*dt*1.5;
+  Game.speed += (Game.baseSpeed + Game.nitroBoost - Game.speed)*dt*1.5;
   Game.road += Game.speed * dt;
   Game.dist += Game.speed*dt;
   SAVE.totalDist += Game.speed*dt;
   // shake decay
   Game.shake *= 0.9;
+  // combo timer
+  if(Game.comboT>0){
+    Game.comboT -= dt;
+    if(Game.comboT<=0){ Game.combo=0; Game.comboT=0; }
+  }
   // sector progress
   Game.sectorTime += dt;
   if(Game.modeName==='gauntlet' && Game.sectorTime > Game.sectorTarget){ nextSector(); }
@@ -785,8 +960,13 @@ function update(dt){
       Audio.pickup();
       if(pk.t==='scrap'){ Game.scrap+=5+rndi(0,8); }
       else if(pk.t==='health'){ p.hp = clamp(p.hp+25,0,p.maxHp); }
-      else if(pk.t==='nitro'){ Game.speed += 350; Audio.nitro(); }
+      else if(pk.t==='nitro'){
+        Game.speed += NITRO_PICKUP_BURST;
+        if(p.special===SPECIAL_NITRO) p.nitro = Math.max(p.nitro, NITRO_PICKUP_DURATION);
+        Audio.nitro();
+      }
       else if(pk.t==='multi'){ Game.score += 100; }
+      else if(pk.t==='shield'){ p.invuln = Math.max(p.invuln, SHIELD_DURATION); toast('SHIELD'); }
       pk.dead=true;
     }
     if(pk.y>H+30) pk.dead=true;
@@ -873,23 +1053,57 @@ function draw(){
 const hud = {
   hp: document.getElementById('hpFill'),
   scrap: document.getElementById('scrapHud'),
+  special: document.getElementById('specialHud'),
   score: document.getElementById('scoreHud'),
   sector: document.getElementById('sectorHud'),
   kill: document.getElementById('killHud'),
+  combo: document.getElementById('comboHud'),
+  comboCount: document.getElementById('comboCount'),
+  comboMult: document.getElementById('comboMult'),
   el: document.getElementById('hud'),
   pause: document.getElementById('pauseBtn'),
+  specialBtn: document.getElementById('specialBtn'),
+  bossEl: document.getElementById('bossHp'),
+  bossName: document.getElementById('bossName'),
+  bossFill: document.getElementById('bossHpFill'),
 };
 function hudShow(on){
   hud.el.classList.toggle('hidden', !on);
   hud.pause.classList.toggle('hidden', !on);
+  hud.specialBtn.classList.toggle('hidden', !on);
+  if(!on){ hud.bossEl.classList.add('hidden'); hud.combo.classList.add('hidden'); }
 }
 function updateHud(){
   const p = Game.player;
   hud.hp.style.width = Math.max(0,(p.hp/p.maxHp)*100)+'%';
   hud.scrap.textContent = Game.scrap;
+  hud.special.textContent = specialName(p.special);
   hud.score.textContent = Game.score;
   hud.sector.textContent = Game.sector;
   hud.kill.textContent = Game.kills;
+  if(p.special===SPECIAL_NITRO){
+    hud.specialBtn.textContent = nitroButtonLabel(p);
+    hud.specialBtn.disabled = p.specialCd>0;
+  } else {
+    hud.specialBtn.textContent = specialName(p.special);
+    hud.specialBtn.disabled = true;
+  }
+  // combo
+  if(Game.combo>1){
+    hud.combo.classList.remove('hidden');
+    hud.comboCount.textContent = Game.combo;
+    hud.comboMult.textContent = 'x'+comboMultiplier(Game.combo).toFixed(1);
+  } else {
+    hud.combo.classList.add('hidden');
+  }
+  // boss
+  if(Game.boss && Game.boss.alive){
+    hud.bossEl.classList.remove('hidden');
+    hud.bossName.textContent = Game.boss.t.name || 'BOSS';
+    hud.bossFill.style.width = Math.max(0,(Game.boss.hp/Game.boss.maxHp)*100)+'%';
+  } else {
+    hud.bossEl.classList.add('hidden');
+  }
 }
 const toastEl=document.getElementById('toast');
 let toastTO=null;
@@ -948,15 +1162,26 @@ document.getElementById('pauseBtn').addEventListener('click', ()=>{
   if(Game.mode!=='play') return;
   Game.mode='pause'; showOverlay('pause');
 });
+document.getElementById('specialBtn').addEventListener('click', e=>{
+  e.stopPropagation();
+  tryActivateSpecial();
+});
 
 // ---------- Garage ---------------------------------------------------
 const UPGRADES = [
   {k:'engine', name:'ENGINE', desc:'Top speed & handling'},
   {k:'armor', name:'ARMOR', desc:'+25 HP per level'},
   {k:'weapon', name:'WEAPON', desc:'Faster fire, +dmg'},
-  {k:'special',name:'SPECIAL', desc:'0:Ram 1:Pierce 2:Nitro 3:Spread'},
+  {k:'special',name:'SPECIAL', desc:'Unlocks weapon and boost perks'},
 ];
 function upgradeCost(lvl){return 50 + lvl*40;}
+function specialDesc(lvl){
+  const current = specialName(lvl);
+  const next = Number.isInteger(lvl) && lvl+1>=0 && lvl+1<SPECIAL_ABILITIES.length
+    ? SPECIAL_ABILITIES[lvl+1]
+    : null;
+  return next ? current+' → '+next : current+' active';
+}
 function renderGarage(){
   const list = document.getElementById('upgradesList');
   list.innerHTML = '';
@@ -966,9 +1191,10 @@ function renderGarage(){
     const lvl = d[u.k]||0;
     const cap = u.k==='special' ? 3 : 5;
     const cost = upgradeCost(lvl);
+    const desc = u.k==='special' ? specialDesc(lvl) : u.desc;
     const row = document.createElement('div');
     row.className='upgrade';
-    row.innerHTML = '<span><b>'+u.name+'</b><br><i style="opacity:.7">'+u.desc+'</i></span>'+
+    row.innerHTML = '<span><b>'+u.name+'</b><br><i style="opacity:.7">'+desc+'</i></span>'+
       '<span class="lvl">L'+lvl+'/'+cap+'</span>'+
       '<button class="btn small" '+(lvl>=cap||d.scrap<cost?'disabled style="opacity:.4"':'')+'>'+
       (lvl>=cap?'MAX':'BUY '+cost)+'</button>';
