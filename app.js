@@ -3421,16 +3421,185 @@ function updateHint() {
 // ============================================================
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  // Clamp dt: anything >50ms (tab throttled / long stall) becomes a single 50ms tick,
+  // which prevents giant catch-up updates that blew up enemy/bullet/particle counts
+  // and froze the simulation mid-match.
+  const rawDt = (now - last) / 1000;
+  const dt = (!isFinite(rawDt) || rawDt <= 0) ? 0.016 : Math.min(0.05, rawDt);
   last = now;
-  if (Game.state === 'playing' || Game.state === 'loading'
-      || Game.state === 'dying' || Game.state === 'victory') {
-    update(dt);
+  try {
+    if (Game.state === 'playing' || Game.state === 'loading'
+        || Game.state === 'dying' || Game.state === 'victory') {
+      update(dt);
+      capRuntimeArrays();
+    }
+    if (window.MP && MP.connected) {
+      MP.pruneStale();
+      sendMpState();
+    }
+    render();
+    if (window.MP && MP.connected) drawMpGhosts();
+    updateHint();
+  } catch (err) {
+    // Never let one bad frame kill the loop. Log + continue.
+    console.error('[frame]', err);
   }
-  render();
-  updateHint();
   requestAnimationFrame(frame);
 }
+
+// Hard caps to prevent unbounded growth from runaway spawns / boss enrage / lag
+// catch-up. These limits are well above normal gameplay maxima but bound the
+// worst case so the canvas/CPU never spirals into a freeze.
+const RUNTIME_CAPS = {
+  particles: 700,
+  bullets: 200,
+  enemyBullets: 250,
+  popups: 80,
+  shockwaves: 24,
+  enemies: 60,
+  obstacles: 60,
+  pickups: 20,
+};
+function capRuntimeArrays() {
+  for (const k in RUNTIME_CAPS) {
+    const arr = Game[k];
+    if (arr && arr.length > RUNTIME_CAPS[k]) {
+      arr.splice(0, arr.length - RUNTIME_CAPS[k]);
+    }
+  }
+}
+
+// ============================================================
+// MULTIPLAYER (ghost overlay co-op)
+// ============================================================
+function sendMpState() {
+  if (!window.MP || !MP.connected) return;
+  const inGame = (Game.state === 'playing' || Game.state === 'loading'
+    || Game.state === 'dying' || Game.state === 'victory');
+  if (!inGame || !Game.player) {
+    MP.sendState({ inMenu: true, score: Game.score | 0, kills: Game.kills | 0 });
+    return;
+  }
+  // Normalize x/y as fractions of canvas so peers on different screen sizes line up.
+  MP.sendState({
+    nx: Game.player.x / W,
+    ny: Game.player.y / H,
+    vx: Game.player.vx | 0,
+    score: Game.score | 0,
+    kills: Game.kills | 0,
+    dist: Game.distance | 0,
+    hp: Math.max(0, Math.round((Game.health / Math.max(1, Game.maxHealth || Game.health)) * 100)),
+    state: Game.state,
+    mode: Game.mode || null,
+    level: Game.level || null,
+  });
+}
+
+function drawMpGhosts() {
+  if (!window.MP || !MP.connected) return;
+  const inGame = (Game.state === 'playing' || Game.state === 'loading'
+    || Game.state === 'dying' || Game.state === 'victory');
+  if (!inGame) return;
+  ctx.save();
+  for (const [id, p] of MP.peers) {
+    const s = p.s; if (!s || s.inMenu) continue;
+    if (typeof s.nx !== 'number' || typeof s.ny !== 'number') continue;
+    const v = VEHICLE_BY_ID[p.vehicleId] || VEHICLE_BY_ID[Game.player && Game.vehicle && Game.vehicle.id] || VEHICLES[0];
+    const x = s.nx * W;
+    const y = s.ny * H;
+    ctx.globalAlpha = 0.45;
+    drawVehicle(x, y, v, s.vx || 0);
+    ctx.globalAlpha = 1;
+    // name tag
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const name = (p.name || 'PEER').toUpperCase();
+    ctx.font = 'bold 11px "Courier New", monospace';
+    const tw = ctx.measureText(name).width + 10;
+    ctx.fillRect(x - tw/2, y - 50, tw, 16);
+    ctx.fillStyle = p.color || '#f5d76e';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, x, y - 42);
+  }
+  ctx.restore();
+}
+
+function mpRefreshPeerList() {
+  const list = document.getElementById('mp-peers');
+  if (!list) return;
+  const status = document.getElementById('mp-status-bar');
+  if (status) status.textContent = MP.connected ? ('ROOM ' + MP.room) : (MP.joining ? 'JOINING…' : 'DISCONNECTED');
+  document.getElementById('mp-leave-btn').style.display = MP.connected ? '' : 'none';
+  list.innerHTML = '';
+  if (!MP.connected) {
+    list.innerHTML = '<div class="small center" style="padding:12px 0;opacity:.6">JOIN A ROOM TO SEE OTHER DRIVERS</div>';
+    return;
+  }
+  // self
+  const self = document.createElement('div');
+  self.className = 'mp-peer self';
+  self.innerHTML = `<div><span class="pdot" style="background:#f5d76e"></span>${escapeHtml(MP.name)} <span class="small">(YOU)</span></div><div class="pscore">${Game.score|0}</div>`;
+  list.appendChild(self);
+  for (const [id, p] of MP.peers) {
+    const row = document.createElement('div');
+    row.className = 'mp-peer';
+    const sc = (p.s && p.s.score) || 0;
+    row.innerHTML = `<div><span class="pdot" style="background:${escapeHtml(p.color || '#f5d76e')}"></span>${escapeHtml(p.name || 'PEER')}</div><div class="pscore">${sc}</div>`;
+    list.appendChild(row);
+  }
+}
+
+(function initMp() {
+  if (!window.MP) return;
+  MP.on('open', mpRefreshPeerList);
+  MP.on('close', mpRefreshPeerList);
+  MP.on('peers', mpRefreshPeerList);
+})();
+
+// extend UI
+UI.showMP = function showMP() {
+  Game.state = 'menu';
+  pauseBtn.classList.remove('show');
+  // prefill name & vehicle from active profile
+  const p = Profile.active();
+  if (p) {
+    const v = VEHICLE_BY_ID[p.activeVehicle] || VEHICLES[0];
+    if (window.MP) MP.sendMeta({ name: p.name, vehicleId: v.id });
+  }
+  const urlEl = document.getElementById('mp-url');
+  const roomEl = document.getElementById('mp-room');
+  if (urlEl && !urlEl.value) urlEl.value = '';
+  if (roomEl && !roomEl.value) roomEl.value = 'LOBBY';
+  this.show('mp');
+  mpRefreshPeerList();
+};
+
+// patch UI.act to handle multiplayer actions
+const _origAct = UI.act.bind(UI);
+UI.act = function(action, data) {
+  if (action === 'menu-mp') { UI.showMP(); SFX.click(); return; }
+  if (action === 'mp-join') {
+    SFX.click();
+    const url = document.getElementById('mp-url').value.trim();
+    const room = document.getElementById('mp-room').value.trim() || 'LOBBY';
+    const p = Profile.active();
+    const name = p ? p.name : 'DRIVER';
+    const v = p ? (VEHICLE_BY_ID[p.activeVehicle] || VEHICLES[0]) : VEHICLES[0];
+    if (window.MP) {
+      MP.connect({ url: url || undefined, room, name, vehicleId: v.id });
+      UI.toast('JOINING ' + room.toUpperCase() + '…');
+    }
+    setTimeout(mpRefreshPeerList, 60);
+    return;
+  }
+  if (action === 'mp-leave') {
+    SFX.click();
+    if (window.MP) MP.disconnect();
+    mpRefreshPeerList();
+    return;
+  }
+  return _origAct(action, data);
+};
 
 // ============================================================
 // BOOT
