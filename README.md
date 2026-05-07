@@ -2,72 +2,65 @@
 
 A wasteland arcade driver. Survive the Mojave.
 
-**Mobile-first. Plays in any browser.** Single-file HTML5 Canvas, zero deps, zero build.
-
 🎮 **Live:** https://mojave-run.netlify.app
+
+Mobile-first browser game. Zero deps, zero build, zero backend. Single-page app, ~80KB JS.
+
+## Features
+
+- **Driver profiles** — up to 6 named drivers per device, persistent locally
+- **5 vehicles** — Rust Bucket / Junker / Roadrunner / Goliath / Phantom — each with unique stats
+- **3 upgrade tracks × 5 tiers** — Engine, Plating, Weapons; per-vehicle progression
+- **3 modes** — Classic (endless), Gauntlet (12 tiered sectors with 3 bosses), Time Attack (60s frenzy)
+- **12-level Gauntlet** — survive / kill / distance / boss objectives; bosses every 4 levels
+- **3 boss tiers** — Alpha Raider, Twin Demons, The Overlord — each with unique attack patterns and enrage at 30% HP
+- **Day / night / sandstorm** — late levels feature night sky with stars + headlight cones, or sandstorm streaks
+- **Currency loop** — earn SCRAP from runs (10% of score + boss bonuses), spend on vehicles & upgrades
+- **Stats screen** — lifetime tracking per driver
 
 ## Controls
 
-**Touch (mobile/tablet):**
-- Drag anywhere to steer (truck follows your finger)
-- Hold to auto-fire
-- Tap to start / restart / unpause
+**Touch:** drag to steer · hold to fire · tap pause/fullscreen icons
 
-**Keyboard (desktop):**
-| Key | Action |
-|---|---|
-| `◄ ►` / `A D` | Steer |
-| `Space` / `Z` / `X` | Fire |
-| `R` / `Enter` | Restart |
-| `P` | Pause |
-| `F` | Toggle fullscreen |
+**Keyboard:** `◄ ►` / `A D` steer · `Space` / `Z` / `X` fire · `R` restart · `P` pause · `F` fullscreen
 
-## Mobile-first features
+## Vehicles
 
-- Drag-to-steer + hold-to-fire (no virtual buttons)
-- Multi-touch via Pointer Events (mouse + touch + stylus unified)
-- iOS safe-area-inset support (notch + home indicator)
-- `touch-action: none` — kills pinch/zoom/scroll/pull-to-refresh
-- Wake Lock API — screen stays on while playing
-- Auto-pause on tab switch / app background
-- Adaptive road width (wider on narrow screens)
-- DPR cap at 1.5 + reduced particle counts on mobile for perf
+| Vehicle    | HP  | Top Speed | Accel | Fire Rate | Damage | Cost |
+|------------|-----|-----------|-------|-----------|--------|------|
+| Rust Bucket| 100 | 460       | 1800  | 0.18s     | 1×2    | FREE |
+| Junker     | 160 | 380       | 1400  | 0.22s     | 1×2    | 500  |
+| Roadrunner | 70  | 580       | 2400  | 0.14s     | 1×2    | 1200 |
+| Goliath    | 200 | 360       | 1200  | 0.32s     | 3×1    | 2500 |
+| Phantom    | 60  | 520       | 2000  | 0.10s     | 1×4    | 4500 |
+
+Upgrades stack multiplicatively: +60% accel/speed at engine T5, +100% HP at plating T5, -40% fire delay at weapons T5.
+
+## Mobile-first stack
+
+- HTML5 Canvas (game) + DOM screens (menus) — proper tap targets
+- Pointer Events for unified mouse/touch/stylus input
+- iOS safe-area-inset support, touch-action: none, viewport-fit cover
+- Wake Lock API + visibility-change pause
+- Fullscreen API + portrait orientation lock
 - PWA manifest + SVG icon — installable to home screen
-- Fullscreen toggle with portrait orientation lock
-- Apple touch icon, theme-color, status-bar styling
-
-## Mechanics
-
-- **Scrap (gold diamond)** — +75 score
-- **Repair (green cross)** — +30 hull
-- **Wrecked car** — 35 dmg on contact
-- **Barrel** — 18 dmg on contact, **shoot to chain-explode** for splash
-- **Raider buggy** — 2 hp, fires at you, 40 dmg on ram, drops scrap on kill
-- **Sector** — difficulty tier, ramps every 1500m
-
-Best score persists in `localStorage`.
+- DPR cap 1.5 + reduced particle counts on mobile
 
 ## Stack
 
-- Vanilla JS + HTML5 Canvas
-- WebAudio synthesized SFX (no asset files)
-- Pointer Events for unified input
-- Wake Lock API
-- Fullscreen API + Screen Orientation API
-- PWA (manifest + apple-touch-icon)
-- Netlify static deploy
+Vanilla JS + HTML5 Canvas. Synthesized WebAudio SFX. localStorage persistence. Netlify static deploy.
 
 ## Local
 
 ```bash
-python3 -m http.server 8000
-# → http://localhost:8000
+python3 -m http.server 8000  # → http://localhost:8000
 ```
 
-## Deploy
+## Future (not built)
 
-Manual deploy used for v1. To wire CI:
-Netlify admin → Site config → Build & deploy → Link repository → `ksksrbiz-arch/mojave-run`
+- **Cloud sync** via Supabase — would need a 3rd Supabase project (currently capped at 2: Cathy + PrecisionCore). Local-first profiles cover 95% of perceived value at 5% complexity.
+- **Global leaderboard** — depends on cloud sync.
+- **More vehicles / cosmetics / weapons** — open ended.
 
 ---
 
