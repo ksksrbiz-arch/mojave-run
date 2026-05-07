@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="crispEdges">
+  <!-- desert background -->
+  <rect width="512" height="512" fill="#3a230f"/>
+  <!-- safe-area inset for maskable icon (~10% padding) -->
+  <!-- road -->
+  <rect x="170" y="0" width="172" height="512" fill="#1f1610"/>
+  <!-- road edges -->
+  <rect x="166" y="0" width="6" height="512" fill="#f5d76e"/>
+  <rect x="340" y="0" width="6" height="512" fill="#f5d76e"/>
+  <!-- center dashes -->
+  <rect x="248" y="32" width="16" height="56" fill="#f5d76e"/>
+  <rect x="248" y="120" width="16" height="56" fill="#f5d76e"/>
+  <rect x="248" y="208" width="16" height="56" fill="#f5d76e"/>
+  <rect x="248" y="296" width="16" height="56" fill="#f5d76e"/>
+  <rect x="248" y="384" width="16" height="56" fill="#f5d76e"/>
+  <!-- desert decor -->
+  <ellipse cx="80" cy="120" rx="32" ry="20" fill="#2a1808"/>
+  <ellipse cx="92" cy="124" rx="22" ry="14" fill="#1a0f08" opacity=".6"/>
+  <ellipse cx="430" cy="380" rx="28" ry="18" fill="#2a1808"/>
+  <ellipse cx="440" cy="382" rx="20" ry="12" fill="#1a0f08" opacity=".6"/>
+  <!-- cactus -->
+  <rect x="100" y="380" width="10" height="60" fill="#3a5a2a"/>
+  <rect x="86" y="395" width="10" height="22" fill="#3a5a2a"/>
+  <rect x="114" y="402" width="10" height="18" fill="#3a5a2a"/>
+  <!-- truck centered, larger -->
+  <g transform="translate(256, 320)">
+    <!-- shadow -->
+    <rect x="-58" y="-72" width="116" height="148" fill="#000" opacity=".35"/>
+    <!-- body -->
+    <rect x="-62" y="-76" width="124" height="148" fill="#a86a2e"/>
+    <!-- hood -->
+    <rect x="-56" y="-76" width="112" height="22" fill="#8a4f1f"/>
+    <!-- cab roof -->
+    <rect x="-46" y="-44" width="92" height="38" fill="#3a2410"/>
+    <!-- windshield -->
+    <rect x="-38" y="-38" width="76" height="14" fill="#a8d8e8"/>
+    <!-- grille -->
+    <rect x="-54" y="-82" width="108" height="6" fill="#1a0f08"/>
+    <!-- headlights -->
+    <rect x="-58" y="-86" width="14" height="8" fill="#ffe07a"/>
+    <rect x="44"  y="-86" width="14" height="8" fill="#ffe07a"/>
+    <!-- wheels -->
+    <rect x="-72" y="-50" width="12" height="28" fill="#0d0805"/>
+    <rect x="60"  y="-50" width="12" height="28" fill="#0d0805"/>
+    <rect x="-72" y="32"  width="12" height="34" fill="#0d0805"/>
+    <rect x="60"  y="32"  width="12" height="34" fill="#0d0805"/>
+    <!-- exhaust glow -->
+    <rect x="-18" y="68" width="10" height="6" fill="#ff8c3c"/>
+    <rect x="8"   y="68" width="10" height="6" fill="#ff8c3c"/>
+  </g>
+</svg>

@@ -2,18 +2,39 @@
 
 A wasteland arcade driver. Survive the Mojave.
 
-Single-file HTML5 Canvas game. No build step. Pure vanilla JS.
+**Mobile-first. Plays in any browser.** Single-file HTML5 Canvas, zero deps, zero build.
+
+🎮 **Live:** https://mojave-run.netlify.app
 
 ## Controls
 
+**Touch (mobile/tablet):**
+- Drag anywhere to steer (truck follows your finger)
+- Hold to auto-fire
+- Tap to start / restart / unpause
+
+**Keyboard (desktop):**
 | Key | Action |
 |---|---|
 | `◄ ►` / `A D` | Steer |
 | `Space` / `Z` / `X` | Fire |
 | `R` / `Enter` | Restart |
-| Tap | Start / restart (mobile) |
+| `P` | Pause |
+| `F` | Toggle fullscreen |
 
-Mobile: on-screen pad bottom-left (steer), bottom-right (fire).
+## Mobile-first features
+
+- Drag-to-steer + hold-to-fire (no virtual buttons)
+- Multi-touch via Pointer Events (mouse + touch + stylus unified)
+- iOS safe-area-inset support (notch + home indicator)
+- `touch-action: none` — kills pinch/zoom/scroll/pull-to-refresh
+- Wake Lock API — screen stays on while playing
+- Auto-pause on tab switch / app background
+- Adaptive road width (wider on narrow screens)
+- DPR cap at 1.5 + reduced particle counts on mobile for perf
+- PWA manifest + SVG icon — installable to home screen
+- Fullscreen toggle with portrait orientation lock
+- Apple touch icon, theme-color, status-bar styling
 
 ## Mechanics
 
@@ -30,19 +51,23 @@ Best score persists in `localStorage`.
 
 - Vanilla JS + HTML5 Canvas
 - WebAudio synthesized SFX (no asset files)
+- Pointer Events for unified input
+- Wake Lock API
+- Fullscreen API + Screen Orientation API
+- PWA (manifest + apple-touch-icon)
 - Netlify static deploy
 
 ## Local
 
 ```bash
-# any static server works
 python3 -m http.server 8000
 # → http://localhost:8000
 ```
 
 ## Deploy
 
-Auto-deploys to Netlify on push to `main`.
+Manual deploy used for v1. To wire CI:
+Netlify admin → Site config → Build & deploy → Link repository → `ksksrbiz-arch/mojave-run`
 
 ---
 

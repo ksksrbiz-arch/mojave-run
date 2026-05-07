@@ -1,0 +1,21 @@
+{
+  "name": "Mojave Run",
+  "short_name": "Mojave Run",
+  "description": "A wasteland arcade driver. Survive the Mojave.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "portrait",
+  "background_color": "#1a0f08",
+  "theme_color": "#1a0f08",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
