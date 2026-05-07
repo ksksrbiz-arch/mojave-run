@@ -1045,7 +1045,9 @@ const UPGRADES = [
 function upgradeCost(lvl){return 50 + lvl*40;}
 function specialDesc(lvl){
   const current = specialName(lvl);
-  const next = SPECIAL_ABILITIES[lvl+1];
+  const next = Number.isInteger(lvl) && lvl+1>=0 && lvl+1<SPECIAL_ABILITIES.length
+    ? SPECIAL_ABILITIES[lvl+1]
+    : null;
   return next ? current+' → '+next : current+' active';
 }
 function renderGarage(){
