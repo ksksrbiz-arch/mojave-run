@@ -254,6 +254,18 @@ const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
 
+// Cached gradients — rebuilt on resize so we don't allocate per frame.
+let VIGNETTE_PLAY = null;
+let VIGNETTE_MENU = null;
+function rebuildGradients() {
+  VIGNETTE_PLAY = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  VIGNETTE_PLAY.addColorStop(0, 'rgba(0,0,0,0)');
+  VIGNETTE_PLAY.addColorStop(1, 'rgba(0,0,0,0.55)');
+  VIGNETTE_MENU = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  VIGNETTE_MENU.addColorStop(0, 'rgba(0,0,0,0)');
+  VIGNETTE_MENU.addColorStop(1, 'rgba(0,0,0,0.7)');
+}
+
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
   W = window.innerWidth;
@@ -262,6 +274,7 @@ function resize() {
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.imageSmoothingEnabled = false;
+  rebuildGradients();
   if (Game.player) {
     const { x0, x1 } = roadBounds();
     Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
@@ -2864,11 +2877,8 @@ function render() {
     }
     ctx.restore();
 
-    // vignette
-    const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vg;
+    // vignette (cached gradient — rebuilt on resize)
+    ctx.fillStyle = VIGNETTE_PLAY;
     ctx.fillRect(0, 0, W, H);
 
     if (Game.state === 'playing') {
@@ -2884,11 +2894,7 @@ function render() {
   } else {
     // menu — animated wasteland backdrop
     drawIdleBackground();
-    // soft vignette
-    const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.7)');
-    ctx.fillStyle = vg;
+    ctx.fillStyle = VIGNETTE_MENU;
     ctx.fillRect(0, 0, W, H);
   }
 }
@@ -3420,13 +3426,51 @@ function updateHint() {
 // LOOP
 // ============================================================
 let last = performance.now();
+// Adaptive quality governor: tracks an EWMA of frame cost and dials runtime
+// caps up/down. Quality 1 = full detail, 0 = stripped (fewer particles, no
+// weather, smaller bullet/popup buffers). The governor only nudges by small
+// steps each second so frame rate stays smooth instead of stuttering between
+// modes.
+const PerfMon = {
+  ewmaMs: 16.7,
+  quality: 1,
+  lastAdjustAt: 0,
+  hidden: false,
+};
+function applyQualityCaps() {
+  // Scale a few non-essential caps; gameplay-critical ones (enemies, obstacles,
+  // pickups) stay fixed so the simulation is identical at any quality level.
+  const q = PerfMon.quality;
+  RUNTIME_CAPS.particles    = Math.round(300 + 400 * q);
+  RUNTIME_CAPS.bullets      = Math.round(120 + 80 * q);
+  RUNTIME_CAPS.enemyBullets = Math.round(140 + 110 * q);
+  RUNTIME_CAPS.popups       = Math.round(40 + 40 * q);
+  RUNTIME_CAPS.shockwaves   = Math.round(12 + 12 * q);
+}
+
+document.addEventListener('visibilitychange', () => {
+  PerfMon.hidden = (document.visibilityState !== 'visible');
+  // Reset the dt baseline when we come back so the first post-resume frame
+  // doesn't carry a giant elapsed time.
+  if (!PerfMon.hidden) last = performance.now();
+});
+
 function frame(now) {
+  // When the tab is hidden, skip the frame entirely — saves CPU/battery and
+  // prevents the throttled-tab catch-up burst that the dt clamp can only
+  // partially hide.
+  if (PerfMon.hidden) {
+    last = now;
+    requestAnimationFrame(frame);
+    return;
+  }
   // Clamp dt: anything >50ms (tab throttled / long stall) becomes a single 50ms tick,
   // which prevents giant catch-up updates that blew up enemy/bullet/particle counts
   // and froze the simulation mid-match.
   const rawDt = (now - last) / 1000;
   const dt = (!isFinite(rawDt) || rawDt <= 0) ? 0.016 : Math.min(0.05, rawDt);
   last = now;
+  const frameStart = now;
   try {
     if (Game.state === 'playing' || Game.state === 'loading'
         || Game.state === 'dying' || Game.state === 'victory') {
@@ -3443,6 +3487,20 @@ function frame(now) {
   } catch (err) {
     // Never let one bad frame kill the loop. Log + continue.
     console.error('[frame]', err);
+  }
+  // EWMA of total frame cost — used by the quality governor below.
+  const cost = performance.now() - frameStart;
+  PerfMon.ewmaMs = PerfMon.ewmaMs * 0.92 + cost * 0.08;
+  if (now - PerfMon.lastAdjustAt > 1000) {
+    PerfMon.lastAdjustAt = now;
+    // 22ms ≈ 45fps floor. Above it we shed quality; well below it we recover.
+    if (PerfMon.ewmaMs > 22 && PerfMon.quality > 0) {
+      PerfMon.quality = Math.max(0, PerfMon.quality - 0.15);
+      applyQualityCaps();
+    } else if (PerfMon.ewmaMs < 14 && PerfMon.quality < 1) {
+      PerfMon.quality = Math.min(1, PerfMon.quality + 0.1);
+      applyQualityCaps();
+    }
   }
   requestAnimationFrame(frame);
 }
