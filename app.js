@@ -254,6 +254,18 @@ const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
 
+// Cached gradients — rebuilt on resize so we don't allocate per frame.
+let VIGNETTE_PLAY = null;
+let VIGNETTE_MENU = null;
+function rebuildGradients() {
+  VIGNETTE_PLAY = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  VIGNETTE_PLAY.addColorStop(0, 'rgba(0,0,0,0)');
+  VIGNETTE_PLAY.addColorStop(1, 'rgba(0,0,0,0.55)');
+  VIGNETTE_MENU = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  VIGNETTE_MENU.addColorStop(0, 'rgba(0,0,0,0)');
+  VIGNETTE_MENU.addColorStop(1, 'rgba(0,0,0,0.7)');
+}
+
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
   W = window.innerWidth;
@@ -262,6 +274,7 @@ function resize() {
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.imageSmoothingEnabled = false;
+  rebuildGradients();
   if (Game.player) {
     const { x0, x1 } = roadBounds();
     Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
@@ -2864,11 +2877,8 @@ function render() {
     }
     ctx.restore();
 
-    // vignette
-    const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vg;
+    // vignette (cached gradient — rebuilt on resize)
+    ctx.fillStyle = VIGNETTE_PLAY;
     ctx.fillRect(0, 0, W, H);
 
     if (Game.state === 'playing') {
@@ -2884,11 +2894,7 @@ function render() {
   } else {
     // menu — animated wasteland backdrop
     drawIdleBackground();
-    // soft vignette
-    const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.7)');
-    ctx.fillStyle = vg;
+    ctx.fillStyle = VIGNETTE_MENU;
     ctx.fillRect(0, 0, W, H);
   }
 }
@@ -3420,13 +3426,51 @@ function updateHint() {
 // LOOP
 // ============================================================
 let last = performance.now();
+// Adaptive quality governor: tracks an EWMA of frame cost and dials runtime
+// caps up/down. Quality 1 = full detail, 0 = stripped (fewer particles, no
+// weather, smaller bullet/popup buffers). The governor only nudges by small
+// steps each second so frame rate stays smooth instead of stuttering between
+// modes.
+const PerfMon = {
+  ewmaMs: 16.7,
+  quality: 1,
+  lastAdjustAt: 0,
+  hidden: false,
+};
+function applyQualityCaps() {
+  // Scale a few non-essential caps; gameplay-critical ones (enemies, obstacles,
+  // pickups) stay fixed so the simulation is identical at any quality level.
+  const q = PerfMon.quality;
+  RUNTIME_CAPS.particles    = Math.round(300 + 400 * q);
+  RUNTIME_CAPS.bullets      = Math.round(120 + 80 * q);
+  RUNTIME_CAPS.enemyBullets = Math.round(140 + 110 * q);
+  RUNTIME_CAPS.popups       = Math.round(40 + 40 * q);
+  RUNTIME_CAPS.shockwaves   = Math.round(12 + 12 * q);
+}
+
+document.addEventListener('visibilitychange', () => {
+  PerfMon.hidden = (document.visibilityState !== 'visible');
+  // Reset the dt baseline when we come back so the first post-resume frame
+  // doesn't carry a giant elapsed time.
+  if (!PerfMon.hidden) last = performance.now();
+});
+
 function frame(now) {
+  // When the tab is hidden, skip the frame entirely — saves CPU/battery and
+  // prevents the throttled-tab catch-up burst that the dt clamp can only
+  // partially hide.
+  if (PerfMon.hidden) {
+    last = now;
+    requestAnimationFrame(frame);
+    return;
+  }
   // Clamp dt: anything >50ms (tab throttled / long stall) becomes a single 50ms tick,
   // which prevents giant catch-up updates that blew up enemy/bullet/particle counts
   // and froze the simulation mid-match.
   const rawDt = (now - last) / 1000;
   const dt = (!isFinite(rawDt) || rawDt <= 0) ? 0.016 : Math.min(0.05, rawDt);
   last = now;
+  const frameStart = now;
   try {
     if (Game.state === 'playing' || Game.state === 'loading'
         || Game.state === 'dying' || Game.state === 'victory') {
@@ -3443,6 +3487,20 @@ function frame(now) {
   } catch (err) {
     // Never let one bad frame kill the loop. Log + continue.
     console.error('[frame]', err);
+  }
+  // EWMA of total frame cost — used by the quality governor below.
+  const cost = performance.now() - frameStart;
+  PerfMon.ewmaMs = PerfMon.ewmaMs * 0.92 + cost * 0.08;
+  if (now - PerfMon.lastAdjustAt > 1000) {
+    PerfMon.lastAdjustAt = now;
+    // 22ms ≈ 45fps floor. Above it we shed quality; well below it we recover.
+    if (PerfMon.ewmaMs > 22 && PerfMon.quality > 0) {
+      PerfMon.quality = Math.max(0, PerfMon.quality - 0.15);
+      applyQualityCaps();
+    } else if (PerfMon.ewmaMs < 14 && PerfMon.quality < 1) {
+      PerfMon.quality = Math.min(1, PerfMon.quality + 0.1);
+      applyQualityCaps();
+    }
   }
   requestAnimationFrame(frame);
 }
@@ -3500,14 +3558,28 @@ function drawMpGhosts() {
   const inGame = (Game.state === 'playing' || Game.state === 'loading'
     || Game.state === 'dying' || Game.state === 'victory');
   if (!inGame) return;
+  const now = performance.now();
   ctx.save();
   for (const [id, p] of MP.peers) {
     const s = p.s; if (!s || s.inMenu) continue;
     if (typeof s.nx !== 'number' || typeof s.ny !== 'number') continue;
-    const v = VEHICLE_BY_ID[p.vehicleId] || VEHICLE_BY_ID[Game.player && Game.vehicle && Game.vehicle.id] || VEHICLES[0];
-    const x = s.nx * W;
-    const y = s.ny * H;
-    ctx.globalAlpha = 0.45;
+    // Interpolate between previous and current sample to smooth out the
+    // ~15Hz update rate. Fall back to raw position if we have no history.
+    let nx = s.nx, ny = s.ny;
+    if (p.prev && p.prev.s && typeof p.prev.s.nx === 'number') {
+      const span = Math.max(16, p.recvAt - p.prev.t);
+      const k = Math.min(1, (now - p.recvAt) / span + 1); // 0..1 across last span
+      const t = Math.max(0, Math.min(1, k));
+      nx = p.prev.s.nx + (s.nx - p.prev.s.nx) * t;
+      ny = p.prev.s.ny + (s.ny - p.prev.s.ny) * t;
+    }
+    const v = VEHICLE_BY_ID[p.vehicleId] || (Game.vehicle ? VEHICLE_BY_ID[Game.vehicle.id] : null) || VEHICLES[0];
+    const x = nx * W;
+    const y = ny * H;
+    // Fade ghost out as samples grow stale — looks better than freezing in place.
+    const stale = Math.max(0, now - p.recvAt - 250);
+    const alpha = Math.max(0.12, 0.45 - stale / 4000);
+    ctx.globalAlpha = alpha;
     drawVehicle(x, y, v, s.vx || 0);
     ctx.globalAlpha = 1;
     // name tag
@@ -3524,15 +3596,30 @@ function drawMpGhosts() {
   ctx.restore();
 }
 
+function mpStatusText() {
+  if (!window.MP) return 'OFFLINE';
+  if (MP.connected) {
+    const ping = (typeof MP.pingMs === 'number') ? ` · ${MP.pingMs}MS` : '';
+    return `ROOM ${MP.room}${ping}`;
+  }
+  if (MP.joining) return 'JOINING…';
+  if (MP._wantConnected) return 'RECONNECTING…';
+  return 'DISCONNECTED';
+}
+
 function mpRefreshPeerList() {
   const list = document.getElementById('mp-peers');
   if (!list) return;
   const status = document.getElementById('mp-status-bar');
-  if (status) status.textContent = MP.connected ? ('ROOM ' + MP.room) : (MP.joining ? 'JOINING…' : 'DISCONNECTED');
-  document.getElementById('mp-leave-btn').style.display = MP.connected ? '' : 'none';
+  if (status) status.textContent = mpStatusText();
+  const leaveBtn = document.getElementById('mp-leave-btn');
+  if (leaveBtn) leaveBtn.style.display = (MP.connected || MP._wantConnected) ? '' : 'none';
   list.innerHTML = '';
   if (!MP.connected) {
-    list.innerHTML = '<div class="small center" style="padding:12px 0;opacity:.6">JOIN A ROOM TO SEE OTHER DRIVERS</div>';
+    const msg = MP._wantConnected
+      ? 'CHASING SIGNAL THROUGH THE DUST…'
+      : 'JOIN A ROOM TO SEE OTHER DRIVERS';
+    list.innerHTML = `<div class="small center" style="padding:12px 0;opacity:.6">${msg}</div>`;
     return;
   }
   // self
@@ -3554,6 +3641,49 @@ function mpRefreshPeerList() {
   MP.on('open', mpRefreshPeerList);
   MP.on('close', mpRefreshPeerList);
   MP.on('peers', mpRefreshPeerList);
+  MP.on('latency', () => {
+    // Only refresh the status line — avoid rebuilding the full peer list each ping.
+    const status = document.getElementById('mp-status-bar');
+    if (status) status.textContent = mpStatusText();
+  });
+  // Themed status events surfaced as toasts so the user always knows what's
+  // happening with the radio link. Codes are stable; detail is presentation.
+  MP.on('status', (st) => {
+    if (!st) return;
+    const code = st.code;
+    const detail = st.detail || '';
+    // Suppress noise when the player isn't on the MP screen for trivial events.
+    const onMpScreen = (UI.current === 'mp');
+    switch (code) {
+      case 'connecting':
+      case 'reconnecting':
+        if (onMpScreen) UI.toast(detail || 'RECONNECTING…');
+        break;
+      case 'joined':
+        UI.toast(detail || 'LINKED UP');
+        break;
+      case 'dropped':
+        UI.toast(detail || 'SIGNAL LOST');
+        break;
+      case 'error':
+        UI.toast(detail || 'COMMS FAULT');
+        break;
+      case 'giveup':
+        UI.toast(detail || 'RADIO SILENT — STOPPING');
+        break;
+      case 'kicked':
+        UI.toast('BOOTED: ' + detail);
+        break;
+      case 'peer-join':
+      case 'peer-leave':
+        if (onMpScreen) UI.toast(detail);
+        break;
+      case 'disconnected':
+        if (onMpScreen) UI.toast(detail || 'OFF THE GRID');
+        break;
+    }
+    mpRefreshPeerList();
+  });
 })();
 
 // extend UI

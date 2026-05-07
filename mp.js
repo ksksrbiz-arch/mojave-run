@@ -3,10 +3,22 @@
 // Each peer broadcasts its position/score; everyone draws everyone else
 // as a translucent ghost car on their own road. Gameplay stays single-player
 // per client — this is cooperative side-by-side, not a shared simulation.
+//
+// Stability features:
+//   * automatic reconnect with exponential backoff (capped)
+//   * heartbeat ping/pong with latency measurement and dead-link detection
+//   * latest-state coalescing so we never queue stale frames on a slow link
+//   * themed status events the UI surfaces as desert-flavored toasts
+//   * single re-join on reconnect: room/name/vehicle preserved across drops
 
 (function () {
-  const STATE_HZ = 12;          // ~12 state messages/sec
-  const PEER_TIMEOUT_MS = 6000; // drop peers we haven't heard from in 6s
+  const STATE_HZ = 15;            // ~15 state messages/sec (smoother peers)
+  const PEER_TIMEOUT_MS = 6000;   // drop peers we haven't heard from in 6s
+  const PING_INTERVAL_MS = 4000;  // heartbeat cadence
+  const PING_TIMEOUT_MS = 12000;  // no pong within this -> consider link dead
+  const RECONNECT_MIN_MS = 800;
+  const RECONNECT_MAX_MS = 15000;
+  const MAX_RECONNECTS = 20;      // give up after this many in a row
 
   const MP = {
     ws: null,
@@ -16,40 +28,86 @@
     room: null,
     name: 'DRIVER',
     vehicleId: 'rust',
-    peers: new Map(), // id -> { name, color, vehicleId, s, lastSeen }
-    listeners: { open: [], close: [], peers: [], event: [] },
-    _sendTimer: 0,
+    color: '#f5d76e',
+    url: null,
+    pingMs: null,                 // last round-trip latency (ms)
+    peers: new Map(),             // id -> { name, color, vehicleId, s, prev, recvAt, lastSeen }
+    listeners: { open: [], close: [], peers: [], event: [], status: [], latency: [] },
+    _pendingState: null,
+    _flushTimer: 0,
     _lastSent: 0,
+    _pingTimer: 0,
+    _lastPongAt: 0,
+    _lastPingSentAt: 0,
+    _reconnectTimer: 0,
+    _reconnectAttempts: 0,
+    _wantConnected: false,        // user intent — only auto-reconnect when true
+    _closingByUser: false,
   };
 
   function on(ev, fn) { (MP.listeners[ev] || (MP.listeners[ev] = [])).push(fn); }
-  function emit(ev, ...args) { (MP.listeners[ev] || []).forEach(fn => { try { fn(...args); } catch (e) { console.error(e); } }); }
+  function emit(ev, ...args) {
+    (MP.listeners[ev] || []).forEach(fn => { try { fn(...args); } catch (e) { console.error(e); } });
+  }
+
+  // Themed status messages — UI maps these to toasts/banners.
+  function setStatus(code, detail) {
+    emit('status', { code, detail: detail || '' });
+  }
 
   function defaultUrl() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}/ws`;
   }
 
-  function connect({ url, room, name, vehicleId }) {
-    if (MP.ws) try { MP.ws.close(); } catch (_) {}
-    MP.peers.clear();
-    MP.connected = false;
-    MP.joining = true;
-    MP.room = (room || 'LOBBY').toUpperCase().slice(0, 12);
-    MP.name = (name || 'DRIVER').slice(0, 14);
-    MP.vehicleId = vehicleId || 'rust';
-    const wsUrl = url || defaultUrl();
+  function clearTimers() {
+    if (MP._pingTimer) { clearInterval(MP._pingTimer); MP._pingTimer = 0; }
+    if (MP._flushTimer) { clearInterval(MP._flushTimer); MP._flushTimer = 0; }
+    if (MP._reconnectTimer) { clearTimeout(MP._reconnectTimer); MP._reconnectTimer = 0; }
+  }
+
+  function scheduleReconnect() {
+    if (!MP._wantConnected) return;
+    if (MP._reconnectAttempts >= MAX_RECONNECTS) {
+      setStatus('giveup', 'SIGNAL LOST — RADIO SILENT');
+      return;
+    }
+    const n = MP._reconnectAttempts++;
+    const wait = Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * Math.pow(1.7, n))
+      + Math.random() * 400;
+    setStatus('reconnecting', `REPATCHING THE WIRE… (${Math.ceil(wait/1000)}s)`);
+    MP._reconnectTimer = setTimeout(() => openSocket(), wait);
+  }
+
+  function openSocket() {
     let ws;
-    try { ws = new WebSocket(wsUrl); }
-    catch (e) { MP.joining = false; emit('close', String(e)); return; }
+    try { ws = new WebSocket(MP.url); }
+    catch (e) {
+      setStatus('error', 'BAD FREQUENCY — CHECK SERVER ADDRESS');
+      MP.joining = false;
+      scheduleReconnect();
+      return;
+    }
     MP.ws = ws;
+    MP.joining = true;
+
     ws.onopen = () => {
-      ws.send(JSON.stringify({
-        type: 'join', room: MP.room, name: MP.name, vehicleId: MP.vehicleId,
-      }));
+      MP._reconnectAttempts = 0;
+      MP._lastPongAt = performance.now();
+      try {
+        ws.send(JSON.stringify({
+          type: 'join',
+          room: MP.room,
+          name: MP.name,
+          color: MP.color,
+          vehicleId: MP.vehicleId,
+        }));
+      } catch (_) { /* close handler will retry */ }
     };
+
     ws.onmessage = (evt) => {
-      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
       if (!msg || !msg.type) return;
       switch (msg.type) {
         case 'joined':
@@ -58,22 +116,38 @@
           MP.joining = false;
           MP.peers.clear();
           (msg.peers || []).forEach(p => MP.peers.set(p.id, {
-            name: p.name, color: p.color, vehicleId: p.vehicleId, s: p.state || null, lastSeen: performance.now(),
+            name: p.name, color: p.color, vehicleId: p.vehicleId,
+            s: p.state || null, prev: null, recvAt: performance.now(),
+            lastSeen: performance.now(),
           }));
+          startHeartbeat();
+          startFlusher();
+          setStatus('joined', `LINKED UP IN ${MP.room}`);
           emit('open');
           emit('peers');
           break;
         case 'peer-join':
-          MP.peers.set(msg.id, { name: msg.name, color: msg.color, vehicleId: msg.vehicleId, s: null, lastSeen: performance.now() });
+          MP.peers.set(msg.id, {
+            name: msg.name, color: msg.color, vehicleId: msg.vehicleId,
+            s: null, prev: null, recvAt: performance.now(), lastSeen: performance.now(),
+          });
+          setStatus('peer-join', `${(msg.name || 'DRIVER').toUpperCase()} ROLLED IN`);
           emit('peers');
           break;
-        case 'peer-leave':
+        case 'peer-leave': {
+          const p = MP.peers.get(msg.id);
           MP.peers.delete(msg.id);
+          if (p) setStatus('peer-leave', `${(p.name || 'DRIVER').toUpperCase()} PEELED OFF`);
           emit('peers');
           break;
+        }
         case 'peer-state': {
           const p = MP.peers.get(msg.id); if (!p) return;
-          p.s = msg.s; p.lastSeen = performance.now();
+          // keep previous sample for interpolation
+          p.prev = p.s ? { s: p.s, t: p.recvAt } : null;
+          p.s = msg.s;
+          p.recvAt = performance.now();
+          p.lastSeen = p.recvAt;
           break;
         }
         case 'peer-meta': {
@@ -87,31 +161,110 @@
         case 'peer-event':
           emit('event', msg.id, msg.ev);
           break;
+        case 'pong': {
+          const now = performance.now();
+          MP._lastPongAt = now;
+          if (typeof msg.t === 'number') {
+            MP.pingMs = Math.max(0, Math.round(now - msg.t));
+            emit('latency', MP.pingMs);
+          }
+          break;
+        }
+        case 'kicked':
+          setStatus('kicked', msg.reason ? String(msg.reason).toUpperCase() : 'BOOTED FROM ROOM');
+          MP._wantConnected = false;
+          try { ws.close(); } catch (_) {}
+          break;
       }
     };
-    ws.onclose = () => {
+
+    ws.onclose = (evt) => {
+      const wasConnected = MP.connected;
       MP.connected = false;
       MP.joining = false;
       MP.peers.clear();
-      emit('close');
+      clearTimers();
       emit('peers');
+      if (MP._closingByUser) {
+        MP._closingByUser = false;
+        setStatus('disconnected', 'OFF THE GRID');
+        emit('close');
+        return;
+      }
+      if (wasConnected) {
+        setStatus('dropped', 'SIGNAL LOST IN A DUST STORM');
+      } else if (!MP._reconnectAttempts) {
+        setStatus('error', 'COULD NOT REACH SERVER');
+      }
+      emit('close');
+      scheduleReconnect();
     };
+
     ws.onerror = () => { /* close fires next */ };
   }
 
-  function disconnect() {
-    if (MP.ws) try { MP.ws.close(); } catch (_) {}
+  function startHeartbeat() {
+    if (MP._pingTimer) clearInterval(MP._pingTimer);
+    MP._pingTimer = setInterval(() => {
+      if (!MP.ws || MP.ws.readyState !== 1) return;
+      const now = performance.now();
+      // dead-link guard: no pong in PING_TIMEOUT_MS -> force close to trigger reconnect
+      if (MP._lastPongAt && now - MP._lastPongAt > PING_TIMEOUT_MS) {
+        try { MP.ws.close(); } catch (_) {}
+        return;
+      }
+      MP._lastPingSentAt = now;
+      try { MP.ws.send(JSON.stringify({ type: 'ping', t: now })); } catch (_) {}
+    }, PING_INTERVAL_MS);
+  }
+
+  // Coalesce state: we always send the latest snapshot at most STATE_HZ.
+  function startFlusher() {
+    if (MP._flushTimer) clearInterval(MP._flushTimer);
+    MP._flushTimer = setInterval(() => {
+      if (!MP._pendingState) return;
+      if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
+      const now = performance.now();
+      if (now - MP._lastSent < 1000 / STATE_HZ) return;
+      MP._lastSent = now;
+      try { MP.ws.send(JSON.stringify({ type: 'state', s: MP._pendingState })); } catch (_) {}
+      MP._pendingState = null;
+    }, Math.floor(1000 / STATE_HZ / 2));
+  }
+
+  function connect({ url, room, name, vehicleId, color }) {
+    disconnect(/*silent*/ true);
+    MP.peers.clear();
+    MP.room = (room || 'LOBBY').toUpperCase().slice(0, 12);
+    MP.name = (name || 'DRIVER').slice(0, 14);
+    MP.vehicleId = vehicleId || 'rust';
+    if (color) MP.color = color;
+    MP.url = url || defaultUrl();
+    MP._wantConnected = true;
+    MP._reconnectAttempts = 0;
+    setStatus('connecting', `RAISING THE ANTENNA…`);
+    openSocket();
+  }
+
+  function disconnect(silent) {
+    MP._wantConnected = false;
+    MP._closingByUser = true;
+    clearTimers();
+    if (MP.ws) {
+      try { MP.ws.close(); } catch (_) {}
+    }
     MP.ws = null;
     MP.connected = false;
+    MP.joining = false;
     MP.peers.clear();
+    MP.pingMs = null;
+    MP._pendingState = null;
+    if (!silent) setStatus('disconnected', 'OFF THE GRID');
   }
 
   function sendState(s) {
-    if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
-    const now = performance.now();
-    if (now - MP._lastSent < 1000 / STATE_HZ) return;
-    MP._lastSent = now;
-    try { MP.ws.send(JSON.stringify({ type: 'state', s })); } catch (_) {}
+    // Always store latest; flusher decides when to actually transmit.
+    MP._pendingState = s;
   }
 
   function sendEvent(ev) {
@@ -120,9 +273,10 @@
   }
 
   function sendMeta(meta) {
+    if (meta.name) MP.name = String(meta.name).slice(0, 14);
+    if (meta.vehicleId) MP.vehicleId = String(meta.vehicleId).slice(0, 16);
+    if (meta.color) MP.color = String(meta.color).slice(0, 16);
     if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
-    if (meta.name) MP.name = meta.name;
-    if (meta.vehicleId) MP.vehicleId = meta.vehicleId;
     try { MP.ws.send(JSON.stringify({ type: 'meta', ...meta })); } catch (_) {}
   }
 
@@ -135,6 +289,27 @@
     if (removed) emit('peers');
   }
 
+  // Tab-visibility hook: when the tab returns to foreground, kick a ping
+  // immediately so the heartbeat doesn't sit stale for the full interval.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && MP.ws && MP.ws.readyState === 1) {
+      MP._lastPongAt = performance.now();
+      try { MP.ws.send(JSON.stringify({ type: 'ping', t: performance.now() })); } catch (_) {}
+    }
+  });
+
+  // Network-online event: speed up reconnect when the OS regains connectivity.
+  window.addEventListener('online', () => {
+    if (MP._wantConnected && !MP.connected && MP._reconnectTimer) {
+      clearTimeout(MP._reconnectTimer);
+      MP._reconnectTimer = 0;
+      setStatus('reconnecting', 'NETWORK BACK — REDIALING');
+      openSocket();
+    }
+  });
+
   // expose
-  window.MP = Object.assign(MP, { connect, disconnect, sendState, sendEvent, sendMeta, on, defaultUrl, pruneStale });
+  window.MP = Object.assign(MP, {
+    connect, disconnect, sendState, sendEvent, sendMeta, on, defaultUrl, pruneStale,
+  });
 })();

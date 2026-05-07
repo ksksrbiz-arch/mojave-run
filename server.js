@@ -4,6 +4,13 @@
 // `cloudflared tunnel --url http://localhost:8787` and share the public URL.
 //
 // Single dependency: `ws`. Install with `npm install` once.
+//
+// Hardening:
+//   * heartbeat ping/pong (drops zombie sockets)
+//   * per-connection message rate limit + payload size cap
+//   * room peer cap (prevents one room flooding the relay)
+//   * graceful SIGINT/SIGTERM shutdown
+//   * permissive CORS so the static site can be served separately from the WS
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -12,6 +19,12 @@ const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT, 10) || 8787;
 const ROOT = __dirname;
+
+// Tunables (env-overridable so ops can adjust without code changes).
+const MAX_PAYLOAD_BYTES = parseInt(process.env.MP_MAX_PAYLOAD, 10) || 4096;
+const MAX_MSGS_PER_SEC = parseInt(process.env.MP_MAX_MPS, 10) || 60;
+const ROOM_PEER_CAP = parseInt(process.env.MP_ROOM_CAP, 10) || 16;
+const HEARTBEAT_MS = parseInt(process.env.MP_HEARTBEAT_MS, 10) || 15000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -26,6 +39,20 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
+  // Permissive CORS — read-only static assets.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // Tiny health endpoint — useful for status pages and uptime monitors.
+  if (req.url === '/healthz') {
+    let totalPeers = 0;
+    for (const m of rooms.values()) totalPeers += m.size;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, rooms: rooms.size, peers: totalPeers, uptime: process.uptime() }));
+    return;
+  }
+
   let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
   // prevent path traversal
@@ -42,7 +69,12 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  maxPayload: MAX_PAYLOAD_BYTES,
+  perMessageDeflate: false, // small frequent JSON — compression hurts more than helps
+});
 
 // rooms: Map<roomCode, Map<peerId, { ws, name, color, vehicleId, state }>>
 const rooms = new Map();
@@ -54,40 +86,97 @@ function broadcast(room, msg, exceptId) {
   const data = JSON.stringify(msg);
   for (const [id, p] of peers) {
     if (id === exceptId) continue;
-    if (p.ws.readyState === 1) p.ws.send(data);
+    if (p.ws.readyState === 1) {
+      try { p.ws.send(data); } catch (_) { /* socket may be closing */ }
+    }
   }
 }
 
 function send(ws, msg) {
-  if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+  if (ws.readyState !== 1) return;
+  try { ws.send(JSON.stringify(msg)); } catch (_) {}
 }
 
-wss.on('connection', (ws) => {
-  const peer = { id: String(nextId++), room: null, name: 'DRIVER', color: '#f5d76e', vehicleId: 'rust', state: null };
+function safeStr(v, max) {
+  return String(v == null ? '' : v).slice(0, max);
+}
+
+wss.on('connection', (ws, req) => {
+  const peer = {
+    id: String(nextId++),
+    room: null,
+    name: 'DRIVER',
+    color: '#f5d76e',
+    vehicleId: 'rust',
+    state: null,
+    msgWindowStart: Date.now(),
+    msgsInWindow: 0,
+  };
   ws.peer = peer;
+  ws.isAlive = true;
+
+  ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
+    // rate limit
+    const now = Date.now();
+    if (now - peer.msgWindowStart > 1000) {
+      peer.msgWindowStart = now;
+      peer.msgsInWindow = 0;
+    }
+    if (++peer.msgsInWindow > MAX_MSGS_PER_SEC) {
+      send(ws, { type: 'kicked', reason: 'TOO MUCH CHATTER' });
+      try { ws.close(1008, 'rate-limit'); } catch (_) {}
+      return;
+    }
+
+    if (raw.length > MAX_PAYLOAD_BYTES) {
+      // ws library already enforces maxPayload; this is a defense-in-depth check.
+      try { ws.close(1009, 'payload-too-big'); } catch (_) {}
+      return;
+    }
+
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg.type !== 'string') return;
 
+    if (msg.type === 'ping') {
+      // echo timestamp so the client can compute RTT
+      send(ws, { type: 'pong', t: msg.t });
+      return;
+    }
+
     if (msg.type === 'join') {
-      const room = String(msg.room || 'lobby').toUpperCase().slice(0, 12);
+      const room = safeStr(msg.room || 'lobby', 12).toUpperCase();
+      // enforce room capacity before mutating state
+      const existingRoom = rooms.get(room);
+      if (existingRoom && existingRoom.size >= ROOM_PEER_CAP && !existingRoom.has(peer.id)) {
+        send(ws, { type: 'kicked', reason: 'ROOM FULL' });
+        try { ws.close(1013, 'room-full'); } catch (_) {}
+        return;
+      }
+      // if rejoining (same socket sending join twice) clean up old entry
+      if (peer.room && peer.room !== room) {
+        const old = rooms.get(peer.room);
+        if (old) {
+          old.delete(peer.id);
+          broadcast(peer.room, { type: 'peer-leave', id: peer.id });
+          if (old.size === 0) rooms.delete(peer.room);
+        }
+      }
       peer.room = room;
-      peer.name = String(msg.name || 'DRIVER').slice(0, 14);
-      peer.color = String(msg.color || '#f5d76e').slice(0, 16);
-      peer.vehicleId = String(msg.vehicleId || 'rust').slice(0, 16);
+      peer.name = safeStr(msg.name || 'DRIVER', 14);
+      peer.color = safeStr(msg.color || '#f5d76e', 16);
+      peer.vehicleId = safeStr(msg.vehicleId || 'rust', 16);
       if (!rooms.has(room)) rooms.set(room, new Map());
       const roomMap = rooms.get(room);
       roomMap.set(peer.id, { ws, name: peer.name, color: peer.color, vehicleId: peer.vehicleId, state: null });
-      // tell new peer about existing peers
       const existing = [];
       for (const [id, p] of roomMap) {
         if (id === peer.id) continue;
         existing.push({ id, name: p.name, color: p.color, vehicleId: p.vehicleId, state: p.state });
       }
       send(ws, { type: 'joined', id: peer.id, room, peers: existing });
-      // tell others
       broadcast(room, { type: 'peer-join', id: peer.id, name: peer.name, color: peer.color, vehicleId: peer.vehicleId }, peer.id);
       return;
     }
@@ -103,14 +192,12 @@ wss.on('connection', (ws) => {
       me.state = msg.s || null;
       broadcast(peer.room, { type: 'peer-state', id: peer.id, s: me.state }, peer.id);
     } else if (msg.type === 'event') {
-      // small one-shot events (death, level start, chat)
       const ev = msg.ev || {};
       broadcast(peer.room, { type: 'peer-event', id: peer.id, ev }, peer.id);
     } else if (msg.type === 'meta') {
-      // vehicle change, name change
-      if (msg.name) me.name = peer.name = String(msg.name).slice(0, 14);
-      if (msg.color) me.color = peer.color = String(msg.color).slice(0, 16);
-      if (msg.vehicleId) me.vehicleId = peer.vehicleId = String(msg.vehicleId).slice(0, 16);
+      if (msg.name) me.name = peer.name = safeStr(msg.name, 14);
+      if (msg.color) me.color = peer.color = safeStr(msg.color, 16);
+      if (msg.vehicleId) me.vehicleId = peer.vehicleId = safeStr(msg.vehicleId, 16);
       broadcast(peer.room, { type: 'peer-meta', id: peer.id, name: me.name, color: me.color, vehicleId: me.vehicleId }, peer.id);
     }
   });
@@ -124,11 +211,46 @@ wss.on('connection', (ws) => {
     if (roomMap.size === 0) rooms.delete(peer.room);
   });
 
-  ws.on('error', () => { /* ignore — close handler cleans up */ });
+  ws.on('error', (e) => {
+    // ws library will fire 'close' next; just log so ops can see patterns.
+    console.warn('[ws] peer error', peer.id, e && e.message);
+  });
 });
+
+// Heartbeat sweep — terminate sockets that didn't pong since last sweep.
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      try { ws.terminate(); } catch (_) {}
+      continue;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (_) {}
+  }
+}, HEARTBEAT_MS);
+
+wss.on('close', () => clearInterval(heartbeat));
+
+function shutdown(signal) {
+  console.log(`[server] ${signal} — closing`);
+  clearInterval(heartbeat);
+  for (const ws of wss.clients) {
+    try { ws.close(1001, 'server-shutdown'); } catch (_) {}
+  }
+  wss.close(() => {
+    server.close(() => process.exit(0));
+  });
+  // hard exit if something hangs
+  setTimeout(() => process.exit(0), 4000).unref();
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('uncaughtException', (e) => { console.error('[server] uncaught', e); });
+process.on('unhandledRejection', (e) => { console.error('[server] unhandledRejection', e); });
 
 server.listen(PORT, () => {
   console.log(`MOJAVE RUN server on http://localhost:${PORT}`);
   console.log(`LAN:  share http://<your-lan-ip>:${PORT}`);
   console.log(`WAN:  cloudflared tunnel --url http://localhost:${PORT}`);
+  console.log(`health: http://localhost:${PORT}/healthz`);
 });
