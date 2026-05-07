@@ -144,7 +144,7 @@
     cvs.height = Math.floor(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    if (game && game.player && Array.isArray(game.players)) {
+    if (game && game.player && game.players?.length) {
       const { x0, x1 } = roadBounds();
       for (const p of game.players) {
         p.x = clamp(p.x, x0 + p.w/2 + 4, x1 - p.w/2 - 4);
@@ -459,7 +459,6 @@
     game.winner = null;
     game.players = [makePlayer(0), makePlayer(1)];
     game.player = game.players[0];
-    game.health = 100;
     game.bullets.length = 0;
     game.enemies.length = 0;
     game.obstacles.length = 0;
@@ -810,7 +809,8 @@
       game.shake = 1.2;
       const alive = activePlayers();
       if (alive.length === 0 || game.mode === 'solo' || game.mode === 'pvp') {
-        game.winner = game.mode === 'pvp' ? (alive.length === 1 ? alive[0] : null) : null;
+        game.winner = null;
+        if (game.mode === 'pvp' && alive.length === 1) game.winner = alive[0];
         game.state = 'gameover';
         releaseWakeLock();
         fsBtn.classList.remove('hidden');
