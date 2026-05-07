@@ -3568,6 +3568,7 @@ function frame(now) {
   PerfMon.ewmaMs = PerfMon.ewmaMs * 0.92 + cost * 0.08;
   // Sliding 1s FPS window for the debug HUD.
   PerfMon.frames++;
+  if (PerfMon.lastFpsAt === 0) PerfMon.lastFpsAt = now;
   if (now - PerfMon.lastFpsAt >= 1000) {
     PerfMon.fps = PerfMon.frames * 1000 / (now - PerfMon.lastFpsAt);
     PerfMon.frames = 0;
