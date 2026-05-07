@@ -100,7 +100,7 @@
     <div class="left">
       <div>HP <div class="bar hp"><i id="hpFill" style="width:100%"></i></div></div>
       <div>SCRAP <b id="scrapHud">0</b></div>
-      <div>SPECIAL <b id="specialHud">RAM</b></div>
+      <div>SPECIAL <b id="specialHud">UNKNOWN</b></div>
     </div>
     <div class="right">
       <div>SCORE <b id="scoreHud">0</b></div>
@@ -309,10 +309,14 @@ const NITRO_PICKUP_BURST = 350;
 const NITRO_DURATION = 2.4;
 const NITRO_PICKUP_DURATION = 1.2;
 const RAM_PLATING_DAMAGE_FACTOR = 0.65;
-function specialName(lvl){ return SPECIAL_ABILITIES[lvl] || 'UNKNOWN'; }
+function specialName(lvl){
+  return Number.isInteger(lvl) && lvl>=0 && lvl<SPECIAL_ABILITIES.length
+    ? SPECIAL_ABILITIES[lvl]
+    : 'UNKNOWN';
+}
 function nitroButtonLabel(p){
   if(p.nitro>0) return 'NITRO ACTIVE';
-  if(p.specialCd>0) return 'NITRO '+Math.ceil(p.specialCd)+'S';
+  if(p.specialCd>0) return 'NITRO '+Math.ceil(p.specialCd)+' S';
   return 'NITRO READY';
 }
 
@@ -355,7 +359,7 @@ const Game = {
   modeName:'rust', // rust | gauntlet
   sector:1, sectorTime:0, sectorTarget:30,
   player:null, zombies:[], bullets:[], pickups:[],
-  road:0, speed:380, baseSpeed:380, score:0, scrap:0, kills:0,
+  road:0, speed:380, baseSpeed:380, nitroBoost:0, score:0, scrap:0, kills:0,
   shake:0, dist:0, weather:'clear', visibility:1,
   mp:null,
 };
@@ -398,8 +402,10 @@ class Player{
     if(this.specialCd>0) this.specialCd -= dt;
     if(this.nitro>0){
       this.nitro = Math.max(0, this.nitro-dt);
-      Game.speed = Math.max(Game.speed, Game.baseSpeed+NITRO_SPEED_FLOOR);
+      Game.nitroBoost = NITRO_SPEED_FLOOR;
       Game.shake = Math.max(Game.shake, 4);
+    } else {
+      Game.nitroBoost = 0;
     }
     if(this.invuln>0) this.invuln -= dt;
   }
@@ -464,7 +470,7 @@ function tryActivateSpecial(){
   const p = Game.player;
   if(Game.mode!=='play' || !p) return;
   if(p.special!==SPECIAL_NITRO){
-    toast(specialName(p.special)+' PASSIVE');
+    toast(`${specialName(p.special)} PASSIVE`);
     return;
   }
   if(p.specialCd>0){
@@ -700,7 +706,7 @@ function startGame(mode){
   Game.zombies.length=0; Game.bullets.length=0; Game.pickups.length=0;
   Decals.length=0;
   for(const p of PartPool) p.alive=false;
-  Game.speed = Game.baseSpeed = 380;
+  Game.speed = Game.baseSpeed = 380; Game.nitroBoost=0;
   Game.score=0; Game.scrap=0; Game.kills=0; Game.dist=0; Game.shake=0;
   applySector();
   hudShow(true); Audio.resume();
@@ -805,7 +811,7 @@ function loop(now){
 function update(dt){
   const p = Game.player;
   // speed acceleration
-  Game.speed += (Game.baseSpeed - Game.speed)*dt*1.5;
+  Game.speed += (Game.baseSpeed + Game.nitroBoost - Game.speed)*dt*1.5;
   Game.road += Game.speed * dt;
   Game.dist += Game.speed*dt;
   SAVE.totalDist += Game.speed*dt;
