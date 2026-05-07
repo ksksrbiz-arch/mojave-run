@@ -1,0 +1,31 @@
+# Fly.io config for the MOJAVE RUN multiplayer relay.
+# First-time setup:  fly launch --no-deploy --copy-config --name mojave-run
+# Then:              fly deploy
+# Fly injects PORT inside the VM; server.js honors it. Health check hits /healthz.
+app = "mojave-run"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

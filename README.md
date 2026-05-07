@@ -93,6 +93,35 @@ phones, Chromebooks, anywhere.
 For LAN play (same WiFi) you can skip the tunnel and just share
 `http://<your-lan-ip>:8787`.
 
+### Deploying the relay so the public Netlify site can use it
+
+The Netlify deploy is **static-only** — it cannot run `server.js`, so the
+client cannot connect to `wss://mojave-run.netlify.app/ws` (there is no
+server there). Host `server.js` separately on any Node container host, then
+point the static site at it via the `mp-server-url` `<meta>` tag in
+`index.html`.
+
+Configs included in this repo:
+
+- **Render** — push to GitHub, then *New + → Blueprint* and pick the repo.
+  `render.yaml` is wired up; health check hits `/healthz`.
+- **Fly.io** — `fly launch --copy-config --no-deploy` then `fly deploy`.
+  Uses the included `Dockerfile` and `fly.toml`.
+- **Railway** — `railway up` from the repo root. `railway.json` configures
+  the start command + health check.
+- **Any container host** — `docker build -t mojave-run . && docker run -p 8787:8787 mojave-run`.
+
+Once deployed, copy the public URL (e.g. `https://mojave-run.onrender.com`)
+and edit `index.html`:
+
+```html
+<meta name="mp-server-url" content="wss://mojave-run.onrender.com/ws" />
+```
+
+Redeploy Netlify. The multiplayer screen now pre-fills with the right URL
+and connects automatically. (Players can still override the field
+manually — handy for self-hosting on LAN.)
+
 ## Future (not built)
 
 - **Cloud sync** via Supabase — would need a 3rd Supabase project (currently capped at 2: Cathy + PrecisionCore). Local-first profiles cover 95% of perceived value at 5% complexity.
