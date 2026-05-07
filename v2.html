@@ -32,6 +32,7 @@
     align-items:center;justify-content:center;padding:24px;text-align:center;
     pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
   .overlay.hidden{display:none}
+  .hidden{display:none!important}
   .title{font-size:clamp(32px,9vw,72px);color:var(--blood);
     text-shadow:3px 3px 0 #000,0 0 24px #500;letter-spacing:.1em;
     font-weight:900;margin-bottom:6px;line-height:1}
@@ -58,6 +59,10 @@
   .pause-btn{position:absolute;top:calc(8px + var(--safe-t));right:8px;
     background:rgba(0,0,0,.5);border:1px solid var(--sand);color:var(--bone);
     width:36px;height:36px;font-size:14px;cursor:pointer;z-index:6}
+  .special-btn{position:absolute;right:10px;bottom:calc(18px + var(--safe-b));
+    background:rgba(0,0,0,.6);border:2px solid var(--gold);color:var(--gold);
+    min-width:92px;height:44px;font-size:11px;font-family:inherit;font-weight:bold;
+    letter-spacing:.08em;cursor:pointer;z-index:6;text-transform:uppercase}
   .row-stats{font-size:12px;color:var(--sand);margin:12px 0;line-height:1.7}
   .row-stats b{color:var(--gold)}
   .panel{background:rgba(20,10,5,.95);border:2px solid var(--sand);
@@ -87,10 +92,12 @@
   <canvas id="game" width="800" height="1200"></canvas>
   <div class="scan" id="scan"></div>
   <button class="pause-btn hidden" id="pauseBtn">II</button>
+  <button class="special-btn hidden" id="specialBtn">SPECIAL</button>
   <div class="hud hidden" id="hud">
     <div class="left">
       <div>HP <div class="bar hp"><i id="hpFill" style="width:100%"></i></div></div>
       <div>SCRAP <b id="scrapHud">0</b></div>
+      <div>SPECIAL <b id="specialHud">RAM</b></div>
     </div>
     <div class="right">
       <div>SCORE <b id="scoreHud">0</b></div>
@@ -274,14 +281,21 @@ cvs.addEventListener('pointermove', e=>{
   Input.dx = x - Input.lastX; Input.lastX=x; Input.x=x;
 });
 window.addEventListener('pointerup', ()=>{ Input.down=false; Input.dx=0; });
-window.addEventListener('keydown', e=>{ Input.keys[e.key]=true; if(e.key===' ')Input.down=true; });
+window.addEventListener('keydown', e=>{
+  Input.keys[e.key]=true; if(e.key===' ')Input.down=true;
+  if((e.key==='Shift'||e.key==='n'||e.key==='N') && !Input.specialKey){
+    Input.specialKey=true; tryActivateSpecial();
+  }
+});
 window.addEventListener('keyup', e=>{ Input.keys[e.key]=false; if(e.key===' ')Input.down=false; });
+window.addEventListener('keyup', e=>{ if(e.key==='Shift'||e.key==='n'||e.key==='N')Input.specialKey=false; });
 
 // ---------- Utility ---------------------------------------------------
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const rndi=(a,b)=>Math.floor(rnd(a,b));
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const choose=(arr)=>arr[rndi(0,arr.length)];
+const SPECIAL_NAMES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
 
 // ---------- Particle system + pools ----------------------------------
 class Particle{constructor(){this.alive=false;}
@@ -342,6 +356,9 @@ class Player{
     this.spd = 1 + d.engine*0.12;
     this.special = d.special; // 0 ramming, 1 piercing, 2 nitro, 3 spreadshot
     this.invuln = 0;
+    this.nitro = 0;
+    this.specialCd = 0;
+    this.specialMaxCd = 8;
   }
   update(dt){
     // Steering: hold-anywhere drag toward x; relative dx influences too
@@ -358,6 +375,12 @@ class Player{
     this.fireT -= dt;
     if((Input.down||Input.keys[' ']) && this.fireT<=0){
       this.fire(); this.fireT = this.fireRate;
+    }
+    if(this.specialCd>0) this.specialCd = Math.max(0, this.specialCd-dt);
+    if(this.nitro>0){
+      this.nitro = Math.max(0, this.nitro-dt);
+      Game.speed = Math.max(Game.speed, Game.baseSpeed+340);
+      Game.shake = Math.max(Game.shake, 4);
     }
     if(this.invuln>0) this.invuln -= dt;
   }
@@ -418,6 +441,24 @@ class Player{
   }
 }
 
+function tryActivateSpecial(){
+  const p = Game.player;
+  if(Game.mode!=='play' || !p) return;
+  if(p.special!==2){
+    toast(SPECIAL_NAMES[p.special]+' PASSIVE');
+    return;
+  }
+  if(p.specialCd>0){
+    toast('NITRO CHARGING');
+    return;
+  }
+  p.nitro = 2.4;
+  p.specialCd = p.specialMaxCd;
+  Game.speed += 420;
+  Audio.nitro();
+  toast('NITRO BOOST');
+}
+
 // ---------- Zombies ---------------------------------------------------
 const ZTYPES = {
   walker:{hp:18,spd:90,dmg:10,score:10,col:'#577a3a',w:38,h:48},
@@ -455,7 +496,8 @@ class Zombie{
     // collision with player
     if(this.alive && Math.abs(this.x-player.x) < (this.w+player.w)/2 - 6 &&
        Math.abs(this.y-player.y) < (this.h+player.h)/2 - 6){
-      player.damage(t.dmg);
+      const ramPlating = player.special===0;
+      player.damage(ramPlating ? Math.ceil(t.dmg*0.65) : t.dmg);
       this.kill(false);
     }
     if(this.y > H+80) this.alive=false;
@@ -785,7 +827,11 @@ function update(dt){
       Audio.pickup();
       if(pk.t==='scrap'){ Game.scrap+=5+rndi(0,8); }
       else if(pk.t==='health'){ p.hp = clamp(p.hp+25,0,p.maxHp); }
-      else if(pk.t==='nitro'){ Game.speed += 350; Audio.nitro(); }
+      else if(pk.t==='nitro'){
+        Game.speed += 350;
+        if(p.special===2) p.nitro = Math.max(p.nitro, 1.2);
+        Audio.nitro();
+      }
       else if(pk.t==='multi'){ Game.score += 100; }
       pk.dead=true;
     }
@@ -873,23 +919,34 @@ function draw(){
 const hud = {
   hp: document.getElementById('hpFill'),
   scrap: document.getElementById('scrapHud'),
+  special: document.getElementById('specialHud'),
   score: document.getElementById('scoreHud'),
   sector: document.getElementById('sectorHud'),
   kill: document.getElementById('killHud'),
   el: document.getElementById('hud'),
   pause: document.getElementById('pauseBtn'),
+  specialBtn: document.getElementById('specialBtn'),
 };
 function hudShow(on){
   hud.el.classList.toggle('hidden', !on);
   hud.pause.classList.toggle('hidden', !on);
+  hud.specialBtn.classList.toggle('hidden', !on);
 }
 function updateHud(){
   const p = Game.player;
   hud.hp.style.width = Math.max(0,(p.hp/p.maxHp)*100)+'%';
   hud.scrap.textContent = Game.scrap;
+  hud.special.textContent = SPECIAL_NAMES[p.special];
   hud.score.textContent = Game.score;
   hud.sector.textContent = Game.sector;
   hud.kill.textContent = Game.kills;
+  if(p.special===2){
+    hud.specialBtn.textContent = p.nitro>0 ? 'BOOST' : (p.specialCd>0 ? Math.ceil(p.specialCd)+'S' : 'NITRO');
+    hud.specialBtn.disabled = p.specialCd>0;
+  } else {
+    hud.specialBtn.textContent = SPECIAL_NAMES[p.special];
+    hud.specialBtn.disabled = false;
+  }
 }
 const toastEl=document.getElementById('toast');
 let toastTO=null;
@@ -948,15 +1005,24 @@ document.getElementById('pauseBtn').addEventListener('click', ()=>{
   if(Game.mode!=='play') return;
   Game.mode='pause'; showOverlay('pause');
 });
+document.getElementById('specialBtn').addEventListener('click', e=>{
+  e.stopPropagation();
+  tryActivateSpecial();
+});
 
 // ---------- Garage ---------------------------------------------------
 const UPGRADES = [
   {k:'engine', name:'ENGINE', desc:'Top speed & handling'},
   {k:'armor', name:'ARMOR', desc:'+25 HP per level'},
   {k:'weapon', name:'WEAPON', desc:'Faster fire, +dmg'},
-  {k:'special',name:'SPECIAL', desc:'0:Ram 1:Pierce 2:Nitro 3:Spread'},
+  {k:'special',name:'SPECIAL', desc:'Unlocks weapon and boost perks'},
 ];
 function upgradeCost(lvl){return 50 + lvl*40;}
+function specialDesc(lvl){
+  const current = SPECIAL_NAMES[lvl] || SPECIAL_NAMES[0];
+  const next = SPECIAL_NAMES[lvl+1];
+  return next ? current+' → '+next : current+' active';
+}
 function renderGarage(){
   const list = document.getElementById('upgradesList');
   list.innerHTML = '';
@@ -966,9 +1032,10 @@ function renderGarage(){
     const lvl = d[u.k]||0;
     const cap = u.k==='special' ? 3 : 5;
     const cost = upgradeCost(lvl);
+    const desc = u.k==='special' ? specialDesc(lvl) : u.desc;
     const row = document.createElement('div');
     row.className='upgrade';
-    row.innerHTML = '<span><b>'+u.name+'</b><br><i style="opacity:.7">'+u.desc+'</i></span>'+
+    row.innerHTML = '<span><b>'+u.name+'</b><br><i style="opacity:.7">'+desc+'</i></span>'+
       '<span class="lvl">L'+lvl+'/'+cap+'</span>'+
       '<button class="btn small" '+(lvl>=cap||d.scrap<cost?'disabled style="opacity:.4"':'')+'>'+
       (lvl>=cap?'MAX':'BUY '+cost)+'</button>';
