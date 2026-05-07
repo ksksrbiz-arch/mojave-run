@@ -88,10 +88,16 @@
       scheduleReconnect();
       return;
     }
+    // Replace the active socket. A stale socket whose handlers fire later
+    // will be ignored by the isCurrent() guard below — without it, a fast
+    // rejoin or auto-reconnect could let an old onclose tear down the new
+    // connection (peers cleared, timers killed, status flipped to dropped).
     MP.ws = ws;
     MP.joining = true;
+    const isCurrent = () => MP.ws === ws;
 
     ws.onopen = () => {
+      if (!isCurrent()) return;
       MP._reconnectAttempts = 0;
       MP._lastPongAt = performance.now();
       try {
@@ -106,6 +112,7 @@
     };
 
     ws.onmessage = (evt) => {
+      if (!isCurrent()) return;
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
       if (!msg || !msg.type) return;
@@ -179,6 +186,10 @@
     };
 
     ws.onclose = (evt) => {
+      // If a newer socket has already taken over, this is a stale close
+      // event for the previous attempt — drop it on the floor so it can't
+      // tear down the live connection.
+      if (!isCurrent()) return;
       const wasConnected = MP.connected;
       MP.connected = false;
       MP.joining = false;
@@ -234,6 +245,11 @@
 
   function connect({ url, room, name, vehicleId, color }) {
     disconnect(/*silent*/ true);
+    // disconnect() set _closingByUser to suppress the disconnect toast on the
+    // *previous* socket; we must clear it now so that a failure on the brand
+    // new connection isn't mistaken for a user-initiated close (which would
+    // skip auto-reconnect and surface a misleading "OFF THE GRID" toast).
+    MP._closingByUser = false;
     MP.peers.clear();
     MP.room = (room || 'LOBBY').toUpperCase().slice(0, 12);
     MP.name = (name || 'DRIVER').slice(0, 14);
@@ -248,7 +264,11 @@
 
   function disconnect(silent) {
     MP._wantConnected = false;
-    MP._closingByUser = true;
+    // Only flag user-close when there's actually a live socket whose onclose
+    // will consume the flag. Otherwise the flag would leak forward and make
+    // the next failed connection look user-initiated.
+    const hadSocket = !!MP.ws && MP.ws.readyState !== 3;
+    MP._closingByUser = hadSocket;
     clearTimers();
     if (MP.ws) {
       try { MP.ws.close(); } catch (_) {}
@@ -259,7 +279,11 @@
     MP.peers.clear();
     MP.pingMs = null;
     MP._pendingState = null;
-    if (!silent) setStatus('disconnected', 'OFF THE GRID');
+    // When there's no live socket the close handler won't fire, so we have
+    // to emit the disconnected status ourselves. With a live socket the
+    // onclose path handles it (and the _closingByUser flag suppresses a
+    // duplicate "dropped" toast).
+    if (!silent && !hadSocket) setStatus('disconnected', 'OFF THE GRID');
   }
 
   function sendState(s) {
