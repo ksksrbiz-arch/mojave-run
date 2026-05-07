@@ -63,6 +63,7 @@
     background:rgba(0,0,0,.6);border:2px solid var(--gold);color:var(--gold);
     min-width:92px;height:44px;font-size:11px;font-family:inherit;font-weight:bold;
     letter-spacing:.08em;cursor:pointer;z-index:6;text-transform:uppercase}
+  .special-btn:disabled{opacity:.55;cursor:default}
   .row-stats{font-size:12px;color:var(--sand);margin:12px 0;line-height:1.7}
   .row-stats b{color:var(--gold)}
   .panel{background:rgba(20,10,5,.95);border:2px solid var(--sand);
@@ -287,8 +288,10 @@ window.addEventListener('keydown', e=>{
     Input.specialKey=true; tryActivateSpecial();
   }
 });
-window.addEventListener('keyup', e=>{ Input.keys[e.key]=false; if(e.key===' ')Input.down=false; });
-window.addEventListener('keyup', e=>{ if(e.key==='Shift'||e.key==='n'||e.key==='N')Input.specialKey=false; });
+window.addEventListener('keyup', e=>{
+  Input.keys[e.key]=false; if(e.key===' ')Input.down=false;
+  if(e.key==='Shift'||e.key==='n'||e.key==='N')Input.specialKey=false;
+});
 
 // ---------- Utility ---------------------------------------------------
 const rnd=(a,b)=>a+Math.random()*(b-a);
@@ -941,11 +944,11 @@ function updateHud(){
   hud.sector.textContent = Game.sector;
   hud.kill.textContent = Game.kills;
   if(p.special===2){
-    hud.specialBtn.textContent = p.nitro>0 ? 'BOOST' : (p.specialCd>0 ? Math.ceil(p.specialCd)+'S' : 'NITRO');
+    hud.specialBtn.textContent = p.nitro>0 ? 'NITRO ACTIVE' : (p.specialCd>0 ? 'NITRO '+Math.ceil(p.specialCd)+'S' : 'NITRO READY');
     hud.specialBtn.disabled = p.specialCd>0;
   } else {
     hud.specialBtn.textContent = SPECIAL_NAMES[p.special];
-    hud.specialBtn.disabled = false;
+    hud.specialBtn.disabled = true;
   }
 }
 const toastEl=document.getElementById('toast');
