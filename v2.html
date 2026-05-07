@@ -31,7 +31,6 @@
   .overlay{position:absolute;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:24px;text-align:center;
     pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
-  .overlay.hidden{display:none}
   .hidden{display:none!important}
   .title{font-size:clamp(32px,9vw,72px);color:var(--blood);
     text-shadow:3px 3px 0 #000,0 0 24px #500;letter-spacing:.1em;
@@ -284,13 +283,13 @@ cvs.addEventListener('pointermove', e=>{
 window.addEventListener('pointerup', ()=>{ Input.down=false; Input.dx=0; });
 window.addEventListener('keydown', e=>{
   Input.keys[e.key]=true; if(e.key===' ')Input.down=true;
-  if((e.key==='Shift'||e.key==='n'||e.key==='N') && !Input.specialKey){
+  if((e.key==='n'||e.key==='N') && !Input.specialKey){
     Input.specialKey=true; tryActivateSpecial();
   }
 });
 window.addEventListener('keyup', e=>{
   Input.keys[e.key]=false; if(e.key===' ')Input.down=false;
-  if(e.key==='Shift'||e.key==='n'||e.key==='N')Input.specialKey=false;
+  if(e.key==='n'||e.key==='N')Input.specialKey=false;
 });
 
 // ---------- Utility ---------------------------------------------------
@@ -299,6 +298,17 @@ const rndi=(a,b)=>Math.floor(rnd(a,b));
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const choose=(arr)=>arr[rndi(0,arr.length)];
 const SPECIAL_NAMES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
+const NITRO_SPEED_FLOOR = 340;
+const NITRO_ACTIVATION_BURST = 420;
+const NITRO_PICKUP_BURST = 350;
+const NITRO_DURATION = 2.4;
+const NITRO_PICKUP_DURATION = 1.2;
+function specialName(lvl){ return SPECIAL_NAMES[lvl] || SPECIAL_NAMES[0]; }
+function nitroButtonLabel(p){
+  if(p.nitro>0) return 'NITRO ACTIVE';
+  if(p.specialCd>0) return 'NITRO '+Math.ceil(p.specialCd)+'S';
+  return 'NITRO READY';
+}
 
 // ---------- Particle system + pools ----------------------------------
 class Particle{constructor(){this.alive=false;}
@@ -382,7 +392,7 @@ class Player{
     if(this.specialCd>0) this.specialCd = Math.max(0, this.specialCd-dt);
     if(this.nitro>0){
       this.nitro = Math.max(0, this.nitro-dt);
-      Game.speed = Math.max(Game.speed, Game.baseSpeed+340);
+      Game.speed = Math.max(Game.speed, Game.baseSpeed+NITRO_SPEED_FLOOR);
       Game.shake = Math.max(Game.shake, 4);
     }
     if(this.invuln>0) this.invuln -= dt;
@@ -448,16 +458,16 @@ function tryActivateSpecial(){
   const p = Game.player;
   if(Game.mode!=='play' || !p) return;
   if(p.special!==2){
-    toast(SPECIAL_NAMES[p.special]+' PASSIVE');
+    toast(specialName(p.special)+' PASSIVE');
     return;
   }
   if(p.specialCd>0){
     toast('NITRO CHARGING');
     return;
   }
-  p.nitro = 2.4;
+  p.nitro = NITRO_DURATION;
   p.specialCd = p.specialMaxCd;
-  Game.speed += 420;
+  Game.speed += NITRO_ACTIVATION_BURST;
   Audio.nitro();
   toast('NITRO BOOST');
 }
@@ -831,8 +841,8 @@ function update(dt){
       if(pk.t==='scrap'){ Game.scrap+=5+rndi(0,8); }
       else if(pk.t==='health'){ p.hp = clamp(p.hp+25,0,p.maxHp); }
       else if(pk.t==='nitro'){
-        Game.speed += 350;
-        if(p.special===2) p.nitro = Math.max(p.nitro, 1.2);
+        Game.speed += NITRO_PICKUP_BURST;
+        if(p.special===2) p.nitro = Math.max(p.nitro, NITRO_PICKUP_DURATION);
         Audio.nitro();
       }
       else if(pk.t==='multi'){ Game.score += 100; }
@@ -939,15 +949,15 @@ function updateHud(){
   const p = Game.player;
   hud.hp.style.width = Math.max(0,(p.hp/p.maxHp)*100)+'%';
   hud.scrap.textContent = Game.scrap;
-  hud.special.textContent = SPECIAL_NAMES[p.special];
+  hud.special.textContent = specialName(p.special);
   hud.score.textContent = Game.score;
   hud.sector.textContent = Game.sector;
   hud.kill.textContent = Game.kills;
   if(p.special===2){
-    hud.specialBtn.textContent = p.nitro>0 ? 'NITRO ACTIVE' : (p.specialCd>0 ? 'NITRO '+Math.ceil(p.specialCd)+'S' : 'NITRO READY');
+    hud.specialBtn.textContent = nitroButtonLabel(p);
     hud.specialBtn.disabled = p.specialCd>0;
   } else {
-    hud.specialBtn.textContent = SPECIAL_NAMES[p.special];
+    hud.specialBtn.textContent = specialName(p.special);
     hud.specialBtn.disabled = true;
   }
 }
@@ -1022,7 +1032,7 @@ const UPGRADES = [
 ];
 function upgradeCost(lvl){return 50 + lvl*40;}
 function specialDesc(lvl){
-  const current = SPECIAL_NAMES[lvl] || SPECIAL_NAMES[0];
+  const current = specialName(lvl);
   const next = SPECIAL_NAMES[lvl+1];
   return next ? current+' → '+next : current+' active';
 }
