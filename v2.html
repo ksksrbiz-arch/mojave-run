@@ -587,11 +587,13 @@ class Zombie{
   kill(byShot){
     this.alive=false;
     Game.kills++; SAVE.totalKills++;
+    // Apply combo multiplier to the score for this kill BEFORE incrementing,
+    // so the first kill of a streak scores at 1.0x, not 1.1x.
+    Game.score += Math.floor(this.t.score * comboMultiplier(Game.combo));
     if(byShot){
       Game.combo++;
       Game.comboT = COMBO_WINDOW;
     }
-    Game.score += Math.floor(this.t.score * comboMultiplier(Game.combo));
     if(this.t.boss){
       Game.scrap += 200;
       Game.shake = Math.max(Game.shake, 30);
@@ -808,10 +810,7 @@ function applySector(){
 
 function nextSector(){
   // Block advancement until current boss is defeated.
-  if(Game.boss && Game.boss.alive){
-    Game.sectorTime = Game.sectorTarget; // keep gauntlet timer pinned
-    return;
-  }
+  if(Game.boss && Game.boss.alive) return;
   Game.sector++;
   if(Game.modeName==='gauntlet' && Game.sector>SECTORS.length){
     toast('GAUNTLET COMPLETE!'); SAVE.gauntletProgress = SECTORS.length+1; persist();
