@@ -31,7 +31,7 @@
   .overlay{position:absolute;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:24px;text-align:center;
     pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
-  .hidden{display:none!important}
+  .hidden{display:none}
   .title{font-size:clamp(32px,9vw,72px);color:var(--blood);
     text-shadow:3px 3px 0 #000,0 0 24px #500;letter-spacing:.1em;
     font-weight:900;margin-bottom:6px;line-height:1}
@@ -303,6 +303,7 @@ const NITRO_ACTIVATION_BURST = 420;
 const NITRO_PICKUP_BURST = 350;
 const NITRO_DURATION = 2.4;
 const NITRO_PICKUP_DURATION = 1.2;
+const RAM_PLATING_DAMAGE_FACTOR = 0.65;
 function specialName(lvl){ return SPECIAL_NAMES[lvl] || SPECIAL_NAMES[0]; }
 function nitroButtonLabel(p){
   if(p.nitro>0) return 'NITRO ACTIVE';
@@ -389,7 +390,7 @@ class Player{
     if((Input.down||Input.keys[' ']) && this.fireT<=0){
       this.fire(); this.fireT = this.fireRate;
     }
-    if(this.specialCd>0) this.specialCd = Math.max(0, this.specialCd-dt);
+    if(this.specialCd>0) this.specialCd -= dt;
     if(this.nitro>0){
       this.nitro = Math.max(0, this.nitro-dt);
       Game.speed = Math.max(Game.speed, Game.baseSpeed+NITRO_SPEED_FLOOR);
@@ -510,7 +511,7 @@ class Zombie{
     if(this.alive && Math.abs(this.x-player.x) < (this.w+player.w)/2 - 6 &&
        Math.abs(this.y-player.y) < (this.h+player.h)/2 - 6){
       const ramPlating = player.special===0;
-      player.damage(ramPlating ? Math.ceil(t.dmg*0.65) : t.dmg);
+      player.damage(ramPlating ? Math.ceil(t.dmg*RAM_PLATING_DAMAGE_FACTOR) : t.dmg);
       this.kill(false);
     }
     if(this.y > H+80) this.alive=false;
