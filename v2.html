@@ -31,7 +31,10 @@
   .overlay{position:absolute;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:24px;text-align:center;
     pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
-  .overlay.hidden,.hud.hidden,.pause-btn.hidden,.special-btn.hidden{display:none}
+  .overlay.hidden{display:none}
+  .hud.hidden{display:none}
+  .pause-btn.hidden{display:none}
+  .special-btn.hidden{display:none}
   .title{font-size:clamp(32px,9vw,72px);color:var(--blood);
     text-shadow:3px 3px 0 #000,0 0 24px #500;letter-spacing:.1em;
     font-weight:900;margin-bottom:6px;line-height:1}
@@ -267,7 +270,7 @@ const Audio = (()=>{
 })();
 
 // ---------- Input -----------------------------------------------------
-const Input = { x:null, down:false, lastX:0, dx:0, keys:{} };
+const Input = { x:null, down:false, lastX:0, dx:0, keys:{}, specialKeyDown:false };
 cvs.addEventListener('pointerdown', e=>{
   Audio.resume(); Input.down=true;
   const r=cvs.getBoundingClientRect();
@@ -283,13 +286,13 @@ cvs.addEventListener('pointermove', e=>{
 window.addEventListener('pointerup', ()=>{ Input.down=false; Input.dx=0; });
 window.addEventListener('keydown', e=>{
   Input.keys[e.key]=true; if(e.key===' ')Input.down=true;
-  if((e.key==='n'||e.key==='N') && !Input.specialKey){
-    Input.specialKey=true; tryActivateSpecial();
+  if((e.key==='n'||e.key==='N') && !Input.specialKeyDown){
+    Input.specialKeyDown=true; tryActivateSpecial();
   }
 });
 window.addEventListener('keyup', e=>{
   Input.keys[e.key]=false; if(e.key===' ')Input.down=false;
-  if(e.key==='n'||e.key==='N')Input.specialKey=false;
+  if(e.key==='n'||e.key==='N')Input.specialKeyDown=false;
 });
 
 // ---------- Utility ---------------------------------------------------
