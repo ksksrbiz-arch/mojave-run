@@ -256,8 +256,8 @@ let W = 0, H = 0, DPR = 1;
 
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
-  W = cvs.clientWidth = window.innerWidth;
-  H = cvs.clientHeight = window.innerHeight;
+  W = window.innerWidth;
+  H = window.innerHeight;
   cvs.width  = Math.floor(W * DPR);
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
