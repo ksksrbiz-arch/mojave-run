@@ -300,14 +300,16 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const rndi=(a,b)=>Math.floor(rnd(a,b));
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const choose=(arr)=>arr[rndi(0,arr.length)];
-const SPECIAL_TIER_NAMES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
+const SPECIAL_RAM_PLATING = 0;
+const SPECIAL_NITRO = 2;
+const SPECIAL_ABILITIES = ['RAM PLATING','PIERCING','NITRO','SPREADSHOT'];
 const NITRO_SPEED_FLOOR = 340;
 const NITRO_ACTIVATION_BURST = 420;
 const NITRO_PICKUP_BURST = 350;
 const NITRO_DURATION = 2.4;
 const NITRO_PICKUP_DURATION = 1.2;
 const RAM_PLATING_DAMAGE_FACTOR = 0.65;
-function specialName(lvl){ return SPECIAL_TIER_NAMES[lvl] || SPECIAL_TIER_NAMES[0]; }
+function specialName(lvl){ return SPECIAL_ABILITIES[lvl] || 'UNKNOWN'; }
 function nitroButtonLabel(p){
   if(p.nitro>0) return 'NITRO ACTIVE';
   if(p.specialCd>0) return 'NITRO '+Math.ceil(p.specialCd)+'S';
@@ -461,7 +463,7 @@ class Player{
 function tryActivateSpecial(){
   const p = Game.player;
   if(Game.mode!=='play' || !p) return;
-  if(p.special!==2){
+  if(p.special!==SPECIAL_NITRO){
     toast(specialName(p.special)+' PASSIVE');
     return;
   }
@@ -513,7 +515,7 @@ class Zombie{
     // collision with player
     if(this.alive && Math.abs(this.x-player.x) < (this.w+player.w)/2 - 6 &&
        Math.abs(this.y-player.y) < (this.h+player.h)/2 - 6){
-      const ramPlating = player.special===0;
+      const ramPlating = player.special===SPECIAL_RAM_PLATING;
       player.damage(ramPlating ? Math.ceil(t.dmg*RAM_PLATING_DAMAGE_FACTOR) : t.dmg);
       this.kill(false);
     }
@@ -846,7 +848,7 @@ function update(dt){
       else if(pk.t==='health'){ p.hp = clamp(p.hp+25,0,p.maxHp); }
       else if(pk.t==='nitro'){
         Game.speed += NITRO_PICKUP_BURST;
-        if(p.special===2) p.nitro = Math.max(p.nitro, NITRO_PICKUP_DURATION);
+        if(p.special===SPECIAL_NITRO) p.nitro = Math.max(p.nitro, NITRO_PICKUP_DURATION);
         Audio.nitro();
       }
       else if(pk.t==='multi'){ Game.score += 100; }
@@ -957,7 +959,7 @@ function updateHud(){
   hud.score.textContent = Game.score;
   hud.sector.textContent = Game.sector;
   hud.kill.textContent = Game.kills;
-  if(p.special===2){
+  if(p.special===SPECIAL_NITRO){
     hud.specialBtn.textContent = nitroButtonLabel(p);
     hud.specialBtn.disabled = p.specialCd>0;
   } else {
@@ -1037,7 +1039,7 @@ const UPGRADES = [
 function upgradeCost(lvl){return 50 + lvl*40;}
 function specialDesc(lvl){
   const current = specialName(lvl);
-  const next = SPECIAL_TIER_NAMES[lvl+1];
+  const next = SPECIAL_ABILITIES[lvl+1];
   return next ? current+' → '+next : current+' active';
 }
 function renderGarage(){
