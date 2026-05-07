@@ -11,13 +11,18 @@ A wasteland arcade driver. Survive the Mojave.
 **Touch (mobile/tablet):**
 - Drag anywhere to steer (truck follows your finger)
 - Hold to auto-fire
+- Tap the title mode panel to switch Solo / Co-op / PvP
+- Co-op / PvP: left half controls P1, right half controls P2
 - Tap to start / restart / unpause
 
 **Keyboard (desktop):**
 | Key | Action |
 |---|---|
-| `◄ ►` / `A D` | Steer |
-| `Space` / `Z` / `X` | Fire |
+| `M` / `C` or `1` `2` `3` | Switch Solo / Co-op / PvP on title |
+| `◄ ►` / `A D` | Solo steer |
+| `Space` / `Z` / `X` | Solo fire |
+| `A D` + `Space` | P1 steer/fire in Co-op and PvP |
+| `◄ ►` + `Enter` / `Shift` / `/` | P2 steer/fire in Co-op and PvP |
 | `R` / `Enter` | Restart |
 | `P` | Pause |
 | `F` | Toggle fullscreen |
@@ -38,6 +43,9 @@ A wasteland arcade driver. Survive the Mojave.
 
 ## Mechanics
 
+- **Solo Run** — classic one-truck survival.
+- **Co-op Convoy** — two local trucks share the run and score; the run ends when both are wrecked.
+- **PvP Duel** — two local trucks fight each other while the wasteland keeps spawning hazards; last truck rolling wins.
 - **Scrap (gold diamond)** — +75 score
 - **Repair (green cross)** — +30 hull
 - **Wrecked car** — 35 dmg on contact
@@ -52,6 +60,7 @@ Best score persists in `localStorage`.
 - Vanilla JS + HTML5 Canvas
 - WebAudio synthesized SFX (no asset files)
 - Pointer Events for unified input
+- Local same-screen multiplayer with split touch zones
 - Wake Lock API
 - Fullscreen API + Screen Orientation API
 - PWA (manifest + apple-touch-icon)
