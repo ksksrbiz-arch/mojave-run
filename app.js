@@ -460,12 +460,13 @@ document.addEventListener('visibilitychange', () => {
 // GAME STATE
 // ============================================================
 const Game = {
-  state: 'menu',          // 'menu' | 'playing' | 'gameover' | 'victory'
+  state: 'menu',          // 'menu' | 'loading' | 'playing' | 'dying' | 'gameover' | 'victory'
   paused: false,
   mode: null,             // 'classic' | 'gauntlet' | 'timeattack'
   level: null,            // gauntlet level number
   levelData: null,
   t: 0,
+  animT: 0,               // always-advancing clock for menu/idle animations
   // run stats
   score: 0,
   scrapEarned: 0,
@@ -480,6 +481,7 @@ const Game = {
   pickupTimer: 0,
   shake: 0,
   flash: 0,
+  hitFlash: 0,            // brief vehicle hit indicator
   hintTime: 0,
   laneOffset: 0,
   // theme
@@ -497,11 +499,24 @@ const Game = {
   particles: [],
   shockwaves: [],
   decor: [],
+  popups: [],             // floating score / scrap text
+  wreck: null,            // remains of the player after death
   // boss
   boss: null,
+  bossWarning: 0,         // seconds remaining for "BOSS INCOMING" warning
+  // sequences (animations that span frames)
+  loadingT: 0,
+  loadingDur: 0,
+  deathSeq: null,         // { t, dur, x, y }
+  bossDeathSeq: null,     // { t, dur, x, y, w, h, color, levelClear }
+  victorySeq: null,       // { t, dur, kind }
   // background fly-ins
   bgScroll: 0,
 };
+
+function addPopup(text, x, y, color = '#f5d76e', size = 14) {
+  Game.popups.push({ text, x, y, vy: -60, life: 1.0, max: 1.0, color, size });
+}
 
 function makeDecor(yOverride) {
   const { x0, x1 } = roadBounds();
@@ -526,7 +541,7 @@ function startRun(mode, level) {
   Game.mode = mode;
   Game.level = level || null;
   Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
-  Game.state = 'playing';
+  Game.state = 'loading';
   Game.paused = false;
   Game.t = 0;
   Game.score = 0;
@@ -534,17 +549,18 @@ function startRun(mode, level) {
   Game.distance = 0;
   Game.kills = 0;
   const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1);
-  Game.speed = baseSpeed; Game.targetSpeed = baseSpeed;
+  Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
   Game.maxHealth = Math.round(stats.maxHp);
   Game.health = Game.maxHealth;
   Game.fireCooldown = 0;
   Game.spawnTimer = 0.6;
   Game.pickupTimer = 3;
-  Game.shake = 0; Game.flash = 0;
+  Game.shake = 0; Game.flash = 0; Game.hitFlash = 0;
   Game.hintTime = IS_TOUCH ? 4.5 : 0;
   Game.bullets.length = 0; Game.enemies.length = 0; Game.obstacles.length = 0;
   Game.pickups.length = 0; Game.enemyBullets.length = 0;
   Game.particles.length = 0; Game.shockwaves.length = 0;
+  Game.popups.length = 0;
   Game.decor.length = 0;
   Game.laneOffset = 0;
   Game.isNight = !!(Game.levelData && Game.levelData.night);
@@ -552,26 +568,42 @@ function startRun(mode, level) {
   Game.vehicle = v;
   Game.vehicleStats = stats;
   Game.player = {
-    x: W * 0.5, y: H - 110, w: 42, h: 64, vx: 0,
+    x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
   };
   Game.boss = null;
+  Game.bossWarning = 0;
+  Game.wreck = null;
+  Game.deathSeq = null;
+  Game.bossDeathSeq = null;
+  Game.victorySeq = null;
   Game.bgScroll = 0;
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
-  // Spawn boss right away in boss levels
-  if (Game.levelData && Game.levelData.obj === 'boss') {
-    spawnBoss(Game.levelData.boss);
-    SFX.boss();
-  } else {
-    SFX.start();
-  }
+  // loading sequence — vehicle drives in, level info displays
+  Game.loadingT = 0;
+  Game.loadingDur = 1.7;
+  SFX.start();
   requestWakeLock();
-  pauseBtn.classList.add('show');
+  pauseBtn.classList.remove('show');
   fsBtn.classList.add('hidden');
   UI.hideAllScreens();
 }
 
+function beginPlaying() {
+  Game.state = 'playing';
+  Game.player.x = W * 0.5;
+  Game.player.y = H - 110;
+  Game.player.vx = 0;
+  pauseBtn.classList.add('show');
+  // Spawn boss right away in boss levels
+  if (Game.levelData && Game.levelData.obj === 'boss') {
+    spawnBoss(Game.levelData.boss);
+    Game.bossWarning = 2.4;
+    SFX.boss();
+  }
+}
+
 function endRun(reason /* 'death' | 'victory' | 'time' */) {
-  if (Game.state !== 'playing') return;
+  if (Game.state !== 'playing' && Game.state !== 'dying' && Game.state !== 'victory') return;
   Game.state = reason === 'victory' ? 'victory' : 'gameover';
   releaseWakeLock();
   pauseBtn.classList.remove('show');
@@ -590,21 +622,41 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     level: Game.level,
     victory: reason === 'victory',
   });
-  if (reason === 'victory') SFX.victory(); else SFX.death();
+  // SFX already played by death/victory sequences; only play here for time-out
+  if (reason === 'time') SFX.victory();
   // small delay to let final FX play
-  setTimeout(() => UI.showResults(reason), 1100);
+  setTimeout(() => UI.showResults(reason), reason === 'death' ? 700 : 1100);
+}
+
+function triggerVictory(kind /* 'objective' | 'time' */) {
+  if (Game.state !== 'playing') return;
+  Game.victorySeq = { t: 0, dur: 1.6, kind };
+  Game.state = 'victory';
+  releaseWakeLock();
+  pauseBtn.classList.remove('show');
+  if (kind !== 'time') SFX.victory();
+  // burst sparks above the player
+  if (Game.player) {
+    for (let i = 0; i < 8; i++) {
+      emit(Game.player.x + rand(-30, 30), Game.player.y - 40 + rand(-20, 20), 4,
+        { color:'#fff3b0', speed:280, life:0.8, size:4 });
+    }
+    shockwave(Game.player.x, Game.player.y - 40, 'rgba(255,243,176,0.4)', 160);
+  }
 }
 
 // Check level objective each frame
 function checkObjective() {
   if (Game.mode !== 'gauntlet' || !Game.levelData) return;
   const L = Game.levelData;
-  if (L.obj === 'survive' && Game.t >= L.target) endRun('victory');
-  else if (L.obj === 'kills' && Game.kills >= L.target) endRun('victory');
-  else if (L.obj === 'distance' && Game.distance >= L.target) endRun('victory');
-  // boss: handled by boss death
+  if (L.obj === 'survive' && Game.t >= L.target) triggerVictory('objective');
+  else if (L.obj === 'kills' && Game.kills >= L.target) triggerVictory('objective');
+  else if (L.obj === 'distance' && Game.distance >= L.target) triggerVictory('objective');
+  // boss: handled by boss death sequence
   // Time attack: 60s timer
-  if (Game.mode === 'timeattack' && Game.t >= 60) endRun('time');
+  if (Game.mode === 'timeattack' && Game.t >= 60) {
+    triggerVictory('time');
+  }
 }
 
 // ============================================================
@@ -729,12 +781,18 @@ function updateBoss(dt) {
         emit(b.x, b.y, 30, { color:'#ffd86b', speed:360, life:0.8, size:4 });
         shockwave(b.x, b.y, 'rgba(255,180,80,0.7)', 200);
         Game.shake = 1.4;
-        Game.score += 1500 * (Game.levelData ? Game.levelData.diff : 1);
+        const bossScore = 1500 * (Game.levelData ? Game.levelData.diff : 1);
+        Game.score += bossScore;
         Game.kills += 1;
+        addPopup('+' + Math.floor(bossScore), b.x, b.y - 20, '#ffd86b', 22);
+        const isBossLevel = !!(Game.levelData && Game.levelData.obj === 'boss');
+        Game.bossDeathSeq = {
+          t: 0, dur: isBossLevel ? 2.0 : 1.4,
+          x: b.x, y: b.y, w: b.w, h: b.h,
+          color: b.color, twin: b.twin, twinX: b.twinX,
+          levelClear: isBossLevel,
+        };
         Game.boss = null;
-        if (Game.levelData && Game.levelData.obj === 'boss') {
-          setTimeout(() => endRun('victory'), 800);
-        }
         return;
       } else {
         SFX.hit();
@@ -790,10 +848,217 @@ function fireBossPattern(b) {
 // ============================================================
 // UPDATE
 // ============================================================
+function updateLoading(dt) {
+  // animate background scrolling and player driving onto the road
+  Game.loadingT += dt;
+  Game.bgScroll += Game.speed * dt * 0.3;
+  Game.laneOffset = (Game.laneOffset + Game.speed * dt) % 60;
+  // ease the player from offscreen up to position
+  const k = clamp(Game.loadingT / Game.loadingDur, 0, 1);
+  // ease-out cubic
+  const eased = 1 - Math.pow(1 - k, 3);
+  const startY = H + 100, endY = H - 110;
+  Game.player.y = startY + (endY - startY) * eased;
+  Game.player.x = W * 0.5;
+  // exhaust trail during entry
+  if (Math.random() < 0.85) {
+    emit(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1,
+      { color:'rgba(120,90,60,0.5)', speed:50, life:0.45, size:5, spread:Math.PI/4 });
+    emit(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1,
+      { color:'rgba(120,90,60,0.5)', speed:50, life:0.45, size:5, spread:Math.PI/4 });
+  }
+  // drift decor
+  for (const d of Game.decor) d.y += Game.speed * dt;
+  for (let i = Game.decor.length - 1; i >= 0; i--) {
+    if (Game.decor[i].y > H + 30) Game.decor.splice(i, 1);
+  }
+  while (Game.decor.length < 36) Game.decor.push(makeDecor());
+  // particle decay
+  for (let i = Game.particles.length - 1; i >= 0; i--) {
+    const pr = Game.particles[i];
+    pr.x += pr.vx * dt;
+    pr.y += pr.vy * dt + Game.speed * dt * 0.4;
+    pr.vx *= 0.96; pr.vy *= 0.96;
+    pr.life -= dt;
+    if (pr.life <= 0) Game.particles.splice(i, 1);
+  }
+  if (Game.loadingT >= Game.loadingDur) beginPlaying();
+}
+
+function updateDying(dt) {
+  Game.t += dt;
+  Game.shake = Math.max(0, Game.shake - dt * 1.6);
+  Game.flash = Math.max(0, Game.flash - dt * 2);
+  // wreck spin/drift
+  if (Game.wreck) {
+    Game.wreck.t += dt;
+    Game.wreck.rot += Game.wreck.rotV * dt;
+    Game.wreck.x += Game.wreck.vx * dt;
+    Game.wreck.vx *= 0.96;
+    Game.wreck.y += Game.speed * dt * 0.2;
+    // smoke
+    if (Math.random() < 0.7) {
+      emit(Game.wreck.x + rand(-8, 8), Game.wreck.y + rand(-12, 12), 1,
+        { color:'rgba(60,40,30,0.55)', speed:40, life:1.2, size:7, spread:Math.PI*2 });
+    }
+  }
+  // staged explosions
+  const ds = Game.deathSeq;
+  ds.t += dt;
+  // secondary booms at predictable beats
+  for (const beat of [0.35, 0.7, 1.05, 1.4]) {
+    if (ds.t - dt < beat && ds.t >= beat) {
+      const ox = ds.x + rand(-18, 18), oy = ds.y + rand(-22, 22);
+      emit(ox, oy, 20, { color:'#ff8a3d', speed:280, life:0.7, size:4 });
+      emit(ox, oy, 10, { color:'#ffd86b', speed:200, life:0.5, size:3 });
+      shockwave(ox, oy, 'rgba(255,140,60,0.4)', 80);
+      Game.shake = Math.max(Game.shake, 0.55);
+      SFX.explode();
+    }
+  }
+  // scroll bg slow during death
+  Game.bgScroll += Game.speed * dt * 0.15;
+  Game.laneOffset = (Game.laneOffset + Game.speed * dt * 0.5) % 60;
+  // particles
+  for (let i = Game.particles.length - 1; i >= 0; i--) {
+    const pr = Game.particles[i];
+    pr.x += pr.vx * dt;
+    pr.y += pr.vy * dt + Game.speed * dt * 0.2;
+    if (pr.gravity) pr.vy += pr.gravity * dt;
+    pr.vx *= 0.96; pr.vy *= 0.96;
+    pr.life -= dt;
+    if (pr.life <= 0) Game.particles.splice(i, 1);
+  }
+  for (let i = Game.shockwaves.length - 1; i >= 0; i--) {
+    const s = Game.shockwaves[i];
+    s.life -= dt;
+    s.r = s.maxR * (1 - s.life / s.max);
+    if (s.life <= 0) Game.shockwaves.splice(i, 1);
+  }
+  for (let i = Game.popups.length - 1; i >= 0; i--) {
+    const pp = Game.popups[i];
+    pp.y += pp.vy * dt; pp.vy *= 0.94;
+    pp.life -= dt;
+    if (pp.life <= 0) Game.popups.splice(i, 1);
+  }
+  // decor scroll
+  for (const d of Game.decor) d.y += Game.speed * dt * 0.4;
+  for (let i = Game.decor.length - 1; i >= 0; i--) {
+    if (Game.decor[i].y > H + 30) Game.decor.splice(i, 1);
+  }
+  while (Game.decor.length < 36) Game.decor.push(makeDecor());
+  if (ds.t >= ds.dur) {
+    endRun('death');
+  }
+}
+
+function updateBossDeath(dt) {
+  const seq = Game.bossDeathSeq;
+  seq.t += dt;
+  // staged explosions across the boss body
+  for (const beat of [0.18, 0.42, 0.72, 1.05]) {
+    if (seq.t - dt < beat && seq.t >= beat) {
+      const ox = seq.x + rand(-seq.w/2, seq.w/2);
+      const oy = seq.y + rand(-seq.h/2, seq.h/2);
+      emit(ox, oy, 28, { color:'#ff6a2b', speed:380, life:0.9, size:5 });
+      emit(ox, oy, 14, { color:'#ffd86b', speed:280, life:0.7, size:4 });
+      shockwave(ox, oy, 'rgba(255,180,80,0.55)', 120);
+      Game.shake = Math.max(Game.shake, 0.7);
+      SFX.explode();
+    }
+  }
+  // final bigger boom
+  if (seq.t - dt < seq.dur * 0.65 && seq.t >= seq.dur * 0.65) {
+    emit(seq.x, seq.y, 70, { color:'#ff8a3d', speed:520, life:1.2, size:6 });
+    emit(seq.x, seq.y, 30, { color:'#fff3b0', speed:400, life:0.9, size:5 });
+    shockwave(seq.x, seq.y, 'rgba(255,200,120,0.7)', 240);
+    Game.shake = 1.6;
+    Game.flash = 0.6;
+    SFX.bigBoom();
+  }
+  if (seq.t >= seq.dur) {
+    Game.bossDeathSeq = null;
+    if (seq.levelClear) {
+      // start victory sequence rather than ending immediately
+      Game.victorySeq = { t: 0, dur: 1.8, kind: 'boss' };
+      Game.state = 'victory';
+      releaseWakeLock();
+      pauseBtn.classList.remove('show');
+      SFX.victory();
+    }
+  }
+}
+
+function updateVictory(dt) {
+  Game.t += dt;
+  Game.shake = Math.max(0, Game.shake - dt * 1.6);
+  Game.flash = Math.max(0, Game.flash - dt * 2);
+  // continue any boss death explosions during the victory cinematic
+  if (Game.bossDeathSeq) updateBossDeath(dt);
+  // background scrolls slower as the run "ends"
+  Game.speed += (Game.targetSpeed * 0.4 - Game.speed) * Math.min(1, dt * 0.6);
+  Game.bgScroll += Game.speed * dt * 0.3;
+  Game.laneOffset = (Game.laneOffset + Game.speed * dt) % 60;
+  // gentle exhaust on player
+  if (Game.player && Math.random() < 0.5) {
+    emit(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1,
+      { color:'rgba(120,90,60,0.5)', speed:30, life:0.5, size:5, spread:Math.PI/4 });
+    emit(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1,
+      { color:'rgba(120,90,60,0.5)', speed:30, life:0.5, size:5, spread:Math.PI/4 });
+  }
+  // celebratory sparks from above
+  const seq = Game.victorySeq;
+  if (seq) {
+    seq.t += dt;
+    if (Math.random() < 0.6) {
+      emit(rand(W*0.2, W*0.8), rand(0, H*0.3), 1,
+        { color:'#fff3b0', speed:120, life:1.0, size:3, gravity: 80 });
+    }
+    if (seq.t >= seq.dur) {
+      Game.victorySeq = null;
+      endRun('victory');
+    }
+  }
+  // tick particles / popups / shockwaves
+  for (let i = Game.particles.length - 1; i >= 0; i--) {
+    const pr = Game.particles[i];
+    pr.x += pr.vx * dt;
+    pr.y += pr.vy * dt + Game.speed * dt * 0.4;
+    if (pr.gravity) pr.vy += pr.gravity * dt;
+    pr.vx *= 0.96; pr.vy *= 0.96;
+    pr.life -= dt;
+    if (pr.life <= 0) Game.particles.splice(i, 1);
+  }
+  for (let i = Game.shockwaves.length - 1; i >= 0; i--) {
+    const s = Game.shockwaves[i];
+    s.life -= dt;
+    s.r = s.maxR * (1 - s.life / s.max);
+    if (s.life <= 0) Game.shockwaves.splice(i, 1);
+  }
+  for (let i = Game.popups.length - 1; i >= 0; i--) {
+    const pp = Game.popups[i];
+    pp.y += pp.vy * dt; pp.vy *= 0.94;
+    pp.life -= dt;
+    if (pp.life <= 0) Game.popups.splice(i, 1);
+  }
+  // decor scroll
+  for (const d of Game.decor) d.y += Game.speed * dt;
+  for (let i = Game.decor.length - 1; i >= 0; i--) {
+    if (Game.decor[i].y > H + 30) Game.decor.splice(i, 1);
+  }
+  while (Game.decor.length < 36) Game.decor.push(makeDecor());
+}
+
 function update(dt) {
+  Game.animT += dt;
+  if (Game.state === 'loading') { updateLoading(dt); return; }
+  if (Game.state === 'dying')   { updateDying(dt); return; }
+  if (Game.state === 'victory') { updateVictory(dt); return; }
   Game.t += dt;
   if (Game.state !== 'playing' || Game.paused) return;
   if (Game.hintTime > 0) Game.hintTime -= dt;
+  if (Game.bossWarning > 0) Game.bossWarning -= dt;
+  if (Game.hitFlash > 0) Game.hitFlash -= dt;
 
   Game.distance += Game.speed * dt;
   Game.score += Game.speed * dt * 0.05;
@@ -925,6 +1190,7 @@ function update(dt) {
           Game.score += 150;
           Game.kills += 1;
           Game.shake = Math.max(Game.shake, 0.5);
+          addPopup('+150', e.x, e.y - 16, '#ffd86b', 14);
           if (Math.random() < 0.4) Game.pickups.push({ kind:'scrap', x:e.x, y:e.y, w:22, h:22, t:0 });
           Game.enemies.splice(i,1);
           break;
@@ -962,10 +1228,12 @@ function update(dt) {
       if (pk.kind === 'scrap') {
         Game.score += 75;
         emit(pk.x, pk.y, 12, { color:'#f5d76e', speed:220, life:0.5, size:3 });
+        addPopup('+75', pk.x, pk.y - 12, '#f5d76e', 13);
         SFX.scrap();
       } else {
         Game.health = Math.min(Game.maxHealth, Game.health + Game.maxHealth * 0.3);
         emit(pk.x, pk.y, 14, { color:'#7af07a', speed:220, life:0.5, size:3 });
+        addPopup('+HULL', pk.x, pk.y - 12, '#7af07a', 13);
         SFX.pickup();
       }
       Game.pickups.splice(i,1);
@@ -989,6 +1257,17 @@ function update(dt) {
     s.r = s.maxR * (1 - s.life / s.max);
     if (s.life <= 0) Game.shockwaves.splice(i, 1);
   }
+
+  // ---- popups (floating score text) ----
+  for (let i = Game.popups.length - 1; i >= 0; i--) {
+    const pp = Game.popups[i];
+    pp.y += pp.vy * dt; pp.vy *= 0.94;
+    pp.life -= dt;
+    if (pp.life <= 0) Game.popups.splice(i, 1);
+  }
+
+  // ---- boss death sequence (boss already nulled, but explosions continue) ----
+  if (Game.bossDeathSeq) updateBossDeath(dt);
 
   // ---- decor ----
   for (let i = Game.decor.length - 1; i >= 0; i--) {
@@ -1061,17 +1340,33 @@ function fireGuns() {
 }
 
 function damagePlayer(amt) {
+  if (Game.state !== 'playing') return;
   Game.health -= amt;
   Game.flash = 1;
-  SFX.hit();
+  Game.hitFlash = 0.35;
   if (Game.health <= 0) {
     Game.health = 0;
-    emit(Game.player.x, Game.player.y, 60, { color:'#ff6a2b', speed:420, life:1.0, size:5 });
-    emit(Game.player.x, Game.player.y, 30, { color:'#ffd86b', speed:320, life:0.8, size:4 });
-    shockwave(Game.player.x, Game.player.y, 'rgba(255,140,60,0.6)', 140);
-    Game.shake = 1.2;
-    endRun('death');
+    triggerPlayerDeath();
+  } else {
+    SFX.hit();
   }
+}
+
+function triggerPlayerDeath() {
+  const px = Game.player.x, py = Game.player.y;
+  // first explosion stage
+  emit(px, py, 50, { color:'#ff6a2b', speed:420, life:1.0, size:5 });
+  emit(px, py, 24, { color:'#ffd86b', speed:320, life:0.8, size:4 });
+  shockwave(px, py, 'rgba(255,140,60,0.6)', 140);
+  Game.shake = 1.4;
+  Game.flash = 1;
+  SFX.death();
+  // freeze player as wreck — body remains, smokes for ~2s
+  Game.wreck = { x: px, y: py, vx: Game.player.vx * 0.4, t: 0, rot: rand(-0.25, 0.25), rotV: rand(-1.4, 1.4) };
+  Game.deathSeq = { t: 0, dur: 2.0, x: px, y: py };
+  Game.state = 'dying';
+  releaseWakeLock();
+  pauseBtn.classList.remove('show');
 }
 
 function splashDamage(x, y, r, dmg) {
@@ -1084,6 +1379,7 @@ function splashDamage(x, y, r, dmg) {
         emit(e.x, e.y, 22, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
         Game.score += 120;
         Game.kills += 1;
+        addPopup('+120', e.x, e.y - 16, '#ff8a3d', 13);
         Game.enemies.splice(i,1);
       }
     }
@@ -1664,8 +1960,191 @@ function drawIdleBackground() {
   drawDecor();
 }
 
+function drawWreck() {
+  const w = Game.wreck; if (!w) return;
+  const v = Game.vehicle; if (!v) return;
+  ctx.save();
+  ctx.translate(w.x, w.y);
+  ctx.rotate(w.rot);
+  // darkened body
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = '#1a0f08';
+  ctx.fillRect(-22, -32, 44, 64);
+  // charred panels
+  ctx.fillStyle = '#3a2410';
+  ctx.fillRect(-18, -28, 36, 12);
+  ctx.fillRect(-14, -10, 28, 18);
+  // glow embers — flicker
+  const flicker = 0.6 + Math.sin(w.t * 18) * 0.2;
+  ctx.fillStyle = `rgba(255,140,60,${flicker})`;
+  ctx.fillRect(-10, -4, 6, 6);
+  ctx.fillRect(4, 2, 5, 5);
+  ctx.fillStyle = `rgba(255,210,120,${flicker * 0.8})`;
+  ctx.fillRect(-2, -6, 4, 4);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawPopups() {
+  if (!Game.popups.length) return;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const pp of Game.popups) {
+    const a = clamp(pp.life / pp.max, 0, 1);
+    const scale = 1 + (1 - a) * 0.4;
+    ctx.globalAlpha = a;
+    ctx.font = `bold ${Math.round(pp.size * scale)}px "Courier New", monospace`;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(pp.text, pp.x + 1, pp.y + 1);
+    ctx.fillStyle = pp.color;
+    ctx.fillText(pp.text, pp.x, pp.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawLoadingOverlay() {
+  // gentle dim, then big bold info card
+  const k = clamp(Game.loadingT / Game.loadingDur, 0, 1);
+  const alpha = k < 0.85 ? 1 : 1 - (k - 0.85) / 0.15;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  // dark band across center
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, H * 0.30, W, H * 0.22);
+  ctx.fillStyle = 'rgba(245,215,110,0.5)';
+  ctx.fillRect(0, H * 0.30, W, 1);
+  ctx.fillRect(0, H * 0.52 - 1, W, 1);
+
+  // big title
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f5d76e';
+  const titleSize = W < 500 ? 28 : 40;
+  ctx.font = `bold ${titleSize}px "Courier New", monospace`;
+  let title = 'ROLLING OUT';
+  let sub = (Game.vehicle ? Game.vehicle.name : '');
+  if (Game.mode === 'gauntlet' && Game.levelData) {
+    title = 'SECTOR ' + Game.levelData.num;
+    sub = Game.levelData.name + ' · ' + (Game.vehicle ? Game.vehicle.name : '');
+  } else if (Game.mode === 'timeattack') {
+    title = 'TIME ATTACK';
+    sub = '60 SECONDS · ' + (Game.vehicle ? Game.vehicle.name : '');
+  } else if (Game.mode === 'classic') {
+    title = 'OPEN ROAD';
+    sub = 'ENDLESS · ' + (Game.vehicle ? Game.vehicle.name : '');
+  }
+  // typewriter wipe
+  const reveal = clamp(k * 1.6, 0, 1);
+  const chars = Math.ceil(title.length * reveal);
+  ctx.fillText(title.slice(0, chars), W/2, H * 0.38);
+
+  // subtitle
+  ctx.font = `bold ${W < 500 ? 11 : 13}px "Courier New", monospace`;
+  ctx.fillStyle = 'rgba(245,215,110,0.85)';
+  ctx.fillText(sub, W/2, H * 0.46);
+
+  // progress bar
+  const barW = Math.min(280, W * 0.6), barH = 6;
+  const bx = (W - barW) / 2, by = H * 0.50;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+  ctx.fillStyle = 'rgba(245,215,110,0.25)';
+  ctx.fillRect(bx, by, barW, barH);
+  ctx.fillStyle = '#f5d76e';
+  ctx.fillRect(bx, by, barW * k, barH);
+
+  // boss-level warning beneath
+  if (Game.levelData && Game.levelData.obj === 'boss') {
+    const def = BOSS_DEFS[Game.levelData.boss];
+    const pulse = 0.6 + Math.sin(Game.animT * 8) * 0.4;
+    ctx.globalAlpha = alpha * pulse;
+    ctx.font = `bold ${W < 500 ? 13 : 16}px "Courier New", monospace`;
+    ctx.fillStyle = '#ff5050';
+    ctx.fillText('▲ BOSS: ' + (def ? def.name : 'UNKNOWN') + ' ▲', W/2, H * 0.58);
+  }
+  ctx.restore();
+}
+
+function drawBossWarning() {
+  if (Game.bossWarning <= 0 || !Game.boss) return;
+  const t = Game.bossWarning;
+  const pulse = 0.5 + Math.sin(Game.animT * 14) * 0.5;
+  // red flash bands
+  ctx.save();
+  ctx.globalAlpha = 0.15 + pulse * 0.15;
+  ctx.fillStyle = '#ff2a2a';
+  ctx.fillRect(0, H * 0.35, W, 4);
+  ctx.fillRect(0, H * 0.55, W, 4);
+  ctx.globalAlpha = 0.6 + pulse * 0.4;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, H * 0.39, W, H * 0.16);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ff5050';
+  ctx.font = `bold ${W < 500 ? 22 : 30}px "Courier New", monospace`;
+  ctx.fillText('▲ WARNING ▲', W/2, H * 0.44);
+  ctx.font = `bold ${W < 500 ? 14 : 18}px "Courier New", monospace`;
+  ctx.fillStyle = '#fff3b0';
+  ctx.fillText('BOSS APPROACHING', W/2, H * 0.50);
+  ctx.restore();
+}
+
+function drawVictoryOverlay() {
+  if (!Game.victorySeq) return;
+  const seq = Game.victorySeq;
+  const k = clamp(seq.t / seq.dur, 0, 1);
+  // fade-in/out
+  const a = k < 0.15 ? k / 0.15 : k > 0.85 ? (1 - k) / 0.15 : 1;
+  ctx.save();
+  ctx.globalAlpha = a * 0.5;
+  ctx.fillStyle = '#fff3b0';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // bouncing letters
+  const bounce = Math.sin(seq.t * 8) * 0.06 + 1;
+  const titleSize = (W < 500 ? 38 : 56) * bounce;
+  ctx.font = `bold ${titleSize}px "Courier New", monospace`;
+  ctx.fillStyle = '#1a0f08';
+  ctx.fillText('LEVEL CLEAR', W/2 + 3, H * 0.42 + 3);
+  ctx.fillStyle = '#7af07a';
+  ctx.fillText('LEVEL CLEAR', W/2, H * 0.42);
+  // sub
+  ctx.font = `bold ${W < 500 ? 13 : 16}px "Courier New", monospace`;
+  ctx.fillStyle = '#1a0f08';
+  ctx.fillText(seq.kind === 'boss' ? 'BOSS DOWN' : 'OBJECTIVE COMPLETE', W/2 + 1, H * 0.50 + 1);
+  ctx.fillStyle = '#f5d76e';
+  ctx.fillText(seq.kind === 'boss' ? 'BOSS DOWN' : 'OBJECTIVE COMPLETE', W/2, H * 0.50);
+  ctx.restore();
+}
+
+function drawDeathOverlay() {
+  if (!Game.deathSeq) return;
+  const ds = Game.deathSeq;
+  const k = clamp(ds.t / ds.dur, 0, 1);
+  // red wash that fades in then out
+  const wash = k < 0.3 ? k / 0.3 : 1 - (k - 0.3) / 0.7;
+  ctx.save();
+  ctx.globalAlpha = wash * 0.45;
+  ctx.fillStyle = '#3a0808';
+  ctx.fillRect(0, 0, W, H);
+  // RUN OVER text fades in toward the end
+  if (k > 0.5) {
+    const ta = (k - 0.5) / 0.5;
+    ctx.globalAlpha = ta;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const sz = W < 500 ? 36 : 52;
+    ctx.font = `bold ${sz}px "Courier New", monospace`;
+    ctx.fillStyle = '#1a0f08';
+    ctx.fillText('WRECKED', W/2 + 3, H * 0.45 + 3);
+    ctx.fillStyle = '#ff5050';
+    ctx.fillText('WRECKED', W/2, H * 0.45);
+  }
+  ctx.restore();
+}
+
 function render() {
-  if (Game.state === 'playing' || Game.state === 'gameover' || Game.state === 'victory') {
+  if (Game.state === 'playing' || Game.state === 'gameover' || Game.state === 'victory'
+      || Game.state === 'loading' || Game.state === 'dying') {
     ctx.save();
     if (Game.shake > 0 && !Game.paused) {
       const s = Game.shake * 14;
@@ -1680,9 +2159,24 @@ function render() {
     for (const pk of Game.pickups) drawPickup(pk);
     if (Game.boss) drawBoss();
     drawBullets();
-    if (Game.player) drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx);
+    // player vehicle (none during dying — wreck takes its place)
+    if (Game.state === 'dying') {
+      drawWreck();
+    } else if (Game.player && Game.state !== 'gameover') {
+      // hit flash overlay on the vehicle: tint white briefly
+      drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx);
+      if (Game.hitFlash > 0) {
+        ctx.save();
+        ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
+        ctx.fillStyle = '#fff3b0';
+        ctx.fillRect(Game.player.x - Game.player.w/2 - 2, Game.player.y - Game.player.h/2 - 2,
+                     Game.player.w + 4, Game.player.h + 4);
+        ctx.restore();
+      }
+    }
     drawParticles();
     drawShockwaves();
+    drawPopups();
     drawWeather();
 
     if (Game.flash > 0) {
@@ -1700,6 +2194,10 @@ function render() {
 
     if (Game.state === 'playing') drawHUD();
     if (Game.state === 'playing' && Game.paused) drawPause();
+    if (Game.state === 'loading') drawLoadingOverlay();
+    if (Game.state === 'playing' && Game.bossWarning > 0) drawBossWarning();
+    if (Game.state === 'victory') drawVictoryOverlay();
+    if (Game.state === 'dying')   drawDeathOverlay();
   } else {
     // menu — animated wasteland backdrop
     drawIdleBackground();
@@ -2242,7 +2740,10 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (Game.state === 'playing') update(dt);
+  if (Game.state === 'playing' || Game.state === 'loading'
+      || Game.state === 'dying' || Game.state === 'victory') {
+    update(dt);
+  }
   render();
   updateHint();
   requestAnimationFrame(frame);
