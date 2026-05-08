@@ -2865,6 +2865,10 @@ function drawPopups() {
   ctx.restore();
 }
 
+// Public URL appended to Daily Challenge share text. Single point of change
+// if the canonical deploy URL ever moves.
+const SHARE_BASE_URL = 'https://mojave-run.netlify.app';
+
 // Tips shown during the loading screen — small UX touch that gives the
 // loading sequence purpose. New tip per loading screen, pulled by the
 // boot session counter so successive runs cycle.
@@ -2885,6 +2889,9 @@ const LOADING_TIPS = [
 ];
 let _loadingTipIdx = -1;
 function pickLoadingTip() {
+  // Uses whichever Math.random is currently active. In Daily mode the
+  // seeded RNG is in effect, so the same tip is picked for every player
+  // that day — a tiny but deliberate part of the "shared run" feel.
   _loadingTipIdx = (_loadingTipIdx + 1 + Math.floor(Math.random() * 2)) % LOADING_TIPS.length;
   return LOADING_TIPS[_loadingTipIdx];
 }
@@ -3665,7 +3672,7 @@ const UI = {
         const btn = document.getElementById('res-share');
         const score = btn.dataset.score || '0';
         const seed = btn.dataset.seed || '';
-        const text = `MOJAVE RUN — DAILY ${seed}\nSCORE: ${score}\nhttps://mojave-run.netlify.app`;
+        const text = `MOJAVE RUN — DAILY ${seed}\nSCORE: ${score}\n${SHARE_BASE_URL}`;
         let shared = false;
         try {
           if (navigator.share) {
