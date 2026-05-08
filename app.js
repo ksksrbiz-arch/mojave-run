@@ -86,6 +86,7 @@ const MODES = [
   { id: 'classic',    name: 'CLASSIC',     desc: 'Endless run. Survive as long as you can. Difficulty climbs forever.' },
   { id: 'gauntlet',   name: 'GAUNTLET',    desc: '12 tiered sectors. Clear objectives. Bosses every 4 levels.' },
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
+  { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
 ];
 
 // 12 gauntlet levels. obj: 'survive' (seconds), 'kills' (count), 'distance' (meters), 'boss' (boss tier)
@@ -234,6 +235,11 @@ const Profile = {
     if (result.mode === 'classic' && result.score > p.bestClassic) p.bestClassic = result.score;
     if (result.mode === 'timeattack' && result.score > p.bestTime) p.bestTime = result.score;
     if (result.mode === 'classic' && result.distance > p.bestDistance) p.bestDistance = result.distance;
+    if (result.mode === 'daily' && result.dailySeedKey) {
+      p.dailyBest = p.dailyBest || {};
+      const prev = p.dailyBest[result.dailySeedKey] || 0;
+      if (result.score > prev) p.dailyBest[result.dailySeedKey] = result.score;
+    }
     if (result.mode === 'gauntlet' && result.victory && result.level && !p.gauntletCleared.includes(result.level)) {
       p.gauntletCleared.push(result.level);
       p.gauntletCleared.sort((a,b)=>a-b);
@@ -246,6 +252,120 @@ const Profile = {
     return p.gauntletCleared.includes(num - 1);
   },
 };
+
+// ============================================================
+// SETTINGS — user-tunable UX/accessibility/audio preferences
+// ============================================================
+// Persisted across sessions. Sensible defaults so first-run "just works".
+// Used by the SFX layer (volume), render (shake), emit() (particle count),
+// haptics, and the menu DOM (large-touch-target body class).
+const SETTINGS_KEY = 'mojaveRun_settings_v1';
+const Settings = {
+  // master volume multiplier 0..1
+  master: 1.0,
+  // SFX volume multiplier 0..1 (combines with master)
+  sfx: 1.0,
+  // screen-shake intensity multiplier 0..1.5
+  shake: 1.0,
+  // particle density multiplier 0..1.5 (gameplay-cosmetic only)
+  particles: 1.0,
+  // navigator.vibrate-based haptic feedback on key events
+  haptics: true,
+  // 1.5x hit areas for menu buttons (accessibility)
+  bigButtons: false,
+  load() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return;
+      const o = JSON.parse(raw);
+      if (typeof o.master === 'number')    this.master    = clampSet(o.master, 0, 1);
+      if (typeof o.sfx === 'number')       this.sfx       = clampSet(o.sfx, 0, 1);
+      if (typeof o.shake === 'number')     this.shake     = clampSet(o.shake, 0, 1.5);
+      if (typeof o.particles === 'number') this.particles = clampSet(o.particles, 0, 1.5);
+      if (typeof o.haptics === 'boolean')  this.haptics   = o.haptics;
+      if (typeof o.bigButtons === 'boolean') this.bigButtons = o.bigButtons;
+    } catch (_) {}
+  },
+  save() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        master: this.master, sfx: this.sfx, shake: this.shake,
+        particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
+      }));
+    } catch (_) {}
+    this.applyBodyClass();
+  },
+  applyBodyClass() {
+    document.body.classList.toggle('big-touch', !!this.bigButtons);
+  },
+};
+// local clamp (real `clamp` is defined later in HELPERS section)
+function clampSet(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// ============================================================
+// HAPTICS — opt-in vibration patterns for key events
+// ============================================================
+// All calls are no-ops on devices without `navigator.vibrate` or when the
+// player has disabled haptics in Settings. Patterns are short to respect
+// battery & UX (no buzz spam during heavy combat).
+const Haptics = {
+  _can: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
+  vibrate(pattern) {
+    if (!this._can || !Settings.haptics) return;
+    try { navigator.vibrate(pattern); } catch (_) {}
+  },
+  hit()      { this.vibrate(40); },         // player took damage
+  kill()     { this.vibrate(15); },         // small confirmation
+  pickup()   { this.vibrate([0, 12, 18, 12]); },
+  scrap()    { this.vibrate(10); },
+  death()    { this.vibrate([0, 80, 60, 120, 60, 200]); },
+  bossWarn() { this.vibrate([0, 60, 40, 60, 40, 60]); },
+  victory()  { this.vibrate([0, 30, 30, 30, 30, 80]); },
+};
+
+// ============================================================
+// SEEDED RNG — used by Daily Challenge so the run is identical for
+// everyone playing on the same calendar day. Wraps Math.random for the
+// duration of the run, then restores the original on endRun.
+// ============================================================
+const _origMathRandom = Math.random;
+let _seededActive = false;
+function todaySeedString() {
+  const d = new Date();
+  // use UTC date so the daily flips at the same instant for all players
+  return d.getUTCFullYear() + '-' +
+         String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+         String(d.getUTCDate()).padStart(2, '0');
+}
+function seedFromString(str) {
+  // FNV-1a 32-bit
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+function makeMulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function activateSeededRng(seed) {
+  if (_seededActive) return;
+  Math.random = makeMulberry32(seed);
+  _seededActive = true;
+}
+function restoreRng() {
+  if (!_seededActive) return;
+  Math.random = _origMathRandom;
+  _seededActive = false;
+}
 
 // ============================================================
 // CANVAS
@@ -335,6 +455,8 @@ function ensureAudio() {
 }
 function blip(freq, dur, type='square', vol=0.08, slide=0) {
   if (!audioCtx) return;
+  vol *= Settings.master * Settings.sfx;
+  if (vol <= 0.0001) return;
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -348,6 +470,8 @@ function blip(freq, dur, type='square', vol=0.08, slide=0) {
 }
 function noise(dur, vol=0.12, filterFreq=800) {
   if (!audioCtx) return;
+  vol *= Settings.master * Settings.sfx;
+  if (vol <= 0.0001) return;
   const t = audioCtx.currentTime;
   const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
   const data = buf.getChannelData(0);
@@ -401,7 +525,7 @@ function roadBounds() {
 }
 
 function emit(x, y, n, opts = {}) {
-  n = Math.max(1, Math.round(n * PARTICLE_SCALE));
+  n = Math.max(1, Math.round(n * PARTICLE_SCALE * Settings.particles));
   const { color='#f5d76e', speed=180, life=0.6, size=3, spread=Math.PI*2, gravity=0 } = opts;
   for (let i = 0; i < n; i++) {
     const ang = rand(0, spread) - (spread === Math.PI*2 ? 0 : spread/2 - Math.PI/2);
@@ -549,7 +673,7 @@ window.addEventListener('keydown', e => {
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(e.key.toLowerCase())) e.preventDefault();
   ensureAudio();
   if (e.key.toLowerCase() === 'f') toggleFullscreen();
-  if (e.key.toLowerCase() === 'p' && Game.state === 'playing') Game.paused = !Game.paused;
+  if (e.key.toLowerCase() === 'p' && Game.state === 'playing') togglePause();
   // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
   // persists the choice in localStorage. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
@@ -565,7 +689,7 @@ window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 function onPointerDown(e) {
   ensureAudio();
   if (Game.state !== 'playing') return; // canvas only handles input during gameplay
-  if (Game.paused) { Game.paused = false; return; }
+  if (Game.paused) { togglePause(false); return; }
   e.preventDefault();
   try { cvs.setPointerCapture(e.pointerId); } catch(_){}
   activePointers.set(e.pointerId, e.clientX);
@@ -625,8 +749,20 @@ function toggleFullscreen() {
 }
 fsBtn.addEventListener('click', e => { e.stopPropagation(); toggleFullscreen(); });
 fsBtn.addEventListener('pointerdown', e => e.stopPropagation());
-pauseBtn.addEventListener('click', e => { e.stopPropagation(); if (Game.state === 'playing') Game.paused = !Game.paused; });
+pauseBtn.addEventListener('click', e => { e.stopPropagation(); if (Game.state === 'playing') togglePause(); });
 pauseBtn.addEventListener('pointerdown', e => e.stopPropagation());
+
+// togglePause owns both the gameplay flag and the DOM pause screen so they
+// can never drift out of sync. Keyboard P, the on-screen pause button, and
+// the visibility-change handler all funnel through here.
+function togglePause(force) {
+  if (Game.state !== 'playing') return;
+  const next = (typeof force === 'boolean') ? force : !Game.paused;
+  if (next === Game.paused) return;
+  Game.paused = next;
+  if (Game.paused) UI.showPause();
+  else UI.hideAllScreens();
+}
 
 let wakeLock = null;
 async function requestWakeLock() {
@@ -637,7 +773,7 @@ function releaseWakeLock() {
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && Game.state === 'playing') requestWakeLock();
-  else { if (Game.state === 'playing') Game.paused = true; releaseWakeLock(); }
+  else { if (Game.state === 'playing') togglePause(true); releaseWakeLock(); }
 });
 
 // ============================================================
@@ -646,9 +782,10 @@ document.addEventListener('visibilitychange', () => {
 const Game = {
   state: 'menu',          // 'menu' | 'loading' | 'playing' | 'dying' | 'gameover' | 'victory'
   paused: false,
-  mode: null,             // 'classic' | 'gauntlet' | 'timeattack'
+  mode: null,             // 'classic' | 'gauntlet' | 'timeattack' | 'daily'
   level: null,            // gauntlet level number
   levelData: null,
+  dailySeedKey: null,     // 'YYYY-MM-DD' when mode === 'daily'
   t: 0,
   animT: 0,               // always-advancing clock for menu/idle animations
   // run stats
@@ -736,6 +873,16 @@ function startRun(mode, level) {
   ensureAudio();
   const profile = Profile.active();
   if (!profile) return;
+  // Daily Challenge: seed Math.random for the run so every player who runs
+  // it on the same UTC date sees identical world generation. Always restore
+  // before any new run so seeding doesn't leak across modes.
+  restoreRng();
+  if (mode === 'daily') {
+    Game.dailySeedKey = todaySeedString();
+    activateSeededRng(seedFromString('mojave-run-daily-' + Game.dailySeedKey));
+  } else {
+    Game.dailySeedKey = null;
+  }
   const v = VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0];
   const stats = Profile.effectiveStats(profile.activeVehicle);
   Game.mode = mode;
@@ -799,6 +946,7 @@ function startRun(mode, level) {
   // loading sequence — vehicle drives in, level info displays
   Game.loadingT = 0;
   Game.loadingDur = 1.7;
+  Game.loadingTip = pickLoadingTip();
   SFX.start();
   requestWakeLock();
   pauseBtn.classList.remove('show');
@@ -817,12 +965,16 @@ function beginPlaying() {
     spawnBoss(Game.levelData.boss);
     Game.bossWarning = 2.4;
     SFX.boss();
+    Haptics.bossWarn();
   }
 }
 
 function endRun(reason /* 'death' | 'victory' | 'time' */) {
   if (Game.state !== 'playing' && Game.state !== 'dying' && Game.state !== 'victory') return;
   Game.state = reason === 'victory' ? 'victory' : 'gameover';
+  // Always restore Math.random; daily mode's seeded RNG should never leak
+  // into menus, garage previews, or subsequent non-daily runs.
+  restoreRng();
   releaseWakeLock();
   pauseBtn.classList.remove('show');
   fsBtn.classList.remove('hidden');
@@ -839,6 +991,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     distance: Math.floor(Game.distance),
     level: Game.level,
     victory: reason === 'victory',
+    dailySeedKey: Game.dailySeedKey,
   });
   // SFX already played by death/victory sequences; only play here for time-out
   if (reason === 'time') SFX.victory();
@@ -853,6 +1006,7 @@ function triggerVictory(kind /* 'objective' | 'time' */) {
   releaseWakeLock();
   pauseBtn.classList.remove('show');
   if (kind !== 'time') SFX.victory();
+  Haptics.victory();
   // burst sparks above the player
   if (Game.player) {
     for (let i = 0; i < 8; i++) {
@@ -1623,13 +1777,16 @@ function update(dt) {
         emit(pk.x, pk.y, 12, { color:'#f5d76e', speed:220, life:0.5, size:3 });
         addPopup((x2 > 1 ? 'x2 ' : '') + '+' + score, pk.x, pk.y - 12, '#f5d76e', 13);
         SFX.scrap();
+        Haptics.scrap();
       } else if (pk.kind === 'repair') {
         Game.health = Math.min(Game.maxHealth, Game.health + Game.maxHealth * 0.3);
         emit(pk.x, pk.y, 14, { color:'#7af07a', speed:220, life:0.5, size:3 });
         addPopup('+HULL', pk.x, pk.y - 12, '#7af07a', 13);
         SFX.pickup();
+        Haptics.pickup();
       } else if (pk.kind === 'powerup') {
         activatePowerup(pk.power, pk);
+        Haptics.pickup();
       }
       Game.pickups.splice(i,1);
     }
@@ -1771,6 +1928,7 @@ function damagePlayer(amt) {
     triggerPlayerDeath();
   } else {
     SFX.hit();
+    Haptics.hit();
   }
 }
 
@@ -1783,6 +1941,7 @@ function triggerPlayerDeath() {
   Game.shake = 1.4;
   Game.flash = 1;
   SFX.death();
+  Haptics.death();
   // freeze player as wreck — body remains, smokes for ~2s
   Game.wreck = { x: px, y: py, vx: Game.player.vx * 0.4, t: 0, rot: rand(-0.25, 0.25), rotV: rand(-1.4, 1.4) };
   Game.deathSeq = { t: 0, dur: 2.0, x: px, y: py };
@@ -2706,6 +2865,30 @@ function drawPopups() {
   ctx.restore();
 }
 
+// Tips shown during the loading screen — small UX touch that gives the
+// loading sequence purpose. New tip per loading screen, pulled by the
+// boot session counter so successive runs cycle.
+const LOADING_TIPS = [
+  'HOLD TO FIRE — THE LONGER YOU SQUEEZE, THE LONGER YOU LIVE',
+  'COMBO X10 NEEDS 30 KILLS WITHOUT A SCRATCH',
+  'BARRELS EXPLODE — SHOOT THEM NEAR ENEMIES',
+  'NIGHT SECTORS HIDE EARLIER THREATS — WATCH THE EDGES',
+  'SCRAP DROPS PULL TOWARD YOU UNDER A MAGNET POWER-UP',
+  'GOLIATH TRADES SPEED FOR ARMOR. ROADRUNNER DOES THE OPPOSITE.',
+  'TAP P TO PAUSE · F FOR FULLSCREEN · Q TO CYCLE QUALITY',
+  'BOSSES ENRAGE AT 30% HP — SAVE YOUR NITRO FOR THEN',
+  'TAKING DAMAGE BREAKS YOUR COMBO. SHIELDS DO NOT.',
+  'PHANTOM HAS 4 GUNS BUT GLASS ARMOR — STAY MOVING',
+  'TIME ATTACK FAVORS COMBOS — DON\'T STOP TO CHASE PICKUPS',
+  'DAILY CHALLENGE IS THE SAME WORLD FOR EVERYONE EACH DAY',
+  'STORM SECTORS HAVE LIGHTNING — IT TARGETS METAL',
+];
+let _loadingTipIdx = -1;
+function pickLoadingTip() {
+  _loadingTipIdx = (_loadingTipIdx + 1 + Math.floor(Math.random() * 2)) % LOADING_TIPS.length;
+  return LOADING_TIPS[_loadingTipIdx];
+}
+
 function drawLoadingOverlay() {
   // gentle dim, then big bold info card
   const k = clamp(Game.loadingT / Game.loadingDur, 0, 1);
@@ -2735,6 +2918,9 @@ function drawLoadingOverlay() {
   } else if (Game.mode === 'classic') {
     title = 'OPEN ROAD';
     sub = 'ENDLESS · ' + (Game.vehicle ? Game.vehicle.name : '');
+  } else if (Game.mode === 'daily') {
+    title = 'DAILY CHALLENGE';
+    sub = (Game.dailySeedKey || '') + ' · ' + (Game.vehicle ? Game.vehicle.name : '');
   }
   // typewriter wipe
   const reveal = clamp(k * 1.6, 0, 1);
@@ -2764,6 +2950,24 @@ function drawLoadingOverlay() {
     ctx.font = `bold ${W < 500 ? 13 : 16}px "Courier New", monospace`;
     ctx.fillStyle = '#ff5050';
     ctx.fillText('▲ BOSS: ' + (def ? def.name : 'UNKNOWN') + ' ▲', W/2, H * 0.58);
+  } else if (Game.loadingTip) {
+    // Tip-of-the-run rotator. Fades in slightly after the title so the
+    // hierarchy reads as TITLE -> SUB -> PROGRESS -> TIP.
+    const tipAlpha = alpha * clamp((k - 0.15) * 2.5, 0, 1) * 0.85;
+    ctx.globalAlpha = tipAlpha;
+    ctx.font = `bold ${W < 500 ? 10 : 12}px "Courier New", monospace`;
+    ctx.fillStyle = 'rgba(245,215,110,0.85)';
+    // word-wrap into max ~38 chars
+    const tip = Game.loadingTip;
+    if (tip.length > 38) {
+      const mid = tip.lastIndexOf(' ', 38);
+      const a = tip.slice(0, mid > 0 ? mid : 38);
+      const b = tip.slice((mid > 0 ? mid : 38) + 1);
+      ctx.fillText(a, W/2, H * 0.585);
+      ctx.fillText(b, W/2, H * 0.61);
+    } else {
+      ctx.fillText(tip, W/2, H * 0.59);
+    }
   }
   ctx.restore();
 }
@@ -2850,7 +3054,7 @@ function render() {
       || Game.state === 'loading' || Game.state === 'dying') {
     ctx.save();
     if (Game.shake > 0 && !Game.paused) {
-      const s = Game.shake * 14;
+      const s = Game.shake * 14 * Settings.shake;
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
     drawBackground();
@@ -3236,6 +3440,10 @@ const UI = {
       rows.push(['BEST', p.bestClassic, false]);
     } else if (Game.mode === 'timeattack') {
       rows.push(['BEST', p.bestTime, false]);
+    } else if (Game.mode === 'daily' && Game.dailySeedKey) {
+      const best = (p.dailyBest && p.dailyBest[Game.dailySeedKey]) || Math.floor(Game.score);
+      rows.push(['DAILY', Game.dailySeedKey, false]);
+      rows.push(['BEST TODAY', best, false]);
     } else if (Game.mode === 'gauntlet' && Game.levelData) {
       rows.push(['LEVEL', Game.levelData.num + ' · ' + Game.levelData.name, false]);
     }
@@ -3258,7 +3466,68 @@ const UI = {
       } else nextBtn.style.display = 'none';
     } else nextBtn.style.display = 'none';
 
+    // share button (daily challenge)
+    const shareBtn = document.getElementById('res-share');
+    if (shareBtn) {
+      if (Game.mode === 'daily' && Game.dailySeedKey) {
+        shareBtn.style.display = '';
+        shareBtn.dataset.score = String(Math.floor(Game.score));
+        shareBtn.dataset.seed = Game.dailySeedKey;
+      } else {
+        shareBtn.style.display = 'none';
+      }
+    }
+
     this.show('results');
+  },
+
+  // ---- PAUSE ----
+  showPause() {
+    this.show('pause');
+  },
+
+  // ---- SETTINGS ----
+  showSettings() {
+    // Build the body each time so the controls reflect the current values.
+    // Each `data-set` action is mapped in the action router below.
+    const wrap = document.getElementById('settings-list');
+    if (!wrap) return; // DOM not ready
+    const slider = (label, key, min, max, step, suffix) => {
+      const v = Settings[key];
+      const pct = Math.round(((v - min) / (max - min)) * 100);
+      return `<div class="set-row">
+        <div class="set-head"><div class="set-name">${label}</div><div class="set-val">${pct}%${suffix || ''}</div></div>
+        <input type="range" min="${min}" max="${max}" step="${step}" value="${v}" data-set="${key}" />
+      </div>`;
+    };
+    const toggle = (label, key, sub) => {
+      const on = !!Settings[key];
+      return `<div class="set-row">
+        <div class="set-head">
+          <div><div class="set-name">${label}</div>${sub ? `<div class="set-sub">${sub}</div>` : ''}</div>
+          <button class="btn set-toggle ${on ? 'on' : ''}" data-toggle="${key}">${on ? 'ON' : 'OFF'}</button>
+        </div>
+      </div>`;
+    };
+    const qopts = ['auto','high','medium','low']
+      .map(m => `<button class="btn set-q ${PerfMon.mode === m ? 'on' : ''}" data-quality="${m}">${m.toUpperCase()}</button>`)
+      .join('');
+    wrap.innerHTML = `
+      <h2>AUDIO</h2>
+      ${slider('MASTER VOLUME', 'master', 0, 1, 0.05)}
+      ${slider('SFX VOLUME',    'sfx',    0, 1, 0.05)}
+      <h2>VISUAL</h2>
+      ${slider('SCREEN SHAKE',  'shake',     0, 1.5, 0.1)}
+      ${slider('PARTICLE DENSITY','particles', 0, 1.5, 0.1)}
+      <div class="set-row">
+        <div class="set-head"><div class="set-name">QUALITY</div></div>
+        <div class="set-q-row">${qopts}</div>
+      </div>
+      <h2>CONTROLS</h2>
+      ${toggle('HAPTICS', 'haptics', 'VIBRATE ON HIT / KILL / DEATH')}
+      ${toggle('LARGE TOUCH TARGETS', 'bigButtons', 'EASIER TO TAP ON SMALL SCREENS')}
+    `;
+    this.show('settings');
   },
 
   // ---- MODAL ----
@@ -3326,6 +3595,45 @@ const UI = {
       case 'menu-stats':
         UI.showStats();
         break;
+      case 'menu-settings':
+        UI._settingsFrom = 'menu';
+        UI.showSettings();
+        break;
+      case 'pause-resume':
+        if (Game.state === 'playing') Game.paused = false;
+        UI.hideAllScreens();
+        break;
+      case 'pause-restart': {
+        const m = Game.mode, lvl = Game.level;
+        UI.hideAllScreens();
+        Game.paused = false;
+        startRun(m, lvl);
+        break;
+      }
+      case 'pause-settings':
+        UI._settingsFrom = 'pause';
+        UI.showSettings();
+        break;
+      case 'pause-quit':
+        // abandon the run and return to the menu without recording
+        Game.paused = false;
+        Game.state = 'menu';
+        releaseWakeLock();
+        pauseBtn.classList.remove('show');
+        fsBtn.classList.remove('hidden');
+        restoreRng();
+        UI.showMenu();
+        break;
+      case 'back-pause':
+        UI.showPause();
+        break;
+      case 'back-settings-origin':
+        // Settings can be opened from the main menu or from the in-game
+        // pause screen — return wherever we came from.
+        if (UI._settingsFrom === 'pause') UI.showPause();
+        else UI.showMenu();
+        UI._settingsFrom = null;
+        break;
       case 'menu-switch':
         UI.showProfiles();
         break;
@@ -3351,6 +3659,32 @@ const UI = {
         const next = parseInt(document.getElementById('res-next').dataset.next, 10);
         UI.hideAllScreens();
         startRun('gauntlet', next);
+        break;
+      }
+      case 'res-share': {
+        const btn = document.getElementById('res-share');
+        const score = btn.dataset.score || '0';
+        const seed = btn.dataset.seed || '';
+        const text = `MOJAVE RUN — DAILY ${seed}\nSCORE: ${score}\nhttps://mojave-run.netlify.app`;
+        let shared = false;
+        try {
+          if (navigator.share) {
+            navigator.share({ title: 'Mojave Run — Daily', text }).catch(() => {});
+            shared = true;
+          }
+        } catch (_) {}
+        if (!shared) {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(
+                () => UI.toast('SCORE COPIED'),
+                () => UI.toast('COULD NOT COPY')
+              );
+            } else {
+              UI.toast(text.split('\n')[1]);
+            }
+          } catch (_) { UI.toast('COULD NOT SHARE'); }
+        }
         break;
       }
       case 'modal-cancel':
@@ -3428,6 +3762,47 @@ document.addEventListener('click', e => {
     } else UI.toast('NOT ENOUGH SCRAP');
     return;
   }
+  // settings: quality preset or boolean toggle
+  const sq = e.target.closest('[data-quality]');
+  if (sq) {
+    setQualityMode(sq.dataset.quality, /*persist*/ true);
+    SFX.click();
+    UI.showSettings();
+    return;
+  }
+  const st = e.target.closest('[data-toggle]');
+  if (st) {
+    const key = st.dataset.toggle;
+    if (key in Settings && typeof Settings[key] === 'boolean') {
+      Settings[key] = !Settings[key];
+      Settings.save();
+      SFX.click();
+      UI.showSettings();
+    }
+    return;
+  }
+});
+
+// settings sliders: live-update on input, persist on change
+document.addEventListener('input', e => {
+  const sl = e.target.closest('[data-set]');
+  if (!sl) return;
+  const key = sl.dataset.set;
+  const v = parseFloat(sl.value);
+  if (!(key in Settings) || !isFinite(v)) return;
+  Settings[key] = v;
+  // update the live percentage label without rebuilding the whole screen
+  const row = sl.closest('.set-row');
+  if (row) {
+    const valEl = row.querySelector('.set-val');
+    const min = parseFloat(sl.min), max = parseFloat(sl.max);
+    if (valEl) valEl.textContent = Math.round(((v - min) / (max - min)) * 100) + '%';
+  }
+});
+document.addEventListener('change', e => {
+  const sl = e.target.closest('[data-set]');
+  if (!sl) return;
+  Settings.save();
 });
 
 // keyboard support for modal
@@ -3857,13 +4232,34 @@ UI.act = function(action, data) {
 function boot() {
   resize();
   loadQualityPref();
+  Settings.load();
+  Settings.applyBodyClass();
   Profile.load();
   // seed decor for menu backdrop
   Game.player = { x: W * 0.5, y: H - 110, w: 42, h: 64, vx: 0 };
   for (let i = 0; i < 36; i++) Game.decor.push(makeDecor(Math.random() * H));
-  // first-time -> profiles screen
-  if (Profile.list().length === 0) UI.showProfiles();
-  else UI.showTitle();
+
+  // PWA shortcut deep-links: `?mode=daily` jumps straight into the daily run,
+  // `?continue=1` skips the title screen if a profile already exists. Falls
+  // back to the normal first-run UX if no driver exists yet.
+  let bootHandled = false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const wantMode = params.get('mode');
+    const wantContinue = params.get('continue');
+    if (Profile.active() && wantMode && MODES.some(m => m.id === wantMode)) {
+      if (wantMode === 'gauntlet') UI.showGauntlet();
+      else startRun(wantMode);
+      bootHandled = true;
+    } else if (Profile.active() && wantContinue) {
+      UI.showMenu();
+      bootHandled = true;
+    }
+  } catch (_) {}
+  if (!bootHandled) {
+    if (Profile.list().length === 0) UI.showProfiles();
+    else UI.showTitle();
+  }
   requestAnimationFrame(frame);
 
   ['pointerdown','keydown','touchstart'].forEach(ev =>

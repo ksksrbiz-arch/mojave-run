@@ -413,6 +413,47 @@
     .vehicle-tile .vt-preview{height:70px}
   }
 
+  /* SETTINGS screen */
+  .set-row{
+    background:rgba(0,0,0,.4);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    padding:12px 14px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .set-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .set-name{font-weight:bold;letter-spacing:1.5px;font-size:13px}
+  .set-sub{font-size:9px;letter-spacing:1px;color:var(--gold-dim);margin-top:3px}
+  .set-val{font-size:11px;letter-spacing:1px;color:var(--gold-dim);min-width:42px;text-align:right}
+  .set-row input[type="range"]{
+    width:100%;-webkit-appearance:none;appearance:none;background:transparent;
+    height:24px;cursor:pointer;
+  }
+  .set-row input[type="range"]::-webkit-slider-runnable-track{
+    height:6px;background:rgba(0,0,0,.55);border:1px solid var(--gold-faint);border-radius:3px;
+  }
+  .set-row input[type="range"]::-moz-range-track{
+    height:6px;background:rgba(0,0,0,.55);border:1px solid var(--gold-faint);border-radius:3px;
+  }
+  .set-row input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;
+    background:var(--gold);border:2px solid var(--bg);margin-top:-7px;cursor:pointer;
+  }
+  .set-row input[type="range"]::-moz-range-thumb{
+    width:18px;height:18px;border-radius:50%;background:var(--gold);border:2px solid var(--bg);cursor:pointer;
+  }
+  .set-toggle{
+    width:auto;min-height:36px;min-width:60px;padding:6px 14px;font-size:12px;letter-spacing:1.5px;
+  }
+  .set-toggle.on{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+  .set-q-row{display:flex;gap:6px;flex-wrap:wrap}
+  .set-q{flex:1;min-width:64px;min-height:36px;padding:6px 8px;font-size:11px}
+  .set-q.on{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+
+  /* Large-touch-target accessibility mode */
+  body.big-touch .btn{min-height:64px;font-size:17px;padding:18px 18px}
+  body.big-touch .level-tile{font-size:13px}
+
   #rotate{
     display:none;position:fixed;inset:0;
     background:var(--bg);
@@ -475,6 +516,7 @@
       <button class="btn primary" data-act="menu-play">▶ PLAY</button>
       <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
       <button class="btn" data-act="menu-stats">STATS</button>
+      <button class="btn" data-act="menu-settings">SETTINGS</button>
       <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">CO-OP GHOST RUN</span></button>
       <div style="height:20px"></div>
       <div class="btn-row">
@@ -535,6 +577,29 @@
       <div class="gauntlet-grid" id="gauntlet-grid"></div>
       <div style="height:12px"></div>
       <button class="btn" data-act="back-mode">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== SETTINGS ===== -->
+  <div class="screen" id="screen-settings">
+    <div class="inner">
+      <h1 style="font-size:32px">SETTINGS</h1>
+      <div id="settings-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-settings-origin">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== PAUSE ===== -->
+  <div class="screen" id="screen-pause">
+    <div class="inner" style="margin:auto 0">
+      <h1 style="font-size:42px">PAUSED</h1>
+      <div class="subtitle">RUN ON HOLD</div>
+      <div style="height:14px"></div>
+      <button class="btn primary" data-act="pause-resume">▶ RESUME</button>
+      <button class="btn" data-act="pause-restart">RESTART RUN</button>
+      <button class="btn" data-act="pause-settings">SETTINGS</button>
+      <button class="btn danger" data-act="pause-quit">QUIT TO MENU</button>
     </div>
   </div>
 
@@ -606,6 +671,7 @@
       <div style="height:12px"></div>
       <button class="btn primary" data-act="res-again">▶ RUN AGAIN</button>
       <button class="btn" id="res-next" data-act="res-next" style="display:none">NEXT SECTOR ►</button>
+      <button class="btn" id="res-share" data-act="res-share" style="display:none">SHARE SCORE</button>
       <button class="btn" data-act="back-menu">◄ MENU</button>
     </div>
   </div>
@@ -637,5 +703,15 @@
 </div>
 <script src="/mp.js"></script>
 <script src="/app.js"></script>
+<script>
+  // Service worker — enables offline play and faster repeat loads.
+  // Registered on 'load' so it doesn't block the first paint. Failure is
+  // non-fatal: the game still works, just without offline support.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
 </body>
 </html>
