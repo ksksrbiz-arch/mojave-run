@@ -200,6 +200,94 @@
     opacity:.7;
   }
 
+  /* CHARACTER PORTRAIT (animated SVG headshot) */
+  .portrait{
+    position:relative;display:inline-block;
+    width:64px;height:64px;flex:none;
+    border:1px solid var(--gold-faint);border-radius:4px;
+    overflow:hidden;background:#0d0805;
+  }
+  .portrait svg{display:block;width:100%;height:100%}
+  .portrait.lg{width:140px;height:140px;border-color:var(--gold-dim)}
+  .portrait.xl{width:170px;height:170px;border-color:var(--gold)}
+  .portrait .pframe{
+    position:absolute;inset:0;pointer-events:none;
+    box-shadow:inset 0 0 18px rgba(0,0,0,.7);
+  }
+  /* facial animation keyframes — applied to SVG sub-elements */
+  @keyframes cha-blink{
+    0%,92%,100%{transform:scaleY(1)}
+    94%,97%{transform:scaleY(.05)}
+  }
+  @keyframes cha-blink-2{
+    0%,88%,100%{transform:scaleY(1)}
+    90%,93%{transform:scaleY(.05)}
+  }
+  @keyframes cha-breath{
+    0%,100%{transform:translateY(0)}
+    50%{transform:translateY(.6px)}
+  }
+  @keyframes cha-hair{
+    0%,100%{transform:rotate(-1deg)}
+    50%{transform:rotate(2deg)}
+  }
+  @keyframes cha-hair-2{
+    0%,100%{transform:translateX(-.4px) rotate(.5deg)}
+    50%{transform:translateX(.6px) rotate(-1.5deg)}
+  }
+  @keyframes cha-ember{
+    0%,100%{opacity:.45}
+    50%{opacity:.9}
+  }
+  @keyframes cha-dust{
+    0%{transform:translate(-6px,4px);opacity:0}
+    20%{opacity:.7}
+    100%{transform:translate(60px,-30px);opacity:0}
+  }
+  @keyframes cha-spark{
+    0%,100%{opacity:.2;transform:scale(.8)}
+    50%{opacity:1;transform:scale(1.2)}
+  }
+  .portrait .eyelid{transform-origin:center;transform-box:fill-box;animation:cha-blink 5.4s infinite}
+  .portrait .eyelid.b{animation:cha-blink-2 6.1s infinite}
+  .portrait .breath{transform-origin:center;transform-box:fill-box;animation:cha-breath 3.8s ease-in-out infinite}
+  .portrait .hair{transform-origin:50% 0;transform-box:fill-box;animation:cha-hair 4.4s ease-in-out infinite}
+  .portrait .hair.s{animation:cha-hair-2 5.2s ease-in-out infinite}
+  .portrait .ember{animation:cha-ember 2.6s ease-in-out infinite}
+  .portrait .dust{animation:cha-dust 6.2s linear infinite}
+  .portrait .dust.d2{animation-duration:7.4s;animation-delay:-2.1s}
+  .portrait .dust.d3{animation-duration:5.6s;animation-delay:-3.4s}
+  .portrait .spark{transform-origin:center;transform-box:fill-box;animation:cha-spark 1.8s ease-in-out infinite}
+
+  /* CHARACTER SELECT */
+  .char-card{
+    display:flex;gap:14px;align-items:flex-start;
+    padding:12px;
+    background:rgba(0,0,0,.5);
+    border:2px solid var(--gold-faint);
+    border-radius:6px;cursor:pointer;
+    transition:border-color .15s,background .15s;
+  }
+  .char-card.selected{border-color:var(--gold);background:rgba(245,215,110,.06)}
+  .char-card:active{transform:scale(.995)}
+  .char-card .cmeta{flex:1;min-width:0}
+  .char-card .cname{font-weight:bold;letter-spacing:2px;font-size:15px;color:var(--gold)}
+  .char-card .ctitle{font-size:10px;letter-spacing:2px;color:var(--rust);margin-top:2px}
+  .char-card .cbio{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;margin-top:6px;line-height:1.45}
+  .char-card .cperk{font-size:10px;color:var(--good);letter-spacing:1px;margin-top:6px}
+
+  /* MENU profile bar — character portrait inline */
+  .profile-bar .pb-portrait{
+    width:42px;height:42px;flex:none;margin-right:10px;
+  }
+  .profile-bar .pb-left{display:flex;align-items:center;min-width:0}
+  .profile-bar .pb-name{min-width:0}
+  .profile-bar .ctitle-sm{font-size:9px;letter-spacing:1.5px;color:var(--rust);margin-top:2px}
+
+  /* PROFILE CARD — portrait */
+  .profile-card .pc-portrait{width:48px;height:48px;flex:none;margin-right:12px}
+  .profile-card .pc-left{display:flex;align-items:center;min-width:0;flex:1}
+
   /* GARAGE — vehicle tile */
   .vehicle-tile{
     background:rgba(0,0,0,.5);
@@ -502,19 +590,36 @@
     </div>
   </div>
 
+  <!-- ===== CHARACTER SELECT ===== -->
+  <div class="screen" id="screen-character">
+    <div class="inner">
+      <h1 style="font-size:28px">SELECT WARRIOR</h1>
+      <div class="small center" id="char-sub">CHOOSE YOUR BADLANDS LEGEND</div>
+      <div id="char-list" style="display:flex;flex-direction:column;gap:10px;margin-top:6px"></div>
+      <div style="height:6px"></div>
+      <button class="btn primary" data-act="character-confirm" id="char-confirm-btn">CHOOSE WARRIOR ▶</button>
+      <button class="btn" data-act="character-cancel">◄ BACK</button>
+    </div>
+  </div>
+
   <!-- ===== MAIN MENU ===== -->
   <div class="screen" id="screen-menu">
     <div class="inner">
       <div class="profile-bar">
-        <div>
-          <div class="name" id="menu-name">DRIVER</div>
-          <div class="small" id="menu-runs"></div>
+        <div class="pb-left">
+          <div class="portrait pb-portrait" id="menu-portrait"></div>
+          <div class="pb-name">
+            <div class="name" id="menu-name">DRIVER</div>
+            <div class="ctitle-sm" id="menu-ctitle"></div>
+            <div class="small" id="menu-runs"></div>
+          </div>
         </div>
         <div class="scrap">SCRAP <b id="menu-scrap">0</b></div>
       </div>
       <h1 style="font-size:36px;margin-top:8px">MOJAVE RUN</h1>
       <button class="btn primary" data-act="menu-play">▶ PLAY</button>
       <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
+      <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
       <button class="btn" data-act="menu-stats">STATS</button>
       <button class="btn" data-act="menu-settings">SETTINGS</button>
       <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">CO-OP GHOST RUN</span></button>
