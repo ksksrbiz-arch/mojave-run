@@ -39,6 +39,7 @@
     _pingTimer: 0,
     _lastPongAt: 0,
     _lastPingSentAt: 0,
+    _awaitingPongSince: 0,
     _reconnectTimer: 0,
     _reconnectAttempts: 0,
     _wantConnected: false,        // user intent — only auto-reconnect when true
@@ -109,6 +110,7 @@
       if (!isCurrent()) return;
       MP._reconnectAttempts = 0;
       MP._lastPongAt = performance.now();
+      MP._awaitingPongSince = 0;
       try {
         ws.send(JSON.stringify({
           type: 'join',
@@ -180,6 +182,7 @@
         case 'pong': {
           const now = performance.now();
           MP._lastPongAt = now;
+          MP._awaitingPongSince = 0;
           if (typeof msg.t === 'number') {
             MP.pingMs = Math.max(0, Math.round(now - msg.t));
             emit('latency', MP.pingMs);
@@ -228,12 +231,14 @@
     MP._pingTimer = setInterval(() => {
       if (!MP.ws || MP.ws.readyState !== 1) return;
       const now = performance.now();
-      // dead-link guard: no pong in PING_TIMEOUT_MS -> force close to trigger reconnect
-      if (MP._lastPongAt && now - MP._lastPongAt > PING_TIMEOUT_MS) {
+      // dead-link guard: once a ping is outstanding, require a pong in time.
+      if (MP._awaitingPongSince && now - MP._awaitingPongSince > PING_TIMEOUT_MS) {
         try { MP.ws.close(); } catch (_) {}
         return;
       }
+      if (MP._awaitingPongSince) return;
       MP._lastPingSentAt = now;
+      MP._awaitingPongSince = now;
       try { MP.ws.send(JSON.stringify({ type: 'ping', t: now })); } catch (_) {}
     }, PING_INTERVAL_MS);
   }
@@ -287,6 +292,7 @@
     MP.joining = false;
     MP.peers.clear();
     MP.pingMs = null;
+    MP._awaitingPongSince = 0;
     MP._pendingState = null;
     // When there's no live socket the close handler won't fire, so we have
     // to emit the disconnected status ourselves. With a live socket the
@@ -327,7 +333,12 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && MP.ws && MP.ws.readyState === 1) {
       MP._lastPongAt = performance.now();
-      try { MP.ws.send(JSON.stringify({ type: 'ping', t: performance.now() })); } catch (_) {}
+      if (!MP._awaitingPongSince) {
+        const now = performance.now();
+        MP._lastPingSentAt = now;
+        MP._awaitingPongSince = now;
+        try { MP.ws.send(JSON.stringify({ type: 'ping', t: now })); } catch (_) {}
+      }
     }
   });
 
