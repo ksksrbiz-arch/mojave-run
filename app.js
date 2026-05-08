@@ -252,7 +252,7 @@ const CHARACTERS = [
     name: 'ABIGAIL',
     title: 'DUSTHOWLER',
     bio: 'Born in a shotgun shack at mile 88. Hasn’t lost a duel since she could see over a steering wheel. The wasteland flinches when she laughs.',
-    perk: '+5% SCRAP FROM KILLS',
+    perk: '+5% SCORE FROM KILLS',
     palette: { skin:'#caa07a', skinDark:'#7d4a28', hair:'#a86a2e', hairHi:'#f5d76e', accent:'#f5d76e', cloth:'#3a2410', metal:'#8a4f1f', bg1:'#3a230f', bg2:'#180c04' },
   },
   {
@@ -1746,10 +1746,13 @@ function fireBossPattern(b) {
   } else if (b.pattern === 'lance') {
     // focused rail shots + spread shrapnel
     Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:9, h:16, vx:dx/dist*sp*1.6, vy:dy/dist*sp*1.6, dmg:dmg*1.15, big:true });
+    const baseVx = dx / dist * sp * 0.95;
+    const baseVy = dy / dist * sp * 0.95;
     for (let i = -2; i <= 2; i++) {
       const a = i * 0.16;
       const cs = Math.cos(a), sn = Math.sin(a);
-      const vx = (dx*cs - dy*sn)/dist*sp*0.95, vy = (dx*sn + dy*cs)/dist*sp*0.95;
+      const vx = (baseVx * cs) - (baseVy * sn);
+      const vy = (baseVx * sn) + (baseVy * cs);
       Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:8, vx, vy, dmg:dmg*0.7, big:false });
     }
   } else if (b.pattern === 'maelstrom') {
