@@ -17,5 +17,22 @@
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Daily Challenge",
+      "short_name": "Daily",
+      "description": "Same seed for everyone, every day.",
+      "url": "/?mode=daily",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Continue",
+      "short_name": "Continue",
+      "description": "Jump straight back to your last driver.",
+      "url": "/?continue=1",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
   ]
 }
+

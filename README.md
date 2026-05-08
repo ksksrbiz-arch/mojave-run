@@ -11,12 +11,15 @@ Mobile-first browser game. Zero deps, zero build, zero backend. Single-page app,
 - **Driver profiles** — up to 6 named drivers per device, persistent locally
 - **5 vehicles** — Rust Bucket / Junker / Roadrunner / Goliath / Phantom — each with unique stats
 - **3 upgrade tracks × 5 tiers** — Engine, Plating, Weapons; per-vehicle progression
-- **3 modes** — Classic (endless), Gauntlet (12 tiered sectors with 3 bosses), Time Attack (60s frenzy)
+- **4 modes** — Classic (endless), Gauntlet (12 tiered sectors with 3 bosses), Time Attack (60s frenzy), **Daily Challenge** (seeded run, same world for everyone, shareable score)
 - **12-level Gauntlet** — survive / kill / distance / boss objectives; bosses every 4 levels
 - **3 boss tiers** — Alpha Raider, Twin Demons, The Overlord — each with unique attack patterns and enrage at 30% HP
 - **Day / night / sandstorm** — late levels feature night sky with stars + headlight cones, or sandstorm streaks
 - **Currency loop** — earn SCRAP from runs (10% of score + boss bonuses), spend on vehicles & upgrades
 - **Stats screen** — lifetime tracking per driver
+- **Settings panel** — master/SFX volume, screen-shake intensity, particle density, haptics toggle, large touch targets, graphics quality
+- **In-game pause menu** — resume / restart / settings / quit, with full DOM tap targets
+- **Offline-first PWA** — service worker caches the game so it loads instantly and plays without a network
 
 ## Controls
 
