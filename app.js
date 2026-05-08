@@ -469,8 +469,8 @@ function characterPortraitSVG(charId) {
       ${dust}
     `;
   } else {
-    // Generic fallback portrait used by any future characters not explicitly
-    // hand-drawn above.
+    // Generic fallback portrait intentionally used for characters without
+    // bespoke art variants (including newly added roster entries).
     face = `
       <radialGradient id="g-generic" cx="50%" cy="55%" r="68%">
         <stop offset="0%" stop-color="${p.bg1}"/>
@@ -511,6 +511,7 @@ function characterPortraitSVG(charId) {
 const STORAGE_KEY = 'mojaveRun_profiles_v2';
 const ACTIVE_KEY  = 'mojaveRun_activeProfile_v2';
 const LEGACY_BEST = 'mojaveRunBest';
+const UPGRADE_TRACK_DEFAULTS = Object.fromEntries(UPGRADE_TRACKS.map(t => [t.id, 0]));
 
 const Profile = {
   _data: null,
@@ -522,7 +523,6 @@ const Profile = {
     // migrate: ensure every profile has a characterId and complete upgrade keys
     if (this._data && Array.isArray(this._data.profiles)) {
       let dirty = false;
-      const trackDefaults = Object.fromEntries(UPGRADE_TRACKS.map(t => [t.id, 0]));
       this._data.profiles.forEach(p => {
         if (!p.characterId || !CHARACTER_BY_ID[p.characterId]) {
           p.characterId = DEFAULT_CHARACTER_ID;
@@ -533,11 +533,11 @@ const Profile = {
         Object.keys(p.ownedVehicles).forEach(vid => {
           if (!p.ownedVehicles[vid]) return;
           if (!p.vehicleUpgrades[vid]) {
-            p.vehicleUpgrades[vid] = Object.assign({}, trackDefaults);
+            p.vehicleUpgrades[vid] = Object.assign({}, UPGRADE_TRACK_DEFAULTS);
             dirty = true;
             return;
           }
-          for (const tid of Object.keys(trackDefaults)) {
+          for (const tid of Object.keys(UPGRADE_TRACK_DEFAULTS)) {
             if (typeof p.vehicleUpgrades[vid][tid] !== 'number') {
               p.vehicleUpgrades[vid][tid] = 0;
               dirty = true;
@@ -812,7 +812,8 @@ const BIOME_KEYS = Object.keys(BIOME_THEMES);
 function pickBiome(mode, levelData, dailySeedKey) {
   if (levelData && levelData.map && BIOME_THEMES[levelData.map]) return levelData.map;
   if (mode === 'daily' && dailySeedKey) {
-    const idx = seedFromString('biome-' + dailySeedKey) % BIOME_KEYS.length;
+    const seeded = seedFromString('biome-' + dailySeedKey);
+    const idx = ((seeded % BIOME_KEYS.length) + BIOME_KEYS.length) % BIOME_KEYS.length;
     return BIOME_KEYS[idx];
   }
   if (mode === 'timeattack') return 'redcanyon';
