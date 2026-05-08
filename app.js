@@ -1041,7 +1041,7 @@ function comboMult() {
 }
 
 function applyKill(x, y, baseScore) {
-  baseScore *= (Game.killScoreMul || 1);
+  baseScore *= Game.killScoreMul;
   const prev = comboMult();
   Game.combo = (Game.combo | 0) + 1;
   Game.comboT = COMBO_WINDOW;
@@ -1460,7 +1460,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   pauseBtn.classList.remove('show');
   fsBtn.classList.remove('hidden');
   // award scrap (10% of score)
-  const baseScrap = Math.floor((Game.score / 10) * (Game.scrapMul || 1));
+  const baseScrap = Math.floor((Game.score / 10) * Game.scrapMul);
   let bonus = 0;
   if (reason === 'victory' && Game.levelData) bonus = Game.levelData.reward;
   Game.scrapEarned = baseScrap + bonus;
@@ -2682,12 +2682,12 @@ function drawWeather() {
   if (Game.isNight) {
     // headlight cones from player
     const p = Game.player;
-    const headlightRange = 240 * (Game.nightVisionMul || 1);
+    const headlightRange = 240 * Game.nightVisionMul;
     const grad = ctx.createRadialGradient(p.x, p.y - 30, 20, p.x, p.y - 30, headlightRange);
     grad.addColorStop(0, 'rgba(255,235,180,0.20)');
     grad.addColorStop(1, 'rgba(255,235,180,0)');
     ctx.fillStyle = grad;
-    const coneLen = 260 * (Game.nightVisionMul || 1);
+    const coneLen = 260 * Game.nightVisionMul;
     ctx.beginPath();
     ctx.moveTo(p.x - 40, p.y);
     ctx.lineTo(p.x - 100, p.y - coneLen);
@@ -3945,7 +3945,7 @@ const UI = {
       tile.innerHTML = `
         <div class="ln">${L.num}</div>
         <div class="lname">${L.name}</div>
-        <div class="lobj">${objLabel} · ${mapLabel}</div>
+        <div class="lobj">${objLabel} - ${mapLabel}</div>
         ${cleared ? '<div class="lcheck">✓</div>' : ''}
         ${isBoss && !cleared ? '<div class="star">★</div>' : ''}
       `;
