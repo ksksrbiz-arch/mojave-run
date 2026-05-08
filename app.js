@@ -49,6 +49,20 @@ const VEHICLES = [
     base: { maxHp: 60, accel: 2000, maxV: 520, fireRate: 0.10, dmg: 1, guns: 4, bigShot: false },
     color: { body:'#2a3a5a', hood:'#1a2a48', cab:'#0a1a32', windshield:'#7ad0ff', glow:'#80f0ff' },
   },
+  {
+    id: 'sandviper', name: 'SAND VIPER',
+    desc: 'Nitro-tuned interceptor. Fast, sharp, unforgiving.',
+    cost: 6200,
+    base: { maxHp: 85, accel: 2700, maxV: 640, fireRate: 0.12, dmg: 1, guns: 3, bigShot: false },
+    color: { body:'#d27b2a', hood:'#8f4418', cab:'#3e1c0b', windshield:'#9fe6ff', glow:'#ffd16f' },
+  },
+  {
+    id: 'ironclad', name: 'IRONCLAD',
+    desc: 'Armored convoy breaker. Brutal burst damage.',
+    cost: 8800,
+    base: { maxHp: 260, accel: 1250, maxV: 340, fireRate: 0.34, dmg: 4, guns: 2, bigShot: true },
+    color: { body:'#4c5358', hood:'#31373c', cab:'#181d22', windshield:'#88a8b8', glow:'#ff9d66' },
+  },
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
@@ -80,30 +94,138 @@ const UPGRADE_TRACKS = [
     },
     tiers: [150, 300, 600, 1200, 2400],
   },
+  {
+    id: 'reactor', name: 'REACTOR',
+    desc: 'Overclocked payload output. More damage.',
+    apply: (st, tier) => {
+      const m = [1, 1.08, 1.16, 1.26, 1.38, 1.52][tier];
+      st.dmg *= m;
+    },
+    tiers: [250, 500, 950, 1800, 3200],
+  },
 ];
 
 const MODES = [
   { id: 'classic',    name: 'CLASSIC',     desc: 'Endless run. Survive as long as you can. Difficulty climbs forever.' },
-  { id: 'gauntlet',   name: 'GAUNTLET',    desc: '12 tiered sectors. Clear objectives. Bosses every 4 levels.' },
+  { id: 'gauntlet',   name: 'GAUNTLET',    desc: '18 tiered sectors. Clear objectives. Multi-biome bosses every 4-6 levels.' },
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
 ];
 
-// 12 gauntlet levels. obj: 'survive' (seconds), 'kills' (count), 'distance' (meters), 'boss' (boss tier)
+// 18 gauntlet levels. obj: 'survive' (seconds), 'kills' (count), 'distance' (meters), 'boss' (boss tier)
 const LEVELS = [
-  { num:1,  name:'OUTSKIRTS',       obj:'survive',  target:30,   reward:75,   diff:1.0 },
-  { num:2,  name:'BROKEN HIGHWAY',  obj:'kills',    target:8,    reward:100,  diff:1.1 },
-  { num:3,  name:'DUST FIELDS',     obj:'distance', target:1500, reward:125,  diff:1.2 },
-  { num:4,  name:'ALPHA RAIDER',    obj:'boss',     target:1,    reward:300,  diff:1.4, boss:1 },
-  { num:5,  name:'SCORCHED FLATS',  obj:'survive',  target:45,   reward:175,  diff:1.5 },
-  { num:6,  name:'CANYON RUN',      obj:'kills',    target:14,   reward:225,  diff:1.7 },
-  { num:7,  name:'THE BONEYARD',    obj:'distance', target:2500, reward:275,  diff:1.9 },
-  { num:8,  name:'TWIN DEMONS',     obj:'boss',     target:1,    reward:500,  diff:2.1, boss:2 },
-  { num:9,  name:'NIGHT WATCH',     obj:'survive',  target:60,   reward:325,  diff:2.3, night:true },
-  { num:10, name:'STORM FRONT',     obj:'kills',    target:22,   reward:425,  diff:2.6, storm:true },
-  { num:11, name:'DEAD ZONE',       obj:'distance', target:3500, reward:550,  diff:3.0, night:true, storm:true },
-  { num:12, name:'THE OVERLORD',    obj:'boss',     target:1,    reward:1500, diff:3.5, boss:3, night:true },
+  { num:1,  name:'OUTSKIRTS',       obj:'survive',  target:30,   reward:75,   diff:1.0,  map:'wastes' },
+  { num:2,  name:'BROKEN HIGHWAY',  obj:'kills',    target:8,    reward:100,  diff:1.1,  map:'wastes' },
+  { num:3,  name:'DUST FIELDS',     obj:'distance', target:1500, reward:125,  diff:1.2,  map:'wastes' },
+  { num:4,  name:'ALPHA RAIDER',    obj:'boss',     target:1,    reward:300,  diff:1.4,  boss:1, map:'wastes' },
+  { num:5,  name:'SCORCHED FLATS',  obj:'survive',  target:45,   reward:175,  diff:1.5,  map:'saltflats' },
+  { num:6,  name:'CANYON RUN',      obj:'kills',    target:14,   reward:225,  diff:1.7,  map:'saltflats' },
+  { num:7,  name:'THE BONEYARD',    obj:'distance', target:2500, reward:275,  diff:1.9,  map:'saltflats' },
+  { num:8,  name:'TWIN DEMONS',     obj:'boss',     target:1,    reward:500,  diff:2.1,  boss:2, map:'saltflats' },
+  { num:9,  name:'NIGHT WATCH',     obj:'survive',  target:60,   reward:325,  diff:2.3,  map:'ash', night:true },
+  { num:10, name:'STORM FRONT',     obj:'kills',    target:22,   reward:425,  diff:2.6,  map:'ash', storm:true },
+  { num:11, name:'DEAD ZONE',       obj:'distance', target:3500, reward:550,  diff:3.0,  map:'ash', night:true, storm:true },
+  { num:12, name:'THE OVERLORD',    obj:'boss',     target:1,    reward:1500, diff:3.5,  boss:3, map:'ash', night:true },
+  { num:13, name:'SUNSCAR BASIN',   obj:'survive',  target:70,   reward:650,  diff:3.7,  map:'redcanyon', storm:true },
+  { num:14, name:'IRON SPINE',      obj:'kills',    target:30,   reward:760,  diff:4.0,  map:'redcanyon', night:true },
+  { num:15, name:'RAVEN CHASM',     obj:'distance', target:4600, reward:900,  diff:4.4,  map:'redcanyon', night:true, storm:true },
+  { num:16, name:'WARLORD TITAN',   obj:'boss',     target:1,    reward:1900, diff:4.8,  boss:4, map:'redcanyon', storm:true },
+  { num:17, name:'VOID MILE',       obj:'survive',  target:85,   reward:1150, diff:5.2,  map:'midnight', night:true, storm:true },
+  { num:18, name:'THE CHIMERA',     obj:'boss',     target:1,    reward:3000, diff:6.0,  boss:5, map:'midnight', night:true, storm:true },
 ];
+
+const BIOME_THEMES = {
+  wastes: {
+    skyDayTop:'#3a230f', skyDayMid:'#5a3818', skyDayBottom:'#6e4621',
+    skyStormTop:'#2a1a18', skyStormMid:'#4a2a18',
+    skyNightTop:'#0a0a1a', skyNightMid:'#1a1530', skyNightBottom:'#2a1f1a',
+    skyNightStormTop:'#1a0a1a', skyNightStormMid:'#2a1530',
+    farDay:'rgba(70,42,18,0.55)', farNight:'rgba(15,10,28,0.75)',
+    mountainDay:'#2a1808', mountainNight:'#0a0612',
+    hillsDay:'#3a230f', hillsNight:'#1a1020',
+    shoulderDay:'#3d2510', shoulderNight:'#1a1208',
+    crackDay:'rgba(0,0,0,0.15)', crackNight:'rgba(80,70,60,0.08)',
+    lineDay:'rgba(245,215,110,0.65)', lineNight:'rgba(245,215,110,0.85)',
+    roadDayA:'#1f1610', roadDayB:'#2a1d12',
+    roadNightA:'#0a0a08', roadNightB:'#181410',
+    cactusDay:'#3a5a2a', cactusNight:'#1a3a18',
+    wreckDay:'#4a3020', wreckNight:'#2a2018',
+    skullDay:'#cabaa8', skullNight:'#9a8a78',
+    stormLine:'rgba(180,140,90,0.25)', stormHaze:'rgba(180,140,90,0.08)',
+  },
+  saltflats: {
+    skyDayTop:'#564f3f', skyDayMid:'#8a7c64', skyDayBottom:'#c0b39b',
+    skyStormTop:'#4b4637', skyStormMid:'#796e57',
+    skyNightTop:'#141822', skyNightMid:'#263140', skyNightBottom:'#2f2c35',
+    skyNightStormTop:'#1d2530', skyNightStormMid:'#38404f',
+    farDay:'rgba(88,82,72,0.58)', farNight:'rgba(30,34,45,0.78)',
+    mountainDay:'#5e5648', mountainNight:'#1a1f2b',
+    hillsDay:'#7e725e', hillsNight:'#2a3342',
+    shoulderDay:'#8c7f68', shoulderNight:'#3a3c40',
+    crackDay:'rgba(70,60,45,0.18)', crackNight:'rgba(130,120,110,0.10)',
+    lineDay:'rgba(245,232,190,0.7)', lineNight:'rgba(245,232,190,0.9)',
+    roadDayA:'#5a554b', roadDayB:'#6b665b',
+    roadNightA:'#1f2128', roadNightB:'#2d3138',
+    cactusDay:'#5f6c54', cactusNight:'#404b3e',
+    wreckDay:'#6d6252', wreckNight:'#423e3b',
+    skullDay:'#efe4d2', skullNight:'#b8b0a2',
+    stormLine:'rgba(230,220,200,0.18)', stormHaze:'rgba(230,220,200,0.06)',
+  },
+  ash: {
+    skyDayTop:'#35241f', skyDayMid:'#4a332c', skyDayBottom:'#5f4a3d',
+    skyStormTop:'#2a1d1b', skyStormMid:'#3f2d29',
+    skyNightTop:'#140f1a', skyNightMid:'#221a2e', skyNightBottom:'#2e2530',
+    skyNightStormTop:'#1a1322', skyNightStormMid:'#2d2138',
+    farDay:'rgba(52,38,34,0.62)', farNight:'rgba(22,18,28,0.82)',
+    mountainDay:'#2f2522', mountainNight:'#15111c',
+    hillsDay:'#433230', hillsNight:'#221a2a',
+    shoulderDay:'#342923', shoulderNight:'#1f1818',
+    crackDay:'rgba(20,18,18,0.2)', crackNight:'rgba(95,85,90,0.12)',
+    lineDay:'rgba(214,171,120,0.68)', lineNight:'rgba(214,171,120,0.88)',
+    roadDayA:'#251d1b', roadDayB:'#2d2523',
+    roadNightA:'#100d10', roadNightB:'#171218',
+    cactusDay:'#50594d', cactusNight:'#343a34',
+    wreckDay:'#3f332d', wreckNight:'#241f21',
+    skullDay:'#b6a99c', skullNight:'#8f8378',
+    stormLine:'rgba(140,120,115,0.24)', stormHaze:'rgba(140,120,115,0.08)',
+  },
+  redcanyon: {
+    skyDayTop:'#4a1f16', skyDayMid:'#79331f', skyDayBottom:'#aa5830',
+    skyStormTop:'#381a14', skyStormMid:'#5a281d',
+    skyNightTop:'#1b0f16', skyNightMid:'#2f1526', skyNightBottom:'#3d2228',
+    skyNightStormTop:'#24111c', skyNightStormMid:'#3f1f30',
+    farDay:'rgba(95,36,24,0.6)', farNight:'rgba(34,14,24,0.8)',
+    mountainDay:'#3a1a12', mountainNight:'#180913',
+    hillsDay:'#592718', hillsNight:'#271221',
+    shoulderDay:'#4d2416', shoulderNight:'#241211',
+    crackDay:'rgba(38,16,10,0.2)', crackNight:'rgba(120,70,50,0.12)',
+    lineDay:'rgba(255,196,120,0.72)', lineNight:'rgba(255,196,120,0.9)',
+    roadDayA:'#2c1711', roadDayB:'#3c2118',
+    roadNightA:'#130b0d', roadNightB:'#1d1015',
+    cactusDay:'#5a4a2f', cactusNight:'#3b2f24',
+    wreckDay:'#5b3323', wreckNight:'#322025',
+    skullDay:'#d8b8a0', skullNight:'#aa8975',
+    stormLine:'rgba(200,110,72,0.25)', stormHaze:'rgba(200,110,72,0.08)',
+  },
+  midnight: {
+    skyDayTop:'#25253a', skyDayMid:'#303658', skyDayBottom:'#3b4472',
+    skyStormTop:'#202338', skyStormMid:'#2a3152',
+    skyNightTop:'#060712', skyNightMid:'#0f1430', skyNightBottom:'#1b203a',
+    skyNightStormTop:'#0a0e1a', skyNightStormMid:'#151d38',
+    farDay:'rgba(32,36,76,0.62)', farNight:'rgba(10,12,35,0.82)',
+    mountainDay:'#161a3d', mountainNight:'#090d24',
+    hillsDay:'#242956', hillsNight:'#12183c',
+    shoulderDay:'#1d2142', shoulderNight:'#121426',
+    crackDay:'rgba(0,0,0,0.18)', crackNight:'rgba(120,140,220,0.10)',
+    lineDay:'rgba(153,206,255,0.68)', lineNight:'rgba(153,206,255,0.92)',
+    roadDayA:'#141a30', roadDayB:'#1a223d',
+    roadNightA:'#060812', roadNightB:'#0f1425',
+    cactusDay:'#304a60', cactusNight:'#1f3142',
+    wreckDay:'#2d3652', wreckNight:'#1b2439',
+    skullDay:'#c0d7ee', skullNight:'#8fa6c2',
+    stormLine:'rgba(110,140,255,0.22)', stormHaze:'rgba(110,140,255,0.06)',
+  },
+};
 
 // ============================================================
 // CHARACTERS — choosable badlands warriors
@@ -130,8 +252,24 @@ const CHARACTERS = [
     name: 'ABIGAIL',
     title: 'DUSTHOWLER',
     bio: 'Born in a shotgun shack at mile 88. Hasn’t lost a duel since she could see over a steering wheel. The wasteland flinches when she laughs.',
-    perk: '+5% SCRAP FROM KILLS',
+    perk: '+5% SCORE FROM KILLS',
     palette: { skin:'#caa07a', skinDark:'#7d4a28', hair:'#a86a2e', hairHi:'#f5d76e', accent:'#f5d76e', cloth:'#3a2410', metal:'#8a4f1f', bg1:'#3a230f', bg2:'#180c04' },
+  },
+  {
+    id: 'nox',
+    name: 'NOX',
+    title: 'THE SIGNAL GHOST',
+    bio: 'Used to jam convoy radios for sport. Now she makes wrecks sing in perfect static.',
+    perk: '+8% SCORE FROM KILLS',
+    palette: { skin:'#9f7f67', skinDark:'#5e3f2c', hair:'#101318', hairHi:'#496180', accent:'#7ad0ff', cloth:'#1b2230', metal:'#8ea8c5', bg1:'#121826', bg2:'#060b12' },
+  },
+  {
+    id: 'ram',
+    name: 'RAM',
+    title: 'THE CONVOY HAMMER',
+    bio: 'Ex-war rig mechanic with a welded grin and no reverse gear in his vocabulary.',
+    perk: '+10% SCRAP PAYOUT',
+    palette: { skin:'#b18462', skinDark:'#6d442d', hair:'#3d2417', hairHi:'#7d543b', accent:'#ff9d66', cloth:'#38261c', metal:'#74615a', bg1:'#301812', bg2:'#120907' },
   },
 ];
 const CHARACTER_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));
@@ -268,7 +406,7 @@ function characterPortraitSVG(charId) {
       <circle class="spark" cx="78" cy="74" r="1.4" fill="${p.accent}"/>
       ${dust}
     `;
-  } else {
+  } else if (c.id === 'abigail') {
     // ABIGAIL — goggles on forehead, side braid, hood, oil smudge
     face = `
       <radialGradient id="g-abi" cx="50%" cy="55%" r="65%">
@@ -330,6 +468,39 @@ function characterPortraitSVG(charId) {
       <rect class="spark" x="49" y="62" width="1.6" height="1.6" fill="${p.accent}"/>
       ${dust}
     `;
+  } else {
+    // Generic fallback portrait intentionally used for characters without
+    // bespoke art variants (including newly added roster entries).
+    face = `
+      <radialGradient id="g-generic" cx="50%" cy="55%" r="68%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-generic)"/>
+      <circle class="ember" cx="24" cy="20" r="14" fill="${p.accent}" opacity=".4"/>
+      <circle class="ember" cx="74" cy="24" r="10" fill="${p.metal}" opacity=".35"/>
+      <g class="breath">
+        <path d="M8 100 L12 82 Q26 66 40 66 L60 66 Q74 66 88 82 L92 100 Z" fill="${p.cloth}"/>
+        <rect x="44" y="60" width="12" height="12" fill="${p.skin}"/>
+      </g>
+      <ellipse cx="50" cy="46" rx="22" ry="25" fill="${p.skin}"/>
+      <path d="M30 34 Q50 20 70 34 L70 40 Q50 30 30 40 Z" fill="${p.hair}"/>
+      <path d="M32 36 Q50 28 68 36" stroke="${p.hairHi}" stroke-width=".8" fill="none" opacity=".7"/>
+      <g>
+        <ellipse cx="42" cy="47" rx="3.2" ry="2.1" fill="#fff"/>
+        <circle cx="42" cy="47" r="1.3" fill="${p.cloth}"/>
+        <ellipse cx="58" cy="47" rx="3.2" ry="2.1" fill="#fff"/>
+        <circle cx="58" cy="47" r="1.3" fill="${p.cloth}"/>
+        <rect class="eyelid" x="39" y="45" width="6" height="4" fill="${p.skinDark}"/>
+        <rect class="eyelid b" x="55" y="45" width="6" height="4" fill="${p.skinDark}"/>
+      </g>
+      <rect x="38" y="42" width="8" height="1.2" fill="${p.hair}"/>
+      <rect x="54" y="42" width="8" height="1.2" fill="${p.hair}"/>
+      <path d="M50 49 L48 57 L52 57 Z" fill="${p.skinDark}" opacity=".35"/>
+      <path d="M44 62 Q50 65 56 62" stroke="${p.skinDark}" stroke-width="1.1" fill="none"/>
+      <path d="M34 55 Q50 60 66 55" stroke="${p.accent}" stroke-width="1.3" fill="none" opacity=".5"/>
+      ${dust}
+    `;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" shape-rendering="geometricPrecision" preserveAspectRatio="xMidYMid slice">${face}</svg>`;
 }
@@ -340,6 +511,7 @@ function characterPortraitSVG(charId) {
 const STORAGE_KEY = 'mojaveRun_profiles_v2';
 const ACTIVE_KEY  = 'mojaveRun_activeProfile_v2';
 const LEGACY_BEST = 'mojaveRunBest';
+const UPGRADE_TRACK_DEFAULTS = Object.fromEntries(UPGRADE_TRACKS.map(t => [t.id, 0]));
 
 const Profile = {
   _data: null,
@@ -348,7 +520,7 @@ const Profile = {
       const raw = localStorage.getItem(STORAGE_KEY);
       this._data = raw ? JSON.parse(raw) : { profiles: [] };
     } catch (e) { this._data = { profiles: [] }; }
-    // migrate: ensure every profile has a characterId
+    // migrate: ensure every profile has a characterId and complete upgrade keys
     if (this._data && Array.isArray(this._data.profiles)) {
       let dirty = false;
       this._data.profiles.forEach(p => {
@@ -356,6 +528,22 @@ const Profile = {
           p.characterId = DEFAULT_CHARACTER_ID;
           dirty = true;
         }
+        p.ownedVehicles = p.ownedVehicles || { rustbucket: true };
+        p.vehicleUpgrades = p.vehicleUpgrades || {};
+        Object.keys(p.ownedVehicles).forEach(vid => {
+          if (!p.ownedVehicles[vid]) return;
+          if (!p.vehicleUpgrades[vid]) {
+            p.vehicleUpgrades[vid] = Object.assign({}, UPGRADE_TRACK_DEFAULTS);
+            dirty = true;
+            return;
+          }
+          for (const tid of Object.keys(UPGRADE_TRACK_DEFAULTS)) {
+            if (typeof p.vehicleUpgrades[vid][tid] !== 'number') {
+              p.vehicleUpgrades[vid][tid] = 0;
+              dirty = true;
+            }
+          }
+        });
       });
       if (dirty) this.save();
     }
@@ -393,7 +581,7 @@ const Profile = {
       bestTime: 0,
       bestDistance: 0,
       ownedVehicles: { rustbucket: true },
-      vehicleUpgrades: { rustbucket: { engine: 0, plating: 0, weapons: 0 } },
+      vehicleUpgrades: { rustbucket: { engine: 0, plating: 0, weapons: 0, reactor: 0 } },
       activeVehicle: 'rustbucket',
       gauntletCleared: [], // array of cleared level numbers
     };
@@ -437,7 +625,7 @@ const Profile = {
     if (p.scrap < v.cost) return false;
     p.scrap -= v.cost;
     p.ownedVehicles[vehicleId] = true;
-    p.vehicleUpgrades[vehicleId] = { engine: 0, plating: 0, weapons: 0 };
+    p.vehicleUpgrades[vehicleId] = { engine: 0, plating: 0, weapons: 0, reactor: 0 };
     this.save();
     return true;
   },
@@ -620,6 +808,28 @@ function restoreRng() {
   _seededActive = false;
 }
 
+const BIOME_KEYS = Object.keys(BIOME_THEMES);
+function pickBiome(mode, levelData, dailySeedKey) {
+  if (levelData && levelData.map && BIOME_THEMES[levelData.map]) return levelData.map;
+  if (mode === 'daily' && dailySeedKey) {
+    const seeded = seedFromString('biome-' + dailySeedKey);
+    const idx = ((seeded % BIOME_KEYS.length) + BIOME_KEYS.length) % BIOME_KEYS.length;
+    return BIOME_KEYS[idx];
+  }
+  if (mode === 'timeattack') return 'redcanyon';
+  return 'wastes';
+}
+function getCharacterPerkState(characterId) {
+  const perks = {
+    opal:    { scrapMul: 1.05, killScoreMul: 1.00, nightVisionMul: 1.00 },
+    ophelia: { scrapMul: 1.00, killScoreMul: 1.00, nightVisionMul: 1.20 },
+    abigail: { scrapMul: 1.00, killScoreMul: 1.05, nightVisionMul: 1.00 },
+    nox:     { scrapMul: 1.00, killScoreMul: 1.08, nightVisionMul: 1.10 },
+    ram:     { scrapMul: 1.10, killScoreMul: 1.00, nightVisionMul: 1.00 },
+  };
+  return perks[characterId] ?? perks[DEFAULT_CHARACTER_ID];
+}
+
 // ============================================================
 // CANVAS
 // ============================================================
@@ -637,6 +847,10 @@ let SKY_GRAD = null;
 let ROAD_GRAD = null;
 let _skyKey = '';
 let _roadKey = '';
+function activeBiomeTheme() {
+  const id = (Game && Game.biome) || 'wastes';
+  return BIOME_THEMES[id] || BIOME_THEMES.wastes;
+}
 function rebuildGradients() {
   VIGNETTE_PLAY = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
   VIGNETTE_PLAY.addColorStop(0, 'rgba(0,0,0,0)');
@@ -648,33 +862,37 @@ function rebuildGradients() {
   _skyKey = ''; _roadKey = '';
 }
 function getSkyGradient() {
-  const key = `${W}x${H}|${Game.isNight?1:0}|${Game.isStorm?1:0}`;
+  const biome = (Game && Game.biome) || 'wastes';
+  const key = `${W}x${H}|${Game.isNight?1:0}|${Game.isStorm?1:0}|${biome}`;
   if (key === _skyKey && SKY_GRAD) return SKY_GRAD;
+  const t = activeBiomeTheme();
   const g = ctx.createLinearGradient(0, 0, 0, H);
   if (Game.isNight) {
-    g.addColorStop(0, Game.isStorm ? '#1a0a1a' : '#0a0a1a');
-    g.addColorStop(0.35, Game.isStorm ? '#2a1530' : '#1a1530');
-    g.addColorStop(1, '#2a1f1a');
+    g.addColorStop(0, Game.isStorm ? t.skyNightStormTop : t.skyNightTop);
+    g.addColorStop(0.35, Game.isStorm ? t.skyNightStormMid : t.skyNightMid);
+    g.addColorStop(1, t.skyNightBottom);
   } else {
-    g.addColorStop(0, Game.isStorm ? '#2a1a18' : '#3a230f');
-    g.addColorStop(0.4, Game.isStorm ? '#4a2a18' : '#5a3818');
-    g.addColorStop(1, '#6e4621');
+    g.addColorStop(0, Game.isStorm ? t.skyStormTop : t.skyDayTop);
+    g.addColorStop(0.4, Game.isStorm ? t.skyStormMid : t.skyDayMid);
+    g.addColorStop(1, t.skyDayBottom);
   }
   SKY_GRAD = g; _skyKey = key;
   return g;
 }
 function getRoadGradient(x0, x1) {
-  const key = `${x0}|${x1}|${Game.isNight?1:0}`;
+  const biome = (Game && Game.biome) || 'wastes';
+  const key = `${x0}|${x1}|${Game.isNight?1:0}|${biome}`;
   if (key === _roadKey && ROAD_GRAD) return ROAD_GRAD;
+  const t = activeBiomeTheme();
   const rg = ctx.createLinearGradient(x0, 0, x1, 0);
   if (Game.isNight) {
-    rg.addColorStop(0, '#0a0a08');
-    rg.addColorStop(0.5, '#181410');
-    rg.addColorStop(1, '#0a0a08');
+    rg.addColorStop(0, t.roadNightA);
+    rg.addColorStop(0.5, t.roadNightB);
+    rg.addColorStop(1, t.roadNightA);
   } else {
-    rg.addColorStop(0, '#1f1610');
-    rg.addColorStop(0.5, '#2a1d12');
-    rg.addColorStop(1, '#1f1610');
+    rg.addColorStop(0, t.roadDayA);
+    rg.addColorStop(0.5, t.roadDayB);
+    rg.addColorStop(1, t.roadDayA);
   }
   ROAD_GRAD = rg; _roadKey = key;
   return rg;
@@ -824,6 +1042,7 @@ function comboMult() {
 }
 
 function applyKill(x, y, baseScore) {
+  baseScore *= Game.killScoreMul;
   const prev = comboMult();
   Game.combo = (Game.combo | 0) + 1;
   Game.comboT = COMBO_WINDOW;
@@ -1039,6 +1258,7 @@ const Game = {
   level: null,            // gauntlet level number
   levelData: null,
   dailySeedKey: null,     // 'YYYY-MM-DD' when mode === 'daily'
+  biome: 'wastes',
   t: 0,
   animT: 0,               // always-advancing clock for menu/idle animations
   // run stats
@@ -1061,6 +1281,10 @@ const Game = {
   // theme
   isNight: false,
   isStorm: false,
+  // active character perk multipliers
+  scrapMul: 1,
+  killScoreMul: 1,
+  nightVisionMul: 1,
   // entities
   player: null,
   vehicle: null,
@@ -1138,9 +1362,11 @@ function startRun(mode, level) {
   }
   const v = VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0];
   const stats = Profile.effectiveStats(profile.activeVehicle);
+  const perkState = getCharacterPerkState(profile.characterId);
   Game.mode = mode;
   Game.level = level || null;
   Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
+  Game.biome = pickBiome(mode, Game.levelData, Game.dailySeedKey);
   Game.state = 'loading';
   Game.paused = false;
   Game.t = 0;
@@ -1165,6 +1391,9 @@ function startRun(mode, level) {
   Game.laneOffset = 0;
   Game.isNight = !!(Game.levelData && Game.levelData.night);
   Game.isStorm = !!(Game.levelData && Game.levelData.storm);
+  Game.scrapMul = perkState.scrapMul || 1;
+  Game.killScoreMul = perkState.killScoreMul || 1;
+  Game.nightVisionMul = perkState.nightVisionMul || 1;
   Game.vehicle = v;
   Game.vehicleStats = stats;
   Game.player = {
@@ -1232,7 +1461,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   pauseBtn.classList.remove('show');
   fsBtn.classList.remove('hidden');
   // award scrap (10% of score)
-  const baseScrap = Math.floor(Game.score / 10);
+  const baseScrap = Math.floor((Game.score / 10) * Game.scrapMul);
   let bonus = 0;
   if (reason === 'victory' && Game.levelData) bonus = Game.levelData.reward;
   Game.scrapEarned = baseScrap + bonus;
@@ -1382,6 +1611,8 @@ const BOSS_DEFS = [
   { name:'ALPHA RAIDER',  hp: 80,  w: 80,  h: 100, color:'#7a1a1a', pattern:'spread',  fireRate: 1.2, dmg: 12, contactDmg: 25 },
   { name:'TWIN DEMONS',   hp: 140, w: 70,  h: 90,  color:'#aa1a3a', pattern:'aimed',   fireRate: 0.7, dmg: 14, contactDmg: 30, twin: true },
   { name:'THE OVERLORD',  hp: 280, w: 110, h: 130, color:'#5a1a8a', pattern:'hellfire',fireRate: 0.4, dmg: 16, contactDmg: 40 },
+  { name:'WARLORD TITAN', hp: 420, w: 120, h: 140, color:'#8a2a1a', pattern:'lance',   fireRate: 0.35, dmg: 20, contactDmg: 48 },
+  { name:'THE CHIMERA',   hp: 620, w: 128, h: 148, color:'#3a3a9a', pattern:'maelstrom', fireRate: 0.28, dmg: 24, contactDmg: 56, twin: true },
 ];
 function spawnBoss(tier) {
   const def = BOSS_DEFS[tier] || BOSS_DEFS[1];
@@ -1512,6 +1743,29 @@ function fireBossPattern(b) {
         Game.enemyBullets.push({ x:b.x, y:b.y, w:6, h:6, vx:Math.cos(a)*180, vy:Math.sin(a)*180, dmg:dmg*0.7, big:false });
       }
     }
+  } else if (b.pattern === 'lance') {
+    // focused rail shots + spread shrapnel
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:9, h:16, vx:dx/dist*sp*1.6, vy:dy/dist*sp*1.6, dmg:dmg*1.15, big:true });
+    const baseVx = dx / dist * sp * 0.95;
+    const baseVy = dy / dist * sp * 0.95;
+    for (let i = -2; i <= 2; i++) {
+      const a = i * 0.16;
+      const cs = Math.cos(a), sn = Math.sin(a);
+      const vx = (baseVx * cs) - (baseVy * sn);
+      const vy = (baseVx * sn) + (baseVy * cs);
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:8, vx, vy, dmg:dmg*0.7, big:false });
+    }
+  } else if (b.pattern === 'maelstrom') {
+    // dual-core rotating pattern
+    const burst = b.enrage ? 12 : 8;
+    for (let i = 0; i < burst; i++) {
+      const a = b.moveT * 2.4 + (Math.PI * 2 * i) / burst;
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:6, vx:Math.cos(a)*220, vy:Math.sin(a)*220, dmg:dmg*0.6, big:false });
+      if (b.twin) {
+        Game.enemyBullets.push({ x:b.twinX, y:b.y+b.h/2, w:6, h:6, vx:Math.cos(-a)*220, vy:Math.sin(-a)*220, dmg:dmg*0.6, big:false });
+      }
+    }
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:8, h:14, vx:dx/dist*sp*1.25, vy:dy/dist*sp*1.25, dmg:dmg, big:true });
   }
 }
 
@@ -2237,6 +2491,7 @@ function splashDamage(x, y, r, dmg) {
 // RENDER
 // ============================================================
 function drawBackground() {
+  const t = activeBiomeTheme();
   // sky / ground gradient — cached and only rebuilt when size or
   // night/storm flags change (was: allocated every frame).
   ctx.fillStyle = getSkyGradient();
@@ -2277,7 +2532,7 @@ function drawBackground() {
 
   // FAR mesas (deepest parallax, scrolls slowly)
   const farScroll = (Game.bgScroll * 0.0008) % 1;
-  ctx.fillStyle = Game.isNight ? 'rgba(15,10,28,0.75)' : 'rgba(70,42,18,0.55)';
+  ctx.fillStyle = Game.isNight ? t.farNight : t.farDay;
   for (const peak of Game.farPeaks) {
     const x = ((peak.x - farScroll) % 1 + 1) % 1;
     const px = x * W;
@@ -2295,7 +2550,7 @@ function drawBackground() {
   }
 
   // distant mountains parallax
-  ctx.fillStyle = Game.isNight ? '#0a0612' : '#2a1808';
+  ctx.fillStyle = Game.isNight ? t.mountainNight : t.mountainDay;
   ctx.beginPath();
   ctx.moveTo(0, H * 0.32);
   const seed = Math.floor(Game.bgScroll * 0.05);
@@ -2309,7 +2564,7 @@ function drawBackground() {
   ctx.fill();
 
   // mid-distance hills (closer parallax)
-  ctx.fillStyle = Game.isNight ? '#1a1020' : '#3a230f';
+  ctx.fillStyle = Game.isNight ? t.hillsNight : t.hillsDay;
   ctx.beginPath();
   ctx.moveTo(0, H * 0.42);
   const seed2 = Math.floor(Game.bgScroll * 0.15);
@@ -2335,9 +2590,10 @@ function drawBackground() {
 }
 
 function drawRoad() {
+  const t = activeBiomeTheme();
   const { x0, x1, w } = roadBounds();
   // shoulder
-  ctx.fillStyle = Game.isNight ? '#1a1208' : '#3d2510';
+  ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
   ctx.fillRect(0, 0, x0, H);
   ctx.fillRect(x1, 0, W - x1, H);
 
@@ -2346,7 +2602,7 @@ function drawRoad() {
   ctx.fillRect(x0, 0, w, H);
 
   // road texture cracks (subtle)
-  ctx.fillStyle = Game.isNight ? 'rgba(80,70,60,0.08)' : 'rgba(0,0,0,0.15)';
+  ctx.fillStyle = Game.isNight ? t.crackNight : t.crackDay;
   const crackSeed = Math.floor(Game.laneOffset * 4);
   for (let i = 0; i < 12; i++) {
     const cy = ((i * 73 + crackSeed) % (H + 60)) - 30;
@@ -2360,7 +2616,7 @@ function drawRoad() {
   ctx.fillRect(x1 - 1, 0, 3, H);
 
   // dashed center line
-  ctx.fillStyle = Game.isNight ? 'rgba(245,215,110,0.85)' : 'rgba(245,215,110,0.65)';
+  ctx.fillStyle = Game.isNight ? t.lineNight : t.lineDay;
   const cx = (x0 + x1) / 2;
   const dashH = 28, gap = 32;
   for (let y = -gap + Game.laneOffset; y < H + gap; y += dashH + gap) {
@@ -2369,6 +2625,7 @@ function drawRoad() {
 }
 
 function drawDecor() {
+  const t = activeBiomeTheme();
   for (const d of Game.decor) {
     if (d.type === 'rock') {
       const c = Math.floor(60*d.tone), c2 = Math.floor(40*d.tone), c3 = Math.floor(24*d.tone);
@@ -2381,7 +2638,7 @@ function drawDecor() {
       ctx.ellipse(d.x + d.size * 0.4, d.y + d.size * 0.3, d.size * 0.6, d.size * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
     } else if (d.type === 'cactus') {
-      ctx.fillStyle = Game.isNight ? '#1a3a18' : '#3a5a2a';
+      ctx.fillStyle = Game.isNight ? t.cactusNight : t.cactusDay;
       ctx.fillRect(d.x - 3, d.y - d.size, 6, d.size);
       ctx.fillRect(d.x - 3 - 7, d.y - d.size * 0.7, 6, d.size * 0.4);
       ctx.fillRect(d.x + 3, d.y - d.size * 0.55, 6, d.size * 0.35);
@@ -2389,14 +2646,14 @@ function drawDecor() {
       ctx.save();
       ctx.translate(d.x, d.y);
       ctx.rotate(d.rot);
-      ctx.fillStyle = Game.isNight ? '#2a2018' : '#4a3020';
+      ctx.fillStyle = Game.isNight ? t.wreckNight : t.wreckDay;
       ctx.fillRect(-12, -8, 24, 16);
       ctx.fillStyle = '#0d0805';
       ctx.fillRect(-10, -6, 4, 4);
       ctx.fillRect(6, -6, 4, 4);
       ctx.restore();
     } else if (d.type === 'skull') {
-      ctx.fillStyle = Game.isNight ? '#9a8a78' : '#cabaa8';
+      ctx.fillStyle = Game.isNight ? t.skullNight : t.skullDay;
       ctx.beginPath();
       ctx.ellipse(d.x, d.y, 8, 6, 0, 0, Math.PI*2);
       ctx.fill();
@@ -2408,9 +2665,10 @@ function drawDecor() {
 }
 
 function drawWeather() {
+  const t = activeBiomeTheme();
   if (Game.isStorm) {
     // sandstorm — diagonal streaks
-    ctx.strokeStyle = 'rgba(180,140,90,0.25)';
+    ctx.strokeStyle = t.stormLine;
     ctx.lineWidth = 1;
     const seed = Math.floor(Game.t * 60);
     ctx.beginPath();
@@ -2422,20 +2680,22 @@ function drawWeather() {
     }
     ctx.stroke();
     // overall haze
-    ctx.fillStyle = 'rgba(180,140,90,0.08)';
+    ctx.fillStyle = t.stormHaze;
     ctx.fillRect(0, 0, W, H);
   }
   if (Game.isNight) {
     // headlight cones from player
     const p = Game.player;
-    const grad = ctx.createRadialGradient(p.x, p.y - 30, 20, p.x, p.y - 30, 240);
+    const headlightRange = 240 * Game.nightVisionMul;
+    const grad = ctx.createRadialGradient(p.x, p.y - 30, 20, p.x, p.y - 30, headlightRange);
     grad.addColorStop(0, 'rgba(255,235,180,0.20)');
     grad.addColorStop(1, 'rgba(255,235,180,0)');
     ctx.fillStyle = grad;
+    const coneLen = 260 * Game.nightVisionMul;
     ctx.beginPath();
     ctx.moveTo(p.x - 40, p.y);
-    ctx.lineTo(p.x - 100, p.y - 260);
-    ctx.lineTo(p.x + 100, p.y - 260);
+    ctx.lineTo(p.x - 100, p.y - coneLen);
+    ctx.lineTo(p.x + 100, p.y - coneLen);
     ctx.lineTo(p.x + 40, p.y);
     ctx.closePath();
     ctx.fill();
@@ -3685,10 +3945,11 @@ const UI = {
       else if (L.obj === 'kills') objLabel = L.target + ' KILLS';
       else if (L.obj === 'distance') objLabel = (L.target/1000).toFixed(1) + 'KM';
       else if (L.obj === 'boss') objLabel = 'BOSS';
+      const mapLabel = (L.map || 'wastes').toUpperCase();
       tile.innerHTML = `
         <div class="ln">${L.num}</div>
         <div class="lname">${L.name}</div>
-        <div class="lobj">${objLabel}</div>
+        <div class="lobj">${objLabel} - ${mapLabel}</div>
         ${cleared ? '<div class="lcheck">✓</div>' : ''}
         ${isBoss && !cleared ? '<div class="star">★</div>' : ''}
       `;
@@ -3706,7 +3967,7 @@ const UI = {
     const created = new Date(p.created).toLocaleDateString();
     const ownedCount = Object.keys(p.ownedVehicles).length;
     const ttlUpgrades = Object.values(p.vehicleUpgrades).reduce(
-      (s, ups) => s + (ups.engine||0) + (ups.plating||0) + (ups.weapons||0), 0);
+      (s, ups) => s + (ups.engine||0) + (ups.plating||0) + (ups.weapons||0) + (ups.reactor||0), 0);
     const rows = [
       ['CREATED', created],
       ['SCRAP CURRENT', p.scrap],
