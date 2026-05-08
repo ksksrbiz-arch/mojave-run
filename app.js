@@ -105,6 +105,235 @@ const LEVELS = [
 ];
 
 // ============================================================
+// CHARACTERS — choosable badlands warriors
+// ============================================================
+const CHARACTERS = [
+  {
+    id: 'opal',
+    name: 'OPAL',
+    title: 'THE IRONHEART',
+    bio: 'Quick on the trigger, quicker on the throttle. Buried more raiders than the dust storms have. Drives like she owes the devil money.',
+    perk: '+5% STARTING SCRAP',
+    palette: { skin:'#c89770', skinDark:'#7a4a2a', hair:'#1a0f08', hairHi:'#3a230f', accent:'#ff5050', cloth:'#5a2a18', metal:'#a86a2e', bg1:'#3a1410', bg2:'#1a0808' },
+  },
+  {
+    id: 'ophelia',
+    name: 'OPHELIA',
+    title: 'THE BONE QUEEN',
+    bio: 'Speaks to the bones the highway leaves behind. The Mojave hounds answer when she whistles. They say she walked out of the Dead Zone alone.',
+    perk: '+1 NIGHT VISION RANGE',
+    palette: { skin:'#d8b08c', skinDark:'#8a5a3a', hair:'#e8d8b8', hairHi:'#fffbe0', accent:'#7ae0c8', cloth:'#1e2a2c', metal:'#bfb8a0', bg1:'#0e2424', bg2:'#050f10' },
+  },
+  {
+    id: 'abigail',
+    name: 'ABIGAIL',
+    title: 'DUSTHOWLER',
+    bio: 'Born in a shotgun shack at mile 88. Hasn’t lost a duel since she could see over a steering wheel. The wasteland flinches when she laughs.',
+    perk: '+5% SCRAP FROM KILLS',
+    palette: { skin:'#caa07a', skinDark:'#7d4a28', hair:'#a86a2e', hairHi:'#f5d76e', accent:'#f5d76e', cloth:'#3a2410', metal:'#8a4f1f', bg1:'#3a230f', bg2:'#180c04' },
+  },
+];
+const CHARACTER_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));
+const DEFAULT_CHARACTER_ID = 'opal';
+
+// Build an animated SVG headshot portrait for a character.
+// Returns an SVG string. Animations are CSS-driven (see index.html keyframes).
+function characterPortraitSVG(charId) {
+  const c = CHARACTER_BY_ID[charId] || CHARACTER_BY_ID[DEFAULT_CHARACTER_ID];
+  const p = c.palette;
+  // Shared dust particles — drift across the frame
+  const dust = `
+    <circle class="dust"    cx="6"  cy="80" r="1.4" fill="${p.accent}" opacity=".7"/>
+    <circle class="dust d2" cx="2"  cy="60" r="1"   fill="${p.metal}"  opacity=".5"/>
+    <circle class="dust d3" cx="10" cy="92" r="1.6" fill="${p.accent}" opacity=".55"/>`;
+  // Each character: distinct silhouette, hair, war paint, accessories
+  let face = '';
+  if (c.id === 'opal') {
+    // OPAL — buzzed hair, red war-paint stripe across eyes, cheek scar, dog tags
+    face = `
+      <!-- ember glow background -->
+      <radialGradient id="g-opal" cx="50%" cy="55%" r="65%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-opal)"/>
+      <circle class="ember" cx="78" cy="22" r="14" fill="${p.accent}" opacity=".55"/>
+      <!-- shoulders / collar -->
+      <g class="breath">
+        <path d="M8 100 L8 86 Q22 70 40 70 L60 70 Q78 70 92 86 L92 100 Z" fill="${p.cloth}"/>
+        <path d="M40 70 L60 70 L58 78 L42 78 Z" fill="${p.skinDark}"/>
+        <!-- dog-tag chain -->
+        <path d="M44 70 Q50 80 56 70" stroke="${p.metal}" stroke-width="1" fill="none"/>
+        <rect x="48" y="76" width="4" height="6" fill="${p.metal}"/>
+        <!-- neck -->
+        <rect x="44" y="60" width="12" height="14" fill="${p.skin}"/>
+      </g>
+      <!-- head -->
+      <ellipse cx="50" cy="46" rx="22" ry="26" fill="${p.skin}"/>
+      <!-- jaw shadow -->
+      <path d="M30 52 Q50 70 70 52 L70 60 Q50 72 30 60 Z" fill="${p.skinDark}" opacity=".35"/>
+      <!-- buzzed hair cap -->
+      <path d="M28 32 Q50 18 72 32 L72 40 Q50 28 28 40 Z" fill="${p.hair}"/>
+      <path d="M30 34 Q50 24 70 34" stroke="${p.hairHi}" stroke-width=".6" fill="none" opacity=".7"/>
+      <!-- ear -->
+      <ellipse cx="27" cy="48" rx="3" ry="5" fill="${p.skinDark}"/>
+      <circle cx="26" cy="50" r="1" fill="${p.metal}"/>
+      <!-- red war-paint stripe across eyes -->
+      <rect x="26" y="42" width="48" height="6" fill="${p.accent}" opacity=".75"/>
+      <!-- eyes -->
+      <g>
+        <ellipse cx="42" cy="46" rx="3" ry="2" fill="#fff"/>
+        <circle cx="42" cy="46" r="1.3" fill="${p.hair}"/>
+        <ellipse cx="58" cy="46" rx="3" ry="2" fill="#fff"/>
+        <circle cx="58" cy="46" r="1.3" fill="${p.hair}"/>
+        <!-- eyelids (animated blink) -->
+        <rect class="eyelid"   x="39" y="44" width="6" height="4" fill="${p.skinDark}"/>
+        <rect class="eyelid b" x="55" y="44" width="6" height="4" fill="${p.skinDark}"/>
+      </g>
+      <!-- brow -->
+      <rect x="38" y="40" width="8" height="1.4" fill="${p.hair}"/>
+      <rect x="54" y="40" width="8" height="1.4" fill="${p.hair}"/>
+      <!-- cheek scar -->
+      <path d="M62 52 L66 60" stroke="${p.accent}" stroke-width="1.2" fill="none" opacity=".8"/>
+      <path d="M62 52 L60 56" stroke="${p.accent}" stroke-width=".8" fill="none" opacity=".6"/>
+      <!-- nose -->
+      <path d="M50 48 L48 56 L52 56 Z" fill="${p.skinDark}" opacity=".4"/>
+      <!-- mouth — set jaw -->
+      <rect x="44" y="60" width="12" height="1.6" fill="${p.skinDark}"/>
+      <!-- spark (gun ember) -->
+      <circle class="spark" cx="22" cy="74" r="1.6" fill="${p.accent}"/>
+      ${dust}
+    `;
+  } else if (c.id === 'ophelia') {
+    // OPHELIA — long ash dreadlocks, kohl eyes, bone necklace, jagged jaw paint
+    face = `
+      <radialGradient id="g-oph" cx="50%" cy="55%" r="70%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-oph)"/>
+      <circle class="ember" cx="22" cy="24" r="14" fill="${p.accent}" opacity=".4"/>
+      <!-- back hair (long) -->
+      <g class="hair s">
+        <path d="M18 30 Q14 70 22 100 L40 100 Q34 70 36 30 Z" fill="${p.hair}"/>
+        <path d="M82 30 Q86 70 78 100 L60 100 Q66 70 64 30 Z" fill="${p.hair}"/>
+        <!-- highlights -->
+        <path d="M20 38 L22 92" stroke="${p.hairHi}" stroke-width=".6" opacity=".6"/>
+        <path d="M80 38 L78 92" stroke="${p.hairHi}" stroke-width=".6" opacity=".6"/>
+        <path d="M30 36 L32 90" stroke="${p.hairHi}" stroke-width=".4" opacity=".4"/>
+        <path d="M70 36 L68 90" stroke="${p.hairHi}" stroke-width=".4" opacity=".4"/>
+      </g>
+      <!-- shoulders / shawl -->
+      <g class="breath">
+        <path d="M10 100 L14 84 Q30 74 40 74 L60 74 Q70 74 86 84 L90 100 Z" fill="${p.cloth}"/>
+        <!-- bone necklace -->
+        <path d="M40 74 Q50 84 60 74" stroke="${p.hairHi}" stroke-width="1" fill="none"/>
+        <rect x="44" y="78" width="2" height="5" fill="${p.hairHi}"/>
+        <rect x="49" y="80" width="2" height="6" fill="${p.hairHi}"/>
+        <rect x="54" y="78" width="2" height="5" fill="${p.hairHi}"/>
+        <!-- neck -->
+        <rect x="44" y="62" width="12" height="14" fill="${p.skin}"/>
+      </g>
+      <!-- head -->
+      <ellipse cx="50" cy="46" rx="21" ry="25" fill="${p.skin}"/>
+      <!-- front hair fringe -->
+      <path d="M30 32 Q50 22 70 32 L70 40 L62 36 L58 42 L50 36 L42 42 L38 36 L30 40 Z" fill="${p.hair}"/>
+      <!-- ear -->
+      <ellipse cx="29" cy="48" rx="2.5" ry="4" fill="${p.skinDark}"/>
+      <!-- kohl eye paint -->
+      <rect x="34" y="42" width="12" height="6" fill="${p.cloth}" opacity=".85"/>
+      <rect x="54" y="42" width="12" height="6" fill="${p.cloth}" opacity=".85"/>
+      <!-- eyes (pale, piercing) -->
+      <g>
+        <ellipse cx="40" cy="46" rx="3" ry="2" fill="#f4f6f0"/>
+        <circle cx="40" cy="46" r="1.3" fill="${p.accent}"/>
+        <ellipse cx="60" cy="46" rx="3" ry="2" fill="#f4f6f0"/>
+        <circle cx="60" cy="46" r="1.3" fill="${p.accent}"/>
+        <rect class="eyelid"   x="37" y="44" width="6" height="4" fill="${p.cloth}"/>
+        <rect class="eyelid b" x="57" y="44" width="6" height="4" fill="${p.cloth}"/>
+      </g>
+      <!-- jagged jaw war paint (down chin) -->
+      <path d="M46 60 L48 70 L46 70 L48 64 Z M52 60 L54 70 L52 70 L54 64 Z" fill="${p.cloth}"/>
+      <path d="M44 64 L40 72" stroke="${p.cloth}" stroke-width="1.2" opacity=".9"/>
+      <path d="M56 64 L60 72" stroke="${p.cloth}" stroke-width="1.2" opacity=".9"/>
+      <!-- nose -->
+      <path d="M50 48 L48 56 L52 56 Z" fill="${p.skinDark}" opacity=".4"/>
+      <!-- mouth -->
+      <rect x="44" y="60" width="12" height="1.4" fill="${p.cloth}"/>
+      <!-- temple beads -->
+      <circle cx="32" cy="38" r="1.2" fill="${p.hairHi}"/>
+      <circle cx="68" cy="38" r="1.2" fill="${p.hairHi}"/>
+      <!-- spark -->
+      <circle class="spark" cx="78" cy="74" r="1.4" fill="${p.accent}"/>
+      ${dust}
+    `;
+  } else {
+    // ABIGAIL — goggles on forehead, side braid, hood, oil smudge
+    face = `
+      <radialGradient id="g-abi" cx="50%" cy="55%" r="65%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-abi)"/>
+      <circle class="ember" cx="50" cy="20" r="18" fill="${p.accent}" opacity=".35"/>
+      <!-- hood / leather collar -->
+      <g class="breath">
+        <path d="M6 100 L10 80 Q22 64 40 64 L60 64 Q78 64 90 80 L94 100 Z" fill="${p.cloth}"/>
+        <path d="M22 70 Q50 56 78 70 L78 78 Q50 66 22 78 Z" fill="${p.metal}"/>
+        <!-- buckle -->
+        <rect x="46" y="74" width="8" height="4" fill="${p.accent}"/>
+        <rect x="48" y="75" width="4" height="2" fill="${p.cloth}"/>
+        <!-- neck -->
+        <rect x="44" y="60" width="12" height="12" fill="${p.skin}"/>
+      </g>
+      <!-- head -->
+      <ellipse cx="50" cy="46" rx="22" ry="26" fill="${p.skin}"/>
+      <!-- side braid (right side, swaying) -->
+      <g class="hair">
+        <path d="M70 40 Q80 56 76 78 L70 78 Q72 56 64 42 Z" fill="${p.hair}"/>
+        <path d="M71 46 L73 52 M70 54 L74 60 M71 62 L73 68 M70 70 L73 76"
+              stroke="${p.hairHi}" stroke-width=".7" fill="none" opacity=".8"/>
+      </g>
+      <!-- swept top hair under goggles -->
+      <path d="M28 34 Q50 22 72 34 L72 38 Q50 30 28 40 Z" fill="${p.hair}"/>
+      <path d="M30 36 Q50 28 70 36" stroke="${p.hairHi}" stroke-width=".6" fill="none" opacity=".7"/>
+      <!-- goggles strap -->
+      <rect x="26" y="34" width="48" height="3" fill="${p.cloth}"/>
+      <!-- goggles lenses (on forehead) -->
+      <circle cx="38" cy="34" r="6" fill="${p.cloth}" stroke="${p.metal}" stroke-width="1.4"/>
+      <circle cx="62" cy="34" r="6" fill="${p.cloth}" stroke="${p.metal}" stroke-width="1.4"/>
+      <circle cx="36" cy="32" r="1.6" fill="${p.hairHi}" opacity=".9"/>
+      <circle cx="60" cy="32" r="1.6" fill="${p.hairHi}" opacity=".9"/>
+      <rect x="43" y="33" width="14" height="2" fill="${p.metal}"/>
+      <!-- ear -->
+      <ellipse cx="27" cy="48" rx="3" ry="5" fill="${p.skinDark}"/>
+      <!-- eyes -->
+      <g>
+        <ellipse cx="42" cy="48" rx="3" ry="2" fill="#fff"/>
+        <circle cx="42" cy="48" r="1.3" fill="${p.cloth}"/>
+        <ellipse cx="58" cy="48" rx="3" ry="2" fill="#fff"/>
+        <circle cx="58" cy="48" r="1.3" fill="${p.cloth}"/>
+        <rect class="eyelid"   x="39" y="46" width="6" height="4" fill="${p.skinDark}"/>
+        <rect class="eyelid b" x="55" y="46" width="6" height="4" fill="${p.skinDark}"/>
+      </g>
+      <!-- brow -->
+      <rect x="38" y="42" width="8" height="1.4" fill="${p.hair}"/>
+      <rect x="54" y="42" width="8" height="1.4" fill="${p.hair}"/>
+      <!-- oil smudge on cheek -->
+      <ellipse cx="36" cy="56" rx="4" ry="2" fill="${p.cloth}" opacity=".8"/>
+      <ellipse cx="34" cy="58" rx="2" ry="1" fill="${p.cloth}" opacity=".6"/>
+      <!-- nose -->
+      <path d="M50 50 L48 58 L52 58 Z" fill="${p.skinDark}" opacity=".4"/>
+      <!-- mouth — half-smirk with gold tooth glint -->
+      <path d="M44 62 Q50 65 56 62" stroke="${p.skinDark}" stroke-width="1.2" fill="none"/>
+      <rect class="spark" x="49" y="62" width="1.6" height="1.6" fill="${p.accent}"/>
+      ${dust}
+    `;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" shape-rendering="geometricPrecision" preserveAspectRatio="xMidYMid slice">${face}</svg>`;
+}
+
+// ============================================================
 // PROFILE STORE
 // ============================================================
 const STORAGE_KEY = 'mojaveRun_profiles_v2';
@@ -118,6 +347,17 @@ const Profile = {
       const raw = localStorage.getItem(STORAGE_KEY);
       this._data = raw ? JSON.parse(raw) : { profiles: [] };
     } catch (e) { this._data = { profiles: [] }; }
+    // migrate: ensure every profile has a characterId
+    if (this._data && Array.isArray(this._data.profiles)) {
+      let dirty = false;
+      this._data.profiles.forEach(p => {
+        if (!p.characterId || !CHARACTER_BY_ID[p.characterId]) {
+          p.characterId = DEFAULT_CHARACTER_ID;
+          dirty = true;
+        }
+      });
+      if (dirty) this.save();
+    }
     return this._data;
   },
   save() {
@@ -134,14 +374,16 @@ const Profile = {
   setActive(id) {
     try { localStorage.setItem(ACTIVE_KEY, id); } catch (e) {}
   },
-  create(name) {
+  create(name, characterId) {
     name = (name || '').trim().toUpperCase().slice(0, 14);
     if (!name) throw new Error('Name required');
     if (this._data.profiles.some(p => p.name === name)) throw new Error('Name already used');
     if (this._data.profiles.length >= 6) throw new Error('Max 6 drivers');
+    const cid = (characterId && CHARACTER_BY_ID[characterId]) ? characterId : DEFAULT_CHARACTER_ID;
     const p = {
       id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name,
+      characterId: cid,
       created: Date.now(),
       scrap: 100, // starter scrap
       lifetimeScrap: 0,
@@ -218,6 +460,17 @@ const Profile = {
     p.activeVehicle = vehicleId;
     this.save();
     return true;
+  },
+  setCharacter(characterId) {
+    const p = this.active(); if (!p) return false;
+    if (!CHARACTER_BY_ID[characterId]) return false;
+    p.characterId = characterId;
+    this.save();
+    return true;
+  },
+  character() {
+    const p = this.active();
+    return p ? (CHARACTER_BY_ID[p.characterId] || CHARACTER_BY_ID[DEFAULT_CHARACTER_ID]) : null;
   },
   // Compute effective stats for a vehicle including upgrades
   effectiveStats(vehicleId) {
@@ -3005,10 +3258,15 @@ const UI = {
     profiles.forEach(p => {
       const card = document.createElement('div');
       card.className = 'profile-card' + (p.id === activeId ? ' active' : '');
+      const ch = CHARACTER_BY_ID[p.characterId] || CHARACTER_BY_ID[DEFAULT_CHARACTER_ID];
       card.innerHTML = `
-        <div>
-          <div class="pname">${escapeHtml(p.name)}</div>
-          <div class="pmeta">SCRAP ${p.scrap} · RUNS ${p.runs} · BEST ${p.bestClassic}</div>
+        <div class="pc-left">
+          <div class="portrait pc-portrait">${characterPortraitSVG(ch.id)}<div class="pframe"></div></div>
+          <div>
+            <div class="pname">${escapeHtml(p.name)}</div>
+            <div class="pmeta">${escapeHtml(ch.title)}</div>
+            <div class="pmeta">SCRAP ${p.scrap} · RUNS ${p.runs} · BEST ${p.bestClassic}</div>
+          </div>
         </div>
         <button class="delbtn" data-pid="${p.id}" aria-label="Delete">×</button>
       `;
@@ -3035,12 +3293,58 @@ const UI = {
   showMenu() {
     const p = Profile.active();
     if (!p) return UI.showProfiles();
+    const ch = Profile.character();
     document.getElementById('menu-name').textContent = p.name;
+    document.getElementById('menu-ctitle').textContent = ch ? ch.title : '';
+    document.getElementById('menu-portrait').innerHTML = characterPortraitSVG(ch ? ch.id : DEFAULT_CHARACTER_ID) + '<div class="pframe"></div>';
     document.getElementById('menu-runs').textContent = `RUNS ${p.runs} · BEST ${p.bestClassic}`;
     document.getElementById('menu-scrap').textContent = p.scrap;
+    document.getElementById('menu-character-sub').textContent = (ch ? ch.name : '') + ' ◢';
     const v = VEHICLE_BY_ID[p.activeVehicle];
     document.getElementById('menu-garage-sub').textContent = (v ? v.name : '') + ' ◢';
     this.show('menu');
+  },
+
+  // ---- CHARACTER SELECT ----
+  // mode: 'new'    — choosing for a brand-new profile (then prompts for callsign)
+  //       'change' — changing the active profile's character
+  showCharacters(mode) {
+    this._charMode = mode || 'change';
+    const active = Profile.active();
+    const startId = (this._charMode === 'change' && active && active.characterId)
+      ? active.characterId
+      : DEFAULT_CHARACTER_ID;
+    this._pendingChar = startId;
+    document.getElementById('char-sub').textContent = (this._charMode === 'new')
+      ? 'CHOOSE YOUR BADLANDS LEGEND' : 'SWITCH WARRIORS';
+    document.getElementById('char-confirm-btn').textContent = (this._charMode === 'new')
+      ? 'CHOOSE WARRIOR ▶' : 'CONFIRM ▶';
+    this._renderCharacterList();
+    this.show('character');
+  },
+  _renderCharacterList() {
+    const list = document.getElementById('char-list');
+    list.innerHTML = '';
+    CHARACTERS.forEach(ch => {
+      const card = document.createElement('div');
+      card.className = 'char-card' + (ch.id === this._pendingChar ? ' selected' : '');
+      card.dataset.cid = ch.id;
+      card.innerHTML = `
+        <div class="portrait lg">${characterPortraitSVG(ch.id)}<div class="pframe"></div></div>
+        <div class="cmeta">
+          <div class="cname">${escapeHtml(ch.name)}</div>
+          <div class="ctitle">${escapeHtml(ch.title)}</div>
+          <div class="cbio">${escapeHtml(ch.bio)}</div>
+          <div class="cperk">★ ${escapeHtml(ch.perk)}</div>
+        </div>
+      `;
+      card.addEventListener('click', () => {
+        SFX.click();
+        UI._pendingChar = ch.id;
+        UI._renderCharacterList();
+      });
+      list.appendChild(card);
+    });
   },
 
   // ---- GARAGE ----
@@ -3307,16 +3611,40 @@ const UI = {
         UI.showGarage();
         break;
       case 'profile-new':
-        UI.prompt('NEW DRIVER NAME', name => {
-          try {
-            Profile.create(name);
-            UI.showMenu();
-            UI.toast('DRIVER ' + name.toUpperCase() + ' CREATED');
-          } catch (e) {
-            UI.toast(e.message);
-          }
-        });
+        // choose a warrior first, then prompt for callsign
+        UI.showCharacters('new');
         break;
+      case 'menu-character':
+        UI.showCharacters('change');
+        break;
+      case 'character-cancel':
+        if (UI._charMode === 'new') UI.showProfiles();
+        else UI.showMenu();
+        break;
+      case 'character-confirm': {
+        const cid = UI._pendingChar || DEFAULT_CHARACTER_ID;
+        if (UI._charMode === 'new') {
+          UI.prompt('NEW DRIVER NAME', name => {
+            try {
+              Profile.create(name, cid);
+              UI.showMenu();
+              const ch = CHARACTER_BY_ID[cid];
+              UI.toast((ch ? ch.title + ' · ' : '') + (name || '').toUpperCase() + ' READY');
+            } catch (e) {
+              UI.toast(e.message);
+              // re-open the character select so the user can retry naming
+              UI.showCharacters('new');
+            }
+          });
+        } else {
+          if (Profile.setCharacter(cid)) {
+            const ch = CHARACTER_BY_ID[cid];
+            UI.toast('NOW RIDING AS ' + (ch ? ch.name : ''));
+          }
+          UI.showMenu();
+        }
+        break;
+      }
       case 'menu-play':
         UI.showMode();
         break;
