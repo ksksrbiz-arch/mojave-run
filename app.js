@@ -826,7 +826,7 @@ function getCharacterPerkState(characterId) {
     nox:     { scrapMul: 1.00, killScoreMul: 1.08, nightVisionMul: 1.10 },
     ram:     { scrapMul: 1.10, killScoreMul: 1.00, nightVisionMul: 1.00 },
   };
-  return perks[characterId] || perks[DEFAULT_CHARACTER_ID];
+  return perks[characterId] ?? perks[DEFAULT_CHARACTER_ID];
 }
 
 // ============================================================
