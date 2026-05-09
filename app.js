@@ -926,6 +926,112 @@ function characterPortraitSVG(charId) {
 // ============================================================
 // ACHIEVEMENTS — per-profile badge definitions
 // ============================================================
+const ACHIEVEMENT_BADGE_PACKS = [
+  {
+    prefix:'runs',
+    icon:'\u{1F3C3}',
+    metric:'runs',
+    label:'RUN',
+    desc:n => `Complete ${n.toLocaleString()} total runs`,
+    tiers:[
+      ['dust_runner',5,'DUST RUNNER'], ['mile_marker',25,'MILE MARKER'],
+      ['desert_regular',75,'DESERT REGULAR'], ['highway_hardened',150,'HIGHWAY HARDENED'],
+      ['grit_driver',250,'GRIT DRIVER'], ['road_veteran',500,'ROAD VETERAN'],
+      ['asphalt_addict',750,'ASPHALT ADDICT'], ['thousand_start',1000,'THOUSAND START'],
+      ['endless_engine',1500,'ENDLESS ENGINE'], ['two_k_trekker',2000,'2K TREKKER'],
+      ['triple_shift',3000,'TRIPLE SHIFT'], ['quad_runner',4000,'QUAD RUNNER'],
+      ['five_k_fury',5000,'5K FURY'], ['seven_k_sentinel',7500,'7K SENTINEL'],
+      ['ten_k_titan',10000,'10K TITAN'], ['fifteen_k_phantom',15000,'15K PHANTOM'],
+      ['twenty_k_nomad',20000,'20K NOMAD'], ['thirty_k_warden',30000,'30K WARDEN'],
+      ['forty_k_outlaw',40000,'40K OUTLAW'], ['fifty_k_immortal',50000,'50K IMMORTAL']
+    ]
+  },
+  {
+    prefix:'classic_score',
+    icon:'\u{1F3AF}',
+    metric:'bestClassic',
+    label:'CLASSIC',
+    desc:n => `Score ${n.toLocaleString()} in Classic`,
+    tiers:[
+      ['spark',1000,'SPARK'], ['ember',10000,'EMBER'],
+      ['hot_streak',15000,'HOT STREAK'], ['white_line',50000,'WHITE LINE'],
+      ['redline',100000,'REDLINE'], ['heat_index',150000,'HEAT INDEX'],
+      ['scorch_line',200000,'SCORCH LINE'], ['afterburn',300000,'AFTERBURN'],
+      ['blast_zone',500000,'BLAST ZONE'], ['sun_chaser',750000,'SUN CHASER'],
+      ['million_mark',1000000,'MILLION MARK'], ['double_million',2000000,'DOUBLE MILLION'],
+      ['triple_million',3000000,'TRIPLE MILLION'], ['five_million',5000000,'FIVE MILLION'],
+      ['seven_million',7500000,'SEVEN MILLION'], ['ten_million',10000000,'TEN MILLION'],
+      ['fifteen_million',15000000,'FIFTEEN MILLION'], ['twenty_million',20000000,'TWENTY MILLION'],
+      ['thirty_million',30000000,'THIRTY MILLION'], ['fifty_million',50000000,'FIFTY MILLION']
+    ]
+  },
+  {
+    prefix:'distance',
+    icon:'\u{1F6E3}\uFE0F',
+    metric:'bestDistance',
+    label:'DISTANCE',
+    desc:n => `Travel ${n.toLocaleString()} m in one Classic run`,
+    tiers:[
+      ['dust_step',500,'DUST STEP'], ['one_k_cruise',1000,'1K CRUISE'],
+      ['three_k_drift',3000,'3K DRIFT'], ['seven_k_sprint',7500,'7K SPRINT'],
+      ['ten_k_haul',10000,'10K HAUL'], ['fifteen_k_glide',15000,'15K GLIDE'],
+      ['twenty_k_trail',20000,'20K TRAIL'], ['thirty_k_express',30000,'30K EXPRESS'],
+      ['forty_k_voyage',40000,'40K VOYAGE'], ['fifty_k_odyssey',50000,'50K ODYSSEY'],
+      ['seventy_k_roamer',70000,'70K ROAMER'], ['hundred_k_horizon',100000,'100K HORIZON'],
+      ['one_fifty_k_pilgrim',150000,'150K PILGRIM'], ['two_hundred_k_vanguard',200000,'200K VANGUARD'],
+      ['three_hundred_k_path',300000,'300K PATH'], ['five_hundred_k_frontier',500000,'500K FRONTIER'],
+      ['seven_hundred_k_wanderer',700000,'700K WANDERER'], ['million_meter',1000000,'MILLION METER'],
+      ['two_million_meter',2000000,'TWO MILLION METER'], ['five_million_meter',5000000,'FIVE MILLION METER']
+    ]
+  },
+  {
+    prefix:'boss_score',
+    icon:'\u{1F4A5}',
+    metric:'bestBossRush',
+    label:'BOSS',
+    desc:n => `Score ${n.toLocaleString()} in Boss Rush`,
+    tiers:[
+      ['first_mark',1000,'FIRST MARK'], ['boss_bruiser',5000,'BOSS BRUISER'],
+      ['crusher',10000,'CRUSHER'], ['warpath',50000,'WARPATH'],
+      ['breaker',75000,'BREAKER'], ['siege_driver',100000,'SIEGE DRIVER'],
+      ['takedown_artist',150000,'TAKEDOWN ARTIST'], ['red_skull',200000,'RED SKULL'],
+      ['wrecker',300000,'WRECKER'], ['doom_loop',500000,'DOOM LOOP'],
+      ['boss_bane',750000,'BOSS BANE'], ['one_million_onslaught',1000000,'MILLION ONSLAUGHT'],
+      ['two_million_onslaught',2000000,'DOUBLE ONSLAUGHT'], ['three_million_onslaught',3000000,'TRIPLE ONSLAUGHT'],
+      ['five_million_onslaught',5000000,'FIVE MILLION ONSLAUGHT'], ['seven_million_onslaught',7500000,'SEVEN MILLION ONSLAUGHT'],
+      ['ten_million_onslaught',10000000,'TEN MILLION ONSLAUGHT'], ['fifteen_million_onslaught',15000000,'FIFTEEN MILLION ONSLAUGHT'],
+      ['twenty_million_onslaught',20000000,'TWENTY MILLION ONSLAUGHT'], ['fifty_million_onslaught',50000000,'FIFTY MILLION ONSLAUGHT']
+    ]
+  },
+  {
+    prefix:'scrap',
+    icon:'\u{1F4B0}',
+    metric:'lifetimeScrap',
+    label:'SCRAP',
+    desc:n => `Earn ${n.toLocaleString()} lifetime scrap`,
+    tiers:[
+      ['pocket_change',1000,'POCKET CHANGE'], ['parts_pile',5000,'PARTS PILE'],
+      ['junk_drawer',15000,'JUNK DRAWER'], ['salvage_hand',25000,'SALVAGE HAND'],
+      ['rust_bank',75000,'RUST BANK'], ['metal_mogul',100000,'METAL MOGUL'],
+      ['scrap_sultan',150000,'SCRAP SULTAN'], ['chrome_cache',200000,'CHROME CACHE'],
+      ['waste_vault',300000,'WASTE VAULT'], ['gear_goldmine',500000,'GEAR GOLDMINE'],
+      ['million_scrap',1000000,'MILLION SCRAP'], ['double_vault',2000000,'DOUBLE VAULT'],
+      ['triple_vault',3000000,'TRIPLE VAULT'], ['five_million_scrap',5000000,'FIVE MILLION SCRAP'],
+      ['seven_million_scrap',7500000,'SEVEN MILLION SCRAP'], ['ten_million_scrap',10000000,'TEN MILLION SCRAP'],
+      ['fifteen_million_scrap',15000000,'FIFTEEN MILLION SCRAP'], ['twenty_million_scrap',20000000,'TWENTY MILLION SCRAP'],
+      ['thirty_million_scrap',30000000,'THIRTY MILLION SCRAP'], ['fifty_million_scrap',50000000,'FIFTY MILLION SCRAP']
+    ]
+  }
+];
+function buildAchievementBadges() {
+  return ACHIEVEMENT_BADGE_PACKS.flatMap(pack => pack.tiers.map(([slug, target, name]) => ({
+    id:`${pack.prefix}_${slug}`,
+    icon:pack.icon,
+    name,
+    desc:pack.desc(target),
+    criteria:{ metric:pack.metric, target }
+  })));
+}
 const ACHIEVEMENTS = [
   { id:'first_blood',    icon:'\u{1F525}',     name:'FIRST BLOOD',     desc:'Complete your first run' },
   { id:'survivor',       icon:'\u{1F480}',     name:'SURVIVOR',         desc:'Complete 10 runs' },
@@ -949,8 +1055,24 @@ const ACHIEVEMENTS = [
   { id:'wingman',        icon:'\u{1F91D}',     name:'WINGMAN',           desc:'Unlock any sidekick' },
   { id:'scrap_hound',    icon:'\u{1F4B0}',     name:'SCRAP HOUND',       desc:'Earn 10,000 lifetime scrap' },
   { id:'scrap_baron',    icon:'\u{1F48E}',     name:'SCRAP BARON',       desc:'Earn 50,000 lifetime scrap' },
+  ...buildAchievementBadges(),
 ];
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
+
+function achievementMetricValue(metric, p) {
+  switch (metric) {
+    case 'runs': return p.runs || 0;
+    case 'bestClassic': return p.bestClassic || 0;
+    case 'bestDistance': return p.bestDistance || 0;
+    case 'bestBossRush': return p.bestBossRush || 0;
+    case 'lifetimeScrap': return p.lifetimeScrap || 0;
+    default: return 0;
+  }
+}
+function checkAchievementCriteria(criteria, p) {
+  if (!criteria) return false;
+  return achievementMetricValue(criteria.metric, p) >= criteria.target;
+}
 
 function checkAchievementCondition(id, p) {
   switch (id) {
@@ -1001,7 +1123,7 @@ function checkAchievementCondition(id, p) {
       });
     case 'scrap_hound':  return (p.lifetimeScrap || 0) >= 10000;
     case 'scrap_baron':  return (p.lifetimeScrap || 0) >= 50000;
-    default: return false;
+    default: return checkAchievementCriteria(ACHIEVEMENT_BY_ID[id] && ACHIEVEMENT_BY_ID[id].criteria, p);
   }
 }
 
