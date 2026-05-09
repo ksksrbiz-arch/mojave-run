@@ -133,6 +133,7 @@
       <button class="btn" id="zombieBtn" data-act="zombie">ZOMBIE WASTELAND</button>
       <button class="btn" data-act="garage">GARAGE</button>
       <button class="btn" data-act="stats">STATS</button>
+      <button class="btn" data-act="leaderboard">LEADERBOARD</button>
       <button class="btn" data-act="mp">MULTIPLAYER</button>
       <button class="btn small" data-act="settings">SETTINGS · CREDITS</button>
     </div>
@@ -155,6 +156,23 @@
       <h2>STATS</h2>
       <div class="row-stats" id="statsBody"></div>
       <div class="row"><button class="btn small" data-act="back">BACK</button></div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="menuLeaderboard">
+    <div class="panel">
+      <h2>LEADERBOARD</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn small" id="lbRust">RUST</button>
+        <button class="btn small" id="lbGauntlet">GAUNTLET</button>
+        <button class="btn small" id="lbZombie">ZOMBIE</button>
+      </div>
+      <div id="lbMeta" style="font-size:11px;color:var(--sand);margin-bottom:8px">TOP 10 PILOTS</div>
+      <div id="lbRows" class="row-stats" style="min-height:180px"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn small" id="lbRefresh">REFRESH</button>
+        <button class="btn small" data-act="back">BACK</button>
+      </div>
     </div>
   </div>
 
@@ -398,6 +416,7 @@ const Game = {
   gauntletObj:null, gauntletObjT:0,
   hordeSpawnQ:0, hordeSpawnT:0,
   chainsawT:0,
+  scoreSubmitted:false,
 };
 
 // ---------- Player ---------------------------------------------------
@@ -955,6 +974,7 @@ function startGame(mode){
   Game.wave=0; Game.waveStartKills=0; Game.waveKillsNeeded=0; Game.waveCooldown=0;
   Game.gauntletObj=null; Game.gauntletObjT=0;
   Game.hordeSpawnQ=0; Game.hordeSpawnT=0; Game.chainsawT=0;
+  Game.scoreSubmitted=false;
   applySector();
   hideOverlays(); hudShow(true); Audio.resume();
   if(mode==='zombiewasteland'){
@@ -1347,6 +1367,7 @@ const overlays = {
   title:document.getElementById('menuTitle'),
   garage:document.getElementById('menuGarage'),
   stats:document.getElementById('menuStats'),
+  leaderboard:document.getElementById('menuLeaderboard'),
   mp:document.getElementById('menuMP'),
   settings:document.getElementById('menuSettings'),
   pause:document.getElementById('menuPause'),
@@ -1372,6 +1393,7 @@ function gameOver(win){
     if(Game.score > SAVE.zombieHi) SAVE.zombieHi = Game.score;
     if(Game.wave  > (SAVE.zombieBestWave||0)) SAVE.zombieBestWave = Game.wave;
   }
+  submitScore();
   persist();
   const isZombie = Game.modeName==='zombiewasteland';
   document.getElementById('gameoverBody').innerHTML =
@@ -1398,6 +1420,7 @@ document.addEventListener('click', e=>{
   }
   else if(act==='garage'){ showOverlay('garage'); renderGarage(); }
   else if(act==='stats'){ showOverlay('stats'); renderStats(); }
+  else if(act==='leaderboard'){ showOverlay('leaderboard'); renderLeaderboard(); }
   else if(act==='mp'){ showOverlay('mp'); renderMP(); }
   else if(act==='settings'){ showOverlay('settings'); renderSettings(); }
   else if(act==='back') showOverlay('title');
@@ -1504,6 +1527,107 @@ function renderStats(){
     'BEST WAVE <b>'+(SAVE.zombieBestWave||0)+'</b><br>'+
     'ZOMBIE HI-SCORE <b>'+(SAVE.zombieHi||0)+'</b><br>'+
     'UNLOCKED <b>'+(isZombieUnlocked()?'YES':'NO — '+Math.max(0,SAVE.gauntletProgress-1)+'/'+ZOMBIE_UNLOCK_SECTORS+' SECTORS')+'</b>';
+}
+
+// ---------- Online leaderboard -------------------------------------
+const LB = {
+  mode: 'rust',
+  scores: [],
+  loading: false,
+  available: true,
+};
+
+function modeLabel(mode){
+  return mode==='zombiewasteland' ? 'ZOMBIE WASTELAND' : mode.toUpperCase();
+}
+
+function updateLeaderboardModeButtons(){
+  const setActive = (id, mode)=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.style.borderColor = LB.mode===mode ? 'var(--blood)' : 'var(--sand)';
+  };
+  setActive('lbRust', 'rust');
+  setActive('lbGauntlet', 'gauntlet');
+  setActive('lbZombie', 'zombiewasteland');
+}
+
+async function fetchLeaderboard(mode){
+  LB.loading = true;
+  LB.mode = mode;
+  LB.available = true;
+  updateLeaderboardModeButtons();
+  const rows = document.getElementById('lbRows');
+  const meta = document.getElementById('lbMeta');
+  rows.innerHTML = 'CONTACTING WASTELAND RELAY...';
+  meta.textContent = 'TOP 10 · '+modeLabel(mode);
+  try{
+    const res = await fetch('/api/scores?mode='+encodeURIComponent(mode), { headers:{'Accept':'application/json'} });
+    if(!res.ok) throw new Error('bad status '+res.status);
+    const data = await res.json();
+    LB.scores = Array.isArray(data.scores) ? data.scores : [];
+    renderLeaderboardRows();
+  }catch(_){
+    LB.available = false;
+    LB.scores = [];
+    rows.innerHTML = 'ONLINE BOARD OFFLINE.<br>RUN THE SERVER HOST TO ENABLE.';
+    meta.textContent = 'TOP 10 · '+modeLabel(mode)+' · OFFLINE';
+  }finally{
+    LB.loading = false;
+  }
+}
+
+function renderLeaderboardRows(){
+  const rows = document.getElementById('lbRows');
+  const meta = document.getElementById('lbMeta');
+  meta.textContent = 'TOP 10 · '+modeLabel(LB.mode);
+  if(!LB.scores.length){
+    rows.innerHTML = 'NO RUNS YET.<br>BE THE FIRST LEGEND.';
+    return;
+  }
+  rows.innerHTML = LB.scores.map((s, i)=>{
+    const rank = i + 1;
+    const name = String(s.name || 'DRIVER').toUpperCase().slice(0, 14);
+    const score = Math.max(0, Number(s.score) || 0);
+    const kills = Math.max(0, Number(s.kills) || 0);
+    const dist = Math.max(0, Number(s.distance) || 0);
+    return '#'+rank+' <b>'+name+'</b> — <b>'+score+'</b> pts<br><span style="opacity:.75">'+kills+' KILLS · '+dist+'M</span>';
+  }).join('<br><br>');
+}
+
+function renderLeaderboard(){
+  const mode = LB.mode || 'rust';
+  const wire = (id, nextMode)=>{
+    const el = document.getElementById(id);
+    el.onclick = ()=>{ Audio.ui(); fetchLeaderboard(nextMode); };
+  };
+  wire('lbRust', 'rust');
+  wire('lbGauntlet', 'gauntlet');
+  wire('lbZombie', 'zombiewasteland');
+  updateLeaderboardModeButtons();
+  document.getElementById('lbRefresh').onclick = ()=>{ Audio.ui(); fetchLeaderboard(LB.mode || 'rust'); };
+  fetchLeaderboard(mode);
+}
+
+function submitScore(){
+  if(Game.scoreSubmitted) return;
+  if(Game.score <= 0) return;
+  Game.scoreSubmitted = true;
+  const payload = {
+    name: (driver().name || 'DRIVER').toUpperCase().slice(0, 14),
+    score: Math.max(0, Math.floor(Game.score)),
+    mode: String(Game.modeName || 'rust').slice(0, 24),
+    kills: Math.max(0, Math.floor(Game.kills)),
+    distance: Math.max(0, Math.floor(Game.dist)),
+    vehicle: 'rust',
+  };
+  fetch('/api/scores', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload),
+  }).then(res=>{
+    if(res && res.ok) toast('RUN LOGGED TO LEADERBOARD');
+  }).catch(()=>{});
 }
 
 // ---------- MP UI ----------------------------------------------------
