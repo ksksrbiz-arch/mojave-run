@@ -927,28 +927,28 @@ function characterPortraitSVG(charId) {
 // ACHIEVEMENTS — per-profile badge definitions
 // ============================================================
 const ACHIEVEMENTS = [
-  { id:'first_blood',    icon:'\u{1F525}', name:'FIRST BLOOD',     desc:'Complete your first run' },
-  { id:'survivor',       icon:'\u{1F480}', name:'SURVIVOR',         desc:'Complete 10 runs' },
-  { id:'road_warrior',   icon:'\u{1F3C1}', name:'ROAD WARRIOR',     desc:'Complete 50 runs' },
-  { id:'legend',         icon:'\u26A1',    name:'LEGEND',            desc:'Complete 100 runs' },
-  { id:'scorched',       icon:'\u{1F3AF}', name:'SCORCHED',          desc:'Score 5,000 in Classic' },
-  { id:'inferno',        icon:'\u{1F30B}', name:'INFERNO',           desc:'Score 25,000 in Classic' },
-  { id:'nuclear',        icon:'\u2622\uFE0F', name:'NUCLEAR',        desc:'Score 75,000 in Classic' },
-  { id:'drifter',        icon:'\u{1F6E3}\uFE0F', name:'DRIFTER',    desc:'Travel 2,000 m in one Classic run' },
-  { id:'road_king',      icon:'\u{1F451}', name:'ROAD KING',         desc:'Travel 5,000 m in one Classic run' },
-  { id:'boss_slayer',    icon:'\u{1F534}', name:'BOSS SLAYER',       desc:'Score in Boss Rush' },
-  { id:'apex',           icon:'\u{1F4A5}', name:'APEX PREDATOR',     desc:'Score 25,000 in Boss Rush' },
-  { id:'forged',         icon:'\u2694\uFE0F', name:'FORGED',         desc:'Clear the first Gauntlet sector' },
-  { id:'iron_run',       icon:'\u{1F3C6}', name:'IRON RUN',          desc:'Clear all Gauntlet sectors' },
-  { id:'pathfinder',     icon:'\u{1F5FA}\uFE0F', name:'PATHFINDER', desc:'Clear any Campaign location' },
-  { id:'coast_to_coast', icon:'\u{1F305}', name:'COAST TO COAST',    desc:'Clear all Campaign locations' },
-  { id:'gearhead',       icon:'\u{1F527}', name:'GEARHEAD',          desc:'Apply 10 upgrades to vehicles' },
-  { id:'fully_loaded',   icon:'\u{1F529}', name:'FULLY LOADED',      desc:'Max out all upgrades on one vehicle' },
-  { id:'fleet',          icon:'\u{1F697}', name:'FLEET OPERATOR',    desc:'Own 3 vehicles' },
-  { id:'collector',      icon:'\u{1F3CE}\uFE0F', name:'COLLECTOR',  desc:'Own all vehicles' },
-  { id:'wingman',        icon:'\u{1F91D}', name:'WINGMAN',           desc:'Unlock any sidekick' },
-  { id:'scrap_hound',    icon:'\u{1F4B0}', name:'SCRAP HOUND',       desc:'Earn 10,000 lifetime scrap' },
-  { id:'scrap_baron',    icon:'\u{1F48E}', name:'SCRAP BARON',       desc:'Earn 50,000 lifetime scrap' },
+  { id:'first_blood',    icon:'\u{1F525}',     name:'FIRST BLOOD',     desc:'Complete your first run' },
+  { id:'survivor',       icon:'\u{1F480}',     name:'SURVIVOR',         desc:'Complete 10 runs' },
+  { id:'road_warrior',   icon:'\u{1F3C1}',     name:'ROAD WARRIOR',     desc:'Complete 50 runs' },
+  { id:'legend',         icon:'\u26A1\uFE0F',  name:'LEGEND',            desc:'Complete 100 runs' },
+  { id:'scorched',       icon:'\u{1F3AF}',     name:'SCORCHED',          desc:'Score 5,000 in Classic' },
+  { id:'inferno',        icon:'\u{1F30B}',     name:'INFERNO',           desc:'Score 25,000 in Classic' },
+  { id:'nuclear',        icon:'\u2622\uFE0F',  name:'NUCLEAR',           desc:'Score 75,000 in Classic' },
+  { id:'drifter',        icon:'\u{1F6E3}\uFE0F', name:'DRIFTER',        desc:'Travel 2,000 m in one Classic run' },
+  { id:'road_king',      icon:'\u{1F451}',     name:'ROAD KING',         desc:'Travel 5,000 m in one Classic run' },
+  { id:'boss_slayer',    icon:'\u{1F534}',     name:'BOSS SLAYER',       desc:'Score in Boss Rush' },
+  { id:'apex',           icon:'\u{1F4A5}',     name:'APEX PREDATOR',     desc:'Score 25,000 in Boss Rush' },
+  { id:'forged',         icon:'\u2694\uFE0F',  name:'FORGED',            desc:'Clear the first Gauntlet sector' },
+  { id:'iron_run',       icon:'\u{1F3C6}',     name:'IRON RUN',          desc:'Clear all Gauntlet sectors' },
+  { id:'pathfinder',     icon:'\u{1F5FA}\uFE0F', name:'PATHFINDER',     desc:'Clear any Campaign location' },
+  { id:'coast_to_coast', icon:'\u{1F305}',     name:'COAST TO COAST',    desc:'Clear all Campaign locations' },
+  { id:'gearhead',       icon:'\u{1F527}',     name:'GEARHEAD',          desc:'Apply 10 upgrades to vehicles' },
+  { id:'fully_loaded',   icon:'\u{1F529}',     name:'FULLY LOADED',      desc:'Max out all upgrades on one vehicle' },
+  { id:'fleet',          icon:'\u{1F697}',     name:'FLEET OPERATOR',    desc:'Own 3 vehicles' },
+  { id:'collector',      icon:'\u{1F3CE}\uFE0F', name:'COLLECTOR',      desc:'Own all vehicles' },
+  { id:'wingman',        icon:'\u{1F91D}',     name:'WINGMAN',           desc:'Unlock any sidekick' },
+  { id:'scrap_hound',    icon:'\u{1F4B0}',     name:'SCRAP HOUND',       desc:'Earn 10,000 lifetime scrap' },
+  { id:'scrap_baron',    icon:'\u{1F48E}',     name:'SCRAP BARON',       desc:'Earn 50,000 lifetime scrap' },
 ];
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
@@ -5146,21 +5146,15 @@ const UI = {
     list.innerHTML = '';
     // earned first, then locked
     const sorted = ACHIEVEMENTS.slice().sort((a, b) => {
-      const ae = earned.has(a.id) ? 0 : 1;
-      const be = earned.has(b.id) ? 0 : 1;
-      return ae - be;
+      const aEarned = earned.has(a.id) ? 0 : 1;
+      const bEarned = earned.has(b.id) ? 0 : 1;
+      return aEarned - bEarned;
     });
     sorted.forEach(a => {
       const done = earned.has(a.id);
       const card = document.createElement('div');
       card.className = 'ach-card' + (done ? ' earned' : '');
-      card.innerHTML =
-        `<div class="ach-icon">${a.icon}</div>` +
-        `<div class="ach-body">` +
-          `<div class="ach-name">${escapeHtml(a.name)}</div>` +
-          `<div class="ach-desc">${escapeHtml(a.desc)}</div>` +
-        `</div>` +
-        (done ? '<div class="ach-check">\u2713</div>' : '');
+      card.innerHTML = `<div class="ach-icon">${a.icon}</div><div class="ach-body"><div class="ach-name">${escapeHtml(a.name)}</div><div class="ach-desc">${escapeHtml(a.desc)}</div></div>${done ? '<div class="ach-check">\u2713</div>' : ''}`;
       list.appendChild(card);
     });
     this.show('achievements');
