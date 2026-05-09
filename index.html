@@ -130,7 +130,7 @@
   <div class="toast" id="toast"></div>
 
   <div class="overlay" id="menuTitle">
-    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WebGL Classic</span></div>
+    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WebGL classic</span></div>
     <div class="subtitle">Race raiders, dust storms, bosses, and neon road effects across the Mojave.<br><b>Zombie Wasteland is an unlockable side mode after 6 campaign sectors.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
@@ -833,7 +833,7 @@ class Zombie{
        Math.abs(this.y-player.y) < (this.h+player.h)/2 - 6){
       const ramPlating = player.special===SPECIAL_RAM_PLATING;
       player.damage(ramPlating ? Math.ceil(t.dmg*RAM_PLATING_DAMAGE_FACTOR) : t.dmg);
-      if(this.t.boss){
+      if(t.boss){
         // Boss survives the collision, just shoves the player back.
         Game.shake = Math.max(Game.shake, 18);
       } else {
@@ -1157,10 +1157,10 @@ function maybeSpawnBoss(){
   if(!BOSS_SECTORS.includes(Game.sector)) return;
   if(Game.bossLockSector===Game.sector) return;
   Game.bossLockSector = Game.sector;
-  const boss = new Zombie('warlord', W/2, -120);
-  Game.boss = boss;
-  Game.zombies.push(boss);
-  toast('BOSS INCOMING: '+boss.t.name);
+  const bossEnemy = new Zombie('warlord', W/2, -120);
+  Game.boss = bossEnemy;
+  Game.zombies.push(bossEnemy);
+  toast('BOSS INCOMING: '+bossEnemy.t.name);
 }
 
 // ---------- Spawning -------------------------------------------------
