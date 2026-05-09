@@ -1058,16 +1058,17 @@ const ACHIEVEMENTS = [
   ...buildAchievementBadges(),
 ];
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
+const ACHIEVEMENT_METRICS = {
+  runs: p => p.runs || 0,
+  bestClassic: p => p.bestClassic || 0,
+  bestDistance: p => p.bestDistance || 0,
+  bestBossRush: p => p.bestBossRush || 0,
+  lifetimeScrap: p => p.lifetimeScrap || 0,
+};
 
 function achievementMetricValue(metric, p) {
-  switch (metric) {
-    case 'runs': return p.runs || 0;
-    case 'bestClassic': return p.bestClassic || 0;
-    case 'bestDistance': return p.bestDistance || 0;
-    case 'bestBossRush': return p.bestBossRush || 0;
-    case 'lifetimeScrap': return p.lifetimeScrap || 0;
-    default: return 0;
-  }
+  const readMetric = ACHIEVEMENT_METRICS[metric];
+  return readMetric ? readMetric(p) : 0;
 }
 function checkAchievementCriteria(criteria, p) {
   if (!criteria) return false;
