@@ -211,14 +211,27 @@
 
 // ---------- Storage ---------------------------------------------------
 const SAVE_KEY = 'mojave_v2_save';
+const defaultDriver = () => ({name:'DRIFTER',engine:0,armor:0,weapon:0,special:0,scrap:0});
 const defaultSave = () => ({
-  drivers:[{name:'DRIFTER',engine:0,armor:0,weapon:0,special:0,scrap:0}],
+  drivers:[defaultDriver()],
   active:0, hi:0, totalKills:0, totalDist:0, bestSector:1,
   settings:{crt:false,motion:false,cb:false,snd:true},
   gauntletProgress:1,
 });
+function normalizeSave(s){
+  const base = defaultSave();
+  if(!s || !Array.isArray(s.drivers) || !s.drivers.length) return base;
+  s.drivers = s.drivers.map((d,i)=>{
+    if(!d || typeof d !== 'object') d = {};
+    const name = String(d.name || (i ? 'DRIVER '+(i+1) : 'DRIFTER')).toUpperCase().slice(0,10);
+    return {...defaultDriver(), ...d, name};
+  });
+  if(!Number.isInteger(s.active) || s.active < 0 || s.active >= s.drivers.length) s.active = 0;
+  s.settings = {...base.settings, ...(s.settings && typeof s.settings === 'object' ? s.settings : {})};
+  return {...base, ...s};
+}
 let SAVE = (()=>{ try{ const s=JSON.parse(localStorage.getItem(SAVE_KEY));
-  return s && s.drivers ? s : defaultSave(); }catch(e){return defaultSave();} })();
+  return normalizeSave(s); }catch(e){return defaultSave();} })();
 const persist = () => { try{ localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); }catch(e){} };
 const driver = () => SAVE.drivers[SAVE.active];
 
