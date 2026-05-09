@@ -1081,14 +1081,17 @@ let W = 0, H = 0, DPR = 1;
 const DPR_CAP = IS_MOBILE ? 1.5 : 2;
 const MIN_RENDER_SCALE = IS_MOBILE ? 0.7 : 0.85;
 const MIN_DPR = IS_MOBILE ? 0.75 : 1;
+const DPR_CHANGE_THRESHOLD = 0.01;
+const ORIENTATION_CHANGE_DELAY_MS = 160;
 const SCALE_PENALTY_LOW_MEMORY = 0.15;
 const SCALE_PENALTY_LOW_CORES = 0.1;
 let renderScale = (() => {
   let scale = IS_MOBILE ? 0.95 : 1;
   const mem = Number(navigator.deviceMemory || 0);
   const cores = Number(navigator.hardwareConcurrency || 0);
-  if (mem && mem <= 2) scale -= SCALE_PENALTY_LOW_MEMORY;
-  if (cores && cores <= 4) scale -= SCALE_PENALTY_LOW_CORES;
+  const memPenalty = (mem && mem <= 2) ? SCALE_PENALTY_LOW_MEMORY : 0;
+  const corePenalty = (cores && cores <= 4) ? SCALE_PENALTY_LOW_CORES : 0;
+  scale -= Math.max(memPenalty, corePenalty);
   return Math.min(1, Math.max(MIN_RENDER_SCALE, scale));
 })();
 let _resizeRaf = 0;
@@ -1161,7 +1164,7 @@ function resize() {
   const nextH = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
   const wantedDpr = (window.devicePixelRatio || 1) * renderScale;
   const nextDpr = Math.round(Math.min(DPR_CAP, Math.max(MIN_DPR, wantedDpr)) * 100) / 100;
-  if (nextW === W && nextH === H && Math.abs(nextDpr - DPR) < 0.01) return;
+  if (nextW === W && nextH === H && Math.abs(nextDpr - DPR) < DPR_CHANGE_THRESHOLD) return;
   DPR = nextDpr;
   W = nextW;
   H = nextH;
@@ -1189,7 +1192,7 @@ function queueResize(delay = 0) {
   });
 }
 window.addEventListener('resize', () => queueResize());
-window.addEventListener('orientationchange', () => queueResize(160));
+window.addEventListener('orientationchange', () => queueResize(ORIENTATION_CHANGE_DELAY_MS));
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', () => queueResize());
   window.visualViewport.addEventListener('scroll', () => queueResize());
