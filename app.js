@@ -8106,7 +8106,7 @@ function cloudRestore() {
     onOk: (code) => {
       if (!code) { UI.toast('INVALID CLOUD CODE'); return; }
       const parts = code.split('-');
-      if (parts.length !== 2 || parts[0].length < 4 || parts[1].length < 4) {
+      if (parts.length !== 2 || parts[0].length !== 6 || parts[1].length !== 6) {
         UI.toast('INVALID CLOUD CODE — FORMAT MUST BE XXXXXX-XXXXXX');
         return;
       }
@@ -8139,7 +8139,6 @@ UI.act = function(action, data) {
   if (action === 'cloud-restore') { SFX.click(); cloudRestore(); return; }
   return _origActCloud(action, data);
 };
-
 
 function boot() {
   resize();

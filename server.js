@@ -113,12 +113,12 @@ loadScores();
 let accounts = {}; // id -> { token, savedAt, data }
 let accountsSavePending = false;
 
-// Cryptographically random cloud code component.
+// Cryptographically random cloud code component (rejection sampling avoids modulo bias).
 function genCode(len) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars — power of 2, no bias
   const bytes = crypto.randomBytes(len);
   let s = '';
-  for (let i = 0; i < len; i++) s += chars[bytes[i] % chars.length];
+  for (let i = 0; i < len; i++) s += chars[bytes[i] & 31]; // 32 = 2^5, mask is exact
   return s;
 }
 
@@ -306,7 +306,6 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, data: acc.data }));
     return;
   }
-
 
   if (urlPath === '/') urlPath = '/index.html';
   // prevent path traversal
