@@ -1419,11 +1419,23 @@ function restoreRng() {
 
 const BIOME_KEYS = Object.keys(BIOME_THEMES);
 const BIOME_MODIFIERS = {
-  wastes:    { id:'heatwave',   name:'HEATWAVE',     desc:'Shimmering air favors mirage caches and sand ambushes.', color:'#ffb36a', handlingMul:1.00 },
-  saltflats: { id:'slicksalt',  name:'SLICK SALT',   desc:'Glare and loose salt reduce handling, but magnets appear more often.', color:'#e8f2ff', handlingMul:0.90 },
-  ash:       { id:'ashfall',    name:'ASHFALL',      desc:'Ash haze thickens visibility and throws more volatile debris into the road.', color:'#c8a8a0', handlingMul:0.96 },
-  redcanyon: { id:'rockfall',   name:'ROCKFALL ZONE',desc:'Canyon walls shed debris and reward nitro timing.', color:'#ff8a5a', handlingMul:1.00 },
-  midnight:  { id:'neonsurge',  name:'NEON SURGE',   desc:'Signal ghosts boost pulse tech and attract drones.', color:'#8ec5ff', handlingMul:1.03 },
+  wastes:    { id:'heatwave',   eventId:'mirage_cache',    name:'HEATWAVE',     desc:'Shimmering air favors mirage caches and sand ambushes.', color:'#ffb36a', handlingMul:1.00 },
+  saltflats: { id:'slicksalt',  eventId:'salt_glare',      name:'SLICK SALT',   desc:'Glare and loose salt reduce handling, but magnets appear more often.', color:'#e8f2ff', handlingMul:0.90 },
+  ash:       { id:'ashfall',    eventId:'ash_squall',      name:'ASHFALL',      desc:'Ash haze thickens visibility and throws more volatile debris into the road.', color:'#c8a8a0', handlingMul:0.96 },
+  redcanyon: { id:'rockfall',   eventId:'canyon_rockfall', name:'ROCKFALL ZONE',desc:'Canyon walls shed debris and reward nitro timing.', color:'#ff8a5a', handlingMul:1.00 },
+  midnight:  { id:'neonsurge',  eventId:'neon_surge',      name:'NEON SURGE',   desc:'Signal ghosts boost pulse tech and attract drones.', color:'#8ec5ff', handlingMul:1.03 },
+};
+const BIOME_EVENT_TUNING = {
+  pickupMargin: 40,
+  cacheSize: 28,
+  scrapSize: 22,
+  rockfallSpawnRate: 0.75,
+  ashSquallSpawnRate: 0.55,
+  maxEventObstacles: 28,
+  saltGlareHandlingMul: 0.82,
+  ashSquallHandlingMul: 0.94,
+  maxVLowHandlingMul: 0.96,
+  maxVHighHandlingMul: 1.02,
 };
 
 function pickBiome(mode, levelData, dailySeedKey) {
@@ -2355,7 +2367,7 @@ function startRun(mode, level) {
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
   Game.activeEvent = null;
   Game.eventTimer = 0;
-  Game.eventCooldown = rand(8, 13);
+  Game.eventCooldown = rand(12, 18);
   Game.eventBanner = null;
   Game.bonusObjective = null;
   Game.bonusObjectiveT = 0;
@@ -2563,8 +2575,9 @@ function startDynamicEvent(id) {
   } else if (id === 'mirage_cache') {
     Game.activeEvent = { id, name:'MIRAGE CACHE', t: 9, max: 9 };
     const { x0, x1 } = roadBounds();
-    Game.pickups.push({ kind:'cache', x: rand(x0 + 40, x1 - 40), y:-50, w:28, h:28, t:0 });
-    Game.pickups.push({ kind:'scrap', x: rand(x0 + 40, x1 - 40), y:-120, w:22, h:22, t:0 });
+    const margin = BIOME_EVENT_TUNING.pickupMargin;
+    Game.pickups.push({ kind:'cache', x: rand(x0 + margin, x1 - margin), y:-50, w:BIOME_EVENT_TUNING.cacheSize, h:BIOME_EVENT_TUNING.cacheSize, t:0 });
+    Game.pickups.push({ kind:'scrap', x: rand(x0 + margin, x1 - margin), y:-120, w:BIOME_EVENT_TUNING.scrapSize, h:BIOME_EVENT_TUNING.scrapSize, t:0 });
     spawnEnemyWave('bikes');
     announceEvent('MIRAGE CACHE', '#ffcf7a');
   } else if (id === 'salt_glare') {
@@ -2592,11 +2605,12 @@ function maybeTriggerDynamicEvent() {
   if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
   const dist = Game.distance;
   const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
-  if (Game.biome === 'wastes') pool.push('mirage_cache', 'ambush');
-  if (Game.biome === 'saltflats') pool.push('salt_glare', 'convoy');
-  if (Game.biome === 'ash') pool.push('ash_squall', 'hazard');
-  if (Game.biome === 'redcanyon') pool.push('canyon_rockfall', 'hazard');
-  if (Game.biome === 'midnight') pool.push('neon_surge', 'drone_strike');
+  if (Game.biomeModifier && Game.biomeModifier.eventId) pool.push(Game.biomeModifier.eventId);
+  if (Game.biome === 'wastes') pool.push('ambush');
+  if (Game.biome === 'saltflats') pool.push('convoy');
+  if (Game.biome === 'ash') pool.push('hazard');
+  if (Game.biome === 'redcanyon') pool.push('hazard');
+  if (Game.biome === 'midnight') pool.push('drone_strike');
   if (dist > 1500) pool.push('drone_strike');
   if (dist > 4000) pool.push('tank_column');
   if (Game.mode === 'classic' && dist > 1000) pool.push('civilian_convoy');
@@ -3207,10 +3221,10 @@ function update(dt) {
 
   if (Game.activeEvent) {
     Game.activeEvent.t -= dt;
-    if (Game.activeEvent.id === 'canyon_rockfall' && Math.random() < dt * 0.75 && Game.obstacles.length < 28) {
+    if (Game.activeEvent.id === 'canyon_rockfall' && Math.random() < dt * BIOME_EVENT_TUNING.rockfallSpawnRate && Game.obstacles.length < BIOME_EVENT_TUNING.maxEventObstacles) {
       spawnRockfallField();
     }
-    if (Game.activeEvent.id === 'ash_squall' && Math.random() < dt * 0.55 && Game.obstacles.length < 28) {
+    if (Game.activeEvent.id === 'ash_squall' && Math.random() < dt * BIOME_EVENT_TUNING.ashSquallSpawnRate && Game.obstacles.length < BIOME_EVENT_TUNING.maxEventObstacles) {
       spawnHazardField();
     }
     if (Game.activeEvent.id === 'stormfront' && Game.activeEvent.t <= 0 && !Game.runMutators.some(m => m.id === 'volatile')) {
@@ -3321,10 +3335,10 @@ function update(dt) {
   const p = Game.player;
   const stats = Game.vehicleStats;
   let handlingMul = Game.biomeModifier ? Game.biomeModifier.handlingMul : 1;
-  if (Game.activeEvent && Game.activeEvent.id === 'salt_glare') handlingMul *= 0.82;
-  if (Game.activeEvent && Game.activeEvent.id === 'ash_squall') handlingMul *= 0.94;
+  if (Game.activeEvent && Game.activeEvent.id === 'salt_glare') handlingMul *= BIOME_EVENT_TUNING.saltGlareHandlingMul;
+  if (Game.activeEvent && Game.activeEvent.id === 'ash_squall') handlingMul *= BIOME_EVENT_TUNING.ashSquallHandlingMul;
   const accel = stats.accel * handlingMul;
-  const maxV = stats.maxV * (handlingMul < 1 ? 0.96 : 1.02);
+  const maxV = stats.maxV * (handlingMul < 1 ? BIOME_EVENT_TUNING.maxVLowHandlingMul : BIOME_EVENT_TUNING.maxVHighHandlingMul);
   const drag = 6.5;
   if (input.left)  p.vx -= accel * dt;
   if (input.right) p.vx += accel * dt;
