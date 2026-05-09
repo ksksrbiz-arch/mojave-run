@@ -1,1 +1,1 @@
-[v1.2 section added with full feature list, how to use editor/modding, Android build instructions, seasonal calendar]
+[Epic v1.3 changelog with bold vision statement, feature deep-dives, modding tutorial, tournament rules, narrative choices guide, WebGPU requirements, creator economy roadmap]
