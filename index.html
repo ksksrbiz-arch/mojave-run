@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Mojave Run V2" />
-<meta name="description" content="Mojave Run V2: vanilla HTML5 canvas arcade driver. Race across the Mojave and unlock Zombie Wasteland mid-campaign." />
+<meta name="description" content="Mojave Run V2: HTML5 + WebGL arcade driver. Race across the Mojave and unlock Zombie Wasteland mid-campaign." />
 <title>MOJAVE RUN V2</title>
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -27,10 +27,12 @@
   #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
     background:radial-gradient(ellipse at center,#2a1808 0%,#0a0604 80%)}
   canvas#game{display:block;background:#1a0f08;image-rendering:pixelated;
-    image-rendering:crisp-edges;box-shadow:0 0 40px #000;touch-action:none}
+    image-rendering:crisp-edges;box-shadow:0 0 40px #000;touch-action:none;position:relative;z-index:1}
+  canvas#glfx{position:absolute;display:block;pointer-events:none;z-index:2;
+    mix-blend-mode:screen;opacity:.26}
   .overlay{position:absolute;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:24px;text-align:center;
-    pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px)}
+    pointer-events:auto;background:rgba(10,6,4,.78);backdrop-filter:blur(2px);z-index:4}
   .overlay.hidden{display:none}
   .hud.hidden{display:none}
   .pause-btn.hidden{display:none}
@@ -105,6 +107,7 @@
 </head>
 <body>
 <div id="stage">
+  <canvas id="glfx" width="800" height="1200" aria-hidden="true"></canvas>
   <canvas id="game" width="800" height="1200"></canvas>
   <div class="scan" id="scan"></div>
   <button class="pause-btn hidden" id="pauseBtn">II</button>
@@ -127,8 +130,8 @@
   <div class="toast" id="toast"></div>
 
   <div class="overlay" id="menuTitle">
-    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · CLASSIC RUN</span></div>
-    <div class="subtitle">Race the Mojave, clear campaign sectors, and upgrade your Rust Bucket.<br><b>Zombie Wasteland unlocks after clearing 6 campaign sectors.</b></div>
+    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WEBGL CLASSIC</span></div>
+    <div class="subtitle">Race raiders, dust storms, bosses, and neon road effects across the Mojave.<br><b>Zombie Wasteland is an unlockable side mode after 6 campaign sectors.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
       <button class="btn" data-act="campaign">CAMPAIGN (12 SECTORS)</button>
@@ -138,7 +141,7 @@
       <button class="btn" data-act="mp">MULTIPLAYER</button>
       <button class="btn small" data-act="settings">SETTINGS · CREDITS</button>
     </div>
-    <div class="credit">v2.0 · vanilla canvas · 2026</div>
+    <div class="credit">v2.1 · HTML5 canvas + WebGL FX · 2026</div>
   </div>
 
   <div class="overlay hidden" id="menuGarage">
@@ -182,7 +185,7 @@
       <div class="upgrade"><span>COLOR-BLIND</span><button class="btn small" id="tCB">OFF</button></div>
       <div class="upgrade"><span>SOUND</span><button class="btn small" id="tSnd">ON</button></div>
       <h2 style="margin-top:14px">CREDITS</h2>
-      <div class="row-stats">A 2026 single-file canvas joint.<br>Built procedurally — no images, no audio files.<br>Original Mojave Run · reborn.</div>
+      <div class="row-stats">A 2026 HTML5 + WebGL-enhanced single-file joint.<br>Built procedurally — no images, no audio files.<br>Original Mojave Run · restored, with Zombie Wasteland as an optional side mode.</div>
       <div class="row"><button class="btn small" data-act="back">BACK</button></div>
     </div>
   </div>
@@ -243,6 +246,7 @@ const driver = () => SAVE.drivers[SAVE.active];
 // ---------- Canvas / scaling -----------------------------------------
 const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d');
+const glCvs = document.getElementById('glfx');
 const W = cvs.width, H = cvs.height;
 function fit(){
   const ar = W/H;
@@ -250,8 +254,78 @@ function fit(){
   let w = aw, h = aw/ar;
   if(h > ah){ h = ah; w = ah*ar; }
   cvs.style.width = w+'px'; cvs.style.height = h+'px';
+  glCvs.style.width = w+'px'; glCvs.style.height = h+'px';
 }
 window.addEventListener('resize', fit); fit();
+
+// ---------- WebGL presentation layer -----------------------------------
+const WebGLFX = (() => {
+  const gl = glCvs.getContext('webgl', {alpha:true, antialias:false});
+  if(!gl){
+    glCvs.style.display = 'none';
+    return {ok:false, render(){}};
+  }
+  const vert = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
+  const frag = [
+    'precision mediump float;',
+    'uniform float t;',
+    'uniform float speed;',
+    'uniform float zombie;',
+    'uniform vec2 res;',
+    'void main(){',
+    '  vec2 uv=gl_FragCoord.xy/res;',
+    '  float road=smoothstep(0.22,0.34,uv.x)*smoothstep(0.78,0.66,uv.x);',
+    '  float lane=abs(fract((uv.y+t*speed)*9.0)-0.5);',
+    '  float dash=smoothstep(0.43,0.5,lane);',
+    '  float horizon=smoothstep(0.45,0.95,uv.y);',
+    '  vec3 classic=vec3(1.0,0.55,0.16)*(0.10+0.35*horizon)+vec3(0.2,0.65,1.0)*road*dash;',
+    '  vec3 dead=vec3(0.75,0.02,0.01)*(0.15+0.45*horizon)+vec3(0.2,1.0,0.18)*road*dash;',
+    '  vec3 col=mix(classic,dead,zombie);',
+    '  float vign=1.0-length(uv-0.5)*1.2;',
+    '  gl_FragColor=vec4(col*vign,0.55*road+0.12*horizon);',
+    '}'
+  ].join('');
+  function shader(type, src){
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
+  }
+  const vs = shader(gl.VERTEX_SHADER, vert);
+  const fs = shader(gl.FRAGMENT_SHADER, frag);
+  const prog = gl.createProgram();
+  if(!vs || !fs || !prog){
+    glCvs.style.display = 'none';
+    return {ok:false, render(){}};
+  }
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+    glCvs.style.display = 'none';
+    return {ok:false, render(){}};
+  }
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const locP = gl.getAttribLocation(prog, 'p');
+  const locT = gl.getUniformLocation(prog, 't');
+  const locSpeed = gl.getUniformLocation(prog, 'speed');
+  const locZombie = gl.getUniformLocation(prog, 'zombie');
+  const locRes = gl.getUniformLocation(prog, 'res');
+  return {
+    ok:true,
+    render(){
+      gl.viewport(0,0,glCvs.width,glCvs.height);
+      gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(prog);
+      gl.enableVertexAttribArray(locP);
+      gl.vertexAttribPointer(locP, 2, gl.FLOAT, false, 0, 0);
+      gl.uniform1f(locT, performance.now()*0.001);
+      gl.uniform1f(locSpeed, clamp(Game.speed/700, 0.3, 1.8));
+      gl.uniform1f(locZombie, isZombieMode() ? 1 : 0);
+      gl.uniform2f(locRes, glCvs.width, glCvs.height);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+  };
+})();
 
 // ---------- Audio (procedural) ---------------------------------------
 const Audio = (()=>{
@@ -394,9 +468,9 @@ function burst(x,y,n,col,spd=200,life=0.5,size=4,grav=0){
   }
 }
 
-// ---------- Decals (blood on road) ------------------------------------
+// ---------- Decals (blood / oil on road) -------------------------------
 const Decals = [];
-function decal(x,y,r){ Decals.push({x,y,r,t:6}); if(Decals.length>40) Decals.shift(); }
+function decal(x,y,r,col='#5a0808'){ Decals.push({x,y,r,t:6,col}); if(Decals.length>40) Decals.shift(); }
 
 // ---------- Game state -----------------------------------------------
 const Game = {
@@ -697,6 +771,12 @@ const ZTYPES = {
   screamer:{hp:30,spd:100,dmg:8,score:40,col:'#8a3a3a',w:40,h:52},
   exploder:{hp:24,spd:120,dmg:30,score:50,col:'#aa5500',w:42,h:50},
   brute:{hp:600,spd:40,dmg:40,score:800,col:'#5a1a1a',w:120,h:140,boss:true,name:'BRUTE'},
+  raider:{hp:20,spd:120,dmg:10,score:16,col:'#a45a24',w:44,h:72,classic:true},
+  buggy:{hp:16,spd:190,dmg:12,score:24,col:'#c07824',w:42,h:66,classic:true},
+  outrider:{hp:18,spd:230,dmg:14,score:30,col:'#c09a44',w:34,h:58,classic:true},
+  tanker:{hp:65,spd:85,dmg:26,score:70,col:'#6b6048',w:58,h:86,classic:true},
+  drone:{hp:26,spd:105,dmg:8,score:45,col:'#4aa6c0',w:54,h:42,classic:true},
+  warlord:{hp:700,spd:44,dmg:42,score:900,col:'#603018',w:128,h:150,boss:true,name:'WAR RIG',classic:true},
 };
 class Zombie{
   constructor(type,x,y){
@@ -704,6 +784,7 @@ class Zombie{
     this.x=x; this.y=y; this.hp=t.hp; this.maxHp=t.hp;
     this.w=t.w; this.h=t.h;
     this.zig = Math.random()*Math.PI*2;
+    this.undead = !t.classic;
     this.alive=true;
   }
   update(dt,player){
@@ -716,9 +797,12 @@ class Zombie{
     } else if(this.type==='crawler'){
       vx = Math.sign(player.x-this.x)*50;
       vy = t.spd;
-    } else if(this.type==='exploder' || this.type==='screamer'){
+    } else if(this.type==='exploder' || this.type==='screamer' || this.type==='drone'){
       vx = Math.sign(player.x-this.x)*30;
-    } else if(this.type==='brute'){
+    } else if(this.type==='outrider'){
+      this.zig += dt*5;
+      vx = Math.sin(this.zig)*85 + Math.sign(player.x-this.x)*35;
+    } else if(this.type==='warlord' || this.type==='brute'){
       // Boss: hold near top of screen, weave horizontally, slam down briefly.
       this.zig += dt*1.5;
       vx = Math.sin(this.zig)*180 + Math.sign(player.x-this.x)*60;
@@ -730,7 +814,7 @@ class Zombie{
     // which makes them appear to move down. We add their own forward speed too.
     this.x += vx*dt;
     this.y += (vy + Game.speed)*dt;
-    if(this.type==='brute'){
+    if(this.type==='brute' || this.type==='warlord'){
       this.x = clamp(this.x, W*0.22, W*0.78);
     }
     // collision with player
@@ -738,7 +822,7 @@ class Zombie{
        Math.abs(this.y-player.y) < (this.h+player.h)/2 - 6){
       const ramPlating = player.special===SPECIAL_RAM_PLATING;
       player.damage(ramPlating ? Math.ceil(t.dmg*RAM_PLATING_DAMAGE_FACTOR) : t.dmg);
-      if(this.type==='brute'){
+      if(this.t.boss){
         // Boss survives the collision, just shoves the player back.
         Game.shake = Math.max(Game.shake, 18);
       } else {
@@ -752,8 +836,8 @@ class Zombie{
   }
   hit(d){
     this.hp -= d;
-    burst(this.x,this.y,4,'#a01818',180,0.4,3);
-    decal(this.x,this.y,8);
+    burst(this.x,this.y,4,this.undead?'#a01818':'#ffaa44',180,0.4,3);
+    decal(this.x,this.y,8,this.undead?'#5a0808':'#111');
     if(this.hp<=0){ this.kill(true); }
   }
   kill(byShot){
@@ -769,16 +853,16 @@ class Zombie{
     if(this.t.boss){
       Game.scrap += 200;
       Game.shake = Math.max(Game.shake, 30);
-      burst(this.x,this.y,80,'#ff5050',520,1.0,6,300);
+      burst(this.x,this.y,80,this.undead?'#ff5050':'#ffaa44',520,1.0,6,300);
       burst(this.x,this.y,40,'#ffaa44',420,0.8,5);
       Audio.explode();
       toast('BOSS DOWN +200 SCRAP');
       if(Game.boss===this) Game.boss=null;
     }
     if(Math.random()<(this.t.boss?1.0:0.3)) Game.pickups.push(makePickup(this.x,this.y));
-    burst(this.x,this.y,16,'#a01818',300,0.6,4,400);
-    decal(this.x,this.y,16);
-    if(this.type==='exploder'){
+    burst(this.x,this.y,16,this.undead?'#a01818':'#ffcc66',300,0.6,4,400);
+    decal(this.x,this.y,16,this.undead?'#5a0808':'#111');
+    if(this.type==='exploder' || this.type==='tanker'){
       Audio.explode(); Game.shake=Math.max(Game.shake,20);
       burst(this.x,this.y,40,'#ffaa44',500,0.8,5);
       // chain damage
@@ -806,6 +890,41 @@ class Zombie{
     const x=this.x, y=this.y, w=this.w, h=this.h;
     c.fillStyle='rgba(0,0,0,.4)';
     c.fillRect(x-w/2+3,y+h/2-3,w,6);
+    if(!this.undead){
+      c.fillStyle=this.t.col;
+      if(this.type==='drone'){
+        c.fillRect(x-w/2,y-h/2+h*0.25,w,h*0.5);
+        c.fillStyle='#1b3440';
+        c.fillRect(x-w*0.22,y-h*0.08,w*0.44,h*0.16);
+        c.fillStyle='#222';
+        c.fillRect(x-w/2-12,y-h/2+4,12,5);
+        c.fillRect(x+w/2,y-h/2+4,12,5);
+        c.fillRect(x-w/2-12,y+h/2-9,12,5);
+        c.fillRect(x+w/2,y+h/2-9,12,5);
+      } else {
+        c.fillRect(x-w/2,y-h/2,w,h);
+        c.fillStyle='#2a160c';
+        c.fillRect(x-w/2+7,y-h/2+8,w-14,16);
+        c.fillStyle='#263342';
+        c.fillRect(x-w/2+10,y-h/2+28,w-20,16);
+        c.fillStyle='#111';
+        c.fillRect(x-w/2-4,y-h/2+10,8,20);
+        c.fillRect(x+w/2-4,y-h/2+10,8,20);
+        c.fillRect(x-w/2-4,y+h/2-28,8,20);
+        c.fillRect(x+w/2-4,y+h/2-28,8,20);
+        if(this.t.boss){
+          c.fillStyle='#222';
+          for(let i=0;i<4;i++) c.fillRect(x-w/2+10+i*28,y-h/2-8,14,12);
+          c.fillStyle='#ffcc66';
+          c.fillRect(x-w/2+20,y+h/2-18,w-40,8);
+        }
+      }
+      if(this.hp<this.maxHp && !this.t.boss){
+        c.fillStyle='#210'; c.fillRect(x-w/2,y-h/2-10,w,3);
+        c.fillStyle='#ffb84a'; c.fillRect(x-w/2,y-h/2-10,w*(this.hp/this.maxHp),3);
+      }
+      return;
+    }
     c.fillStyle=this.t.col;
     if(this.type==='brute'){
       // hulking torso
@@ -954,18 +1073,18 @@ function drawRoad(c, night){
 
 // ---------- Sectors / weather ----------------------------------------
 const SECTORS = [
-  {name:'I-15 OUTSKIRTS',night:false,weather:'clear',mix:['walker','walker','runner']},
-  {name:'BAKER FLATS',night:false,weather:'clear',mix:['walker','runner','runner']},
-  {name:'NIGHT 1: ZZYZX',night:true,weather:'clear',mix:['walker','runner','crawler']},
-  {name:'DUST STORM',night:false,weather:'dust',mix:['runner','crawler','tank']},
-  {name:'AFTON CANYON',night:false,weather:'clear',mix:['runner','crawler','screamer']},
-  {name:'NIGHT 2: KELSO',night:true,weather:'clear',mix:['runner','exploder','screamer']},
-  {name:'HORDE RUSH',night:false,weather:'clear',mix:['walker','runner','runner','walker']},
-  {name:'AMBOY',night:false,weather:'dust',mix:['runner','tank','exploder']},
-  {name:'NIGHT 3: NEEDLES',night:true,weather:'clear',mix:['runner','crawler','exploder','screamer']},
-  {name:'FORT IRWIN',night:false,weather:'clear',mix:['tank','tank','exploder']},
-  {name:'DEATH VALLEY',night:true,weather:'dust',mix:['runner','tank','screamer','exploder']},
-  {name:'FINAL: VEGAS RUINS',night:true,weather:'clear',mix:['walker','runner','crawler','tank','screamer','exploder']},
+  {name:'I-15 OUTSKIRTS',night:false,weather:'clear',mix:['raider','raider','buggy']},
+  {name:'BAKER FLATS',night:false,weather:'clear',mix:['raider','buggy','buggy']},
+  {name:'NIGHT 1: ZZYZX',night:true,weather:'clear',mix:['raider','buggy','outrider']},
+  {name:'DUST STORM',night:false,weather:'dust',mix:['buggy','outrider','tanker']},
+  {name:'AFTON CANYON',night:false,weather:'clear',mix:['buggy','outrider','drone']},
+  {name:'NIGHT 2: KELSO',night:true,weather:'clear',mix:['buggy','tanker','drone']},
+  {name:'ROAD WAR',night:false,weather:'clear',mix:['raider','buggy','outrider','raider']},
+  {name:'AMBOY',night:false,weather:'dust',mix:['buggy','tanker','tanker']},
+  {name:'NIGHT 3: NEEDLES',night:true,weather:'clear',mix:['buggy','outrider','tanker','drone']},
+  {name:'FORT IRWIN',night:false,weather:'clear',mix:['tanker','tanker','drone']},
+  {name:'DEATH VALLEY',night:true,weather:'dust',mix:['buggy','tanker','drone','outrider']},
+  {name:'FINAL: VEGAS RUINS',night:true,weather:'clear',mix:['raider','buggy','outrider','tanker','drone']},
 ];
 
 function startGame(mode){
@@ -1023,7 +1142,7 @@ function maybeSpawnBoss(){
   if(!BOSS_SECTORS.includes(Game.sector)) return;
   if(Game.bossLockSector===Game.sector) return;
   Game.bossLockSector = Game.sector;
-  const boss = new Zombie('brute', W/2, -120);
+  const boss = new Zombie('warlord', W/2, -120);
   Game.boss = boss;
   Game.zombies.push(boss);
   toast('BOSS INCOMING: '+boss.t.name);
@@ -1232,7 +1351,7 @@ function draw(){
   // decals (blood)
   for(const d of Decals){
     ctx.globalAlpha = clamp(d.t/6,0,1)*0.6;
-    ctx.fillStyle = '#5a0808';
+    ctx.fillStyle = d.col || '#5a0808';
     ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,Math.PI*2); ctx.fill();
   }
   ctx.globalAlpha=1;
@@ -1290,6 +1409,7 @@ function draw(){
     ctx.fillStyle = vg; ctx.fillRect(0,0,W,H);
   }
   ctx.restore();
+  WebGLFX.render();
 }
 
 // ---------- HUD / overlays -------------------------------------------
