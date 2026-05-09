@@ -536,10 +536,15 @@ function tryActivateSpecial(){
 
 // ---------- Zombies ---------------------------------------------------
 // === ZOMBIE WASTELAND MODE ===
-const ZOMBIE_UNLOCK_SECTORS = 6; // complete 6 gauntlet sectors to unlock
-const ZOMBIE_WAVE_BASE      = 10; // kills needed on wave 1
-const ZOMBIE_WAVE_SCALE     = 3;  // extra kills per wave
-const ZOMBIE_OBJ_DURATION   = 60; // seconds for horde survival objective
+const ZOMBIE_UNLOCK_SECTORS  = 6;  // player must clear 6 gauntlet sectors (reach sector 7)
+const ZOMBIE_WAVE_BASE       = 10; // kills needed on wave 1
+const ZOMBIE_WAVE_SCALE      = 3;  // extra kills per wave
+const ZOMBIE_OBJ_DURATION    = 60; // seconds for survive_horde objective
+const ZOMBIE_TANK_OBJ_DURATION = 90; // seconds for kill_tank objective
+const CHAINSAW_DURATION      = 5;  // seconds chainsaw stays active
+const CHAINSAW_DPS           = 20; // damage per second within AOE range
+const MOLOTOV_RADIUS         = 170; // blast radius in pixels
+const MOLOTOV_DAMAGE         = 70;  // damage dealt to zombies in radius
 const ZOMBIE_POWERUPS = ['chainsaw','molotov'];
 const ZOMBIE_OBJECTIVES = ['survive_horde','kill_tank'];
 
@@ -554,10 +559,12 @@ function updateZombieMenuBtn(){
     btn.innerHTML = 'ZOMBIE WASTELAND';
     btn.style.opacity = ''; btn.style.borderColor = 'var(--blood)';
     btn.classList.add('primary');
+    btn.setAttribute('aria-label', 'Zombie Wasteland mode — unlocked');
   } else {
     btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks after '+ZOMBIE_UNLOCK_SECTORS+'/12 Gauntlet Sectors ('+cleared+'/'+ZOMBIE_UNLOCK_SECTORS+')</span>';
     btn.style.opacity = '0.75'; btn.style.borderColor = '';
     btn.classList.remove('primary');
+    btn.setAttribute('aria-label', 'Zombie Wasteland mode — locked. Complete '+ZOMBIE_UNLOCK_SECTORS+' gauntlet sectors to unlock. Progress: '+cleared+' of '+ZOMBIE_UNLOCK_SECTORS);
   }
 }
 
@@ -583,7 +590,7 @@ function triggerGauntletObjective(){
     Game.hordeSpawnQ = 25;
     Game.hordeSpawnT = 0;
   } else if(obj === 'kill_tank'){
-    Game.gauntletObjT = 90;
+    Game.gauntletObjT = ZOMBIE_TANK_OBJ_DURATION;
     toast('OBJECTIVE: DESTROY THE TANK!');
     const boss = new Zombie('tank', W/2, -80);
     boss.maxHp = boss.hp = 300;
@@ -647,7 +654,7 @@ function updateZombieWasteland(dt){
     for(const z of Game.zombies){
       if(!z.alive) continue;
       if(Math.hypot(z.x-Game.player.x, z.y-Game.player.y) < 100){
-        z.hit(20*dt);
+        z.hit(CHAINSAW_DPS*dt);
         if(Math.random()<0.05) burst(z.x, z.y, 2, '#ff8800', 150, 0.2, 3);
       }
     }
@@ -1144,8 +1151,8 @@ function update(dt){
       else if(pk.t==='shield'){ p.invuln = Math.max(p.invuln, SHIELD_DURATION); toast('SHIELD'); }
       // === ZOMBIE WASTELAND exclusive pickups ===
       else if(pk.t==='chainsaw'){
-        Game.chainsawT = 5;
-        toast('CHAINSAW! 5s MELEE AOE');
+        Game.chainsawT = CHAINSAW_DURATION;
+        toast('CHAINSAW! '+CHAINSAW_DURATION+'s MELEE AOE');
         Audio.pickup();
       } else if(pk.t==='molotov'){
         // AOE explosion ahead of player
@@ -1155,7 +1162,7 @@ function update(dt){
         Audio.explode(); Game.shake = Math.max(Game.shake, 16);
         for(const z of Game.zombies){
           if(!z.alive) continue;
-          if(Math.hypot(z.x-mx, z.y-my) < 170) z.hit(70);
+          if(Math.hypot(z.x-mx, z.y-my) < MOLOTOV_RADIUS) z.hit(MOLOTOV_DAMAGE);
         }
         toast('MOLOTOV!');
       }
@@ -1217,7 +1224,7 @@ function draw(){
   if(Game.player) Game.player.draw(ctx);
   // === ZOMBIE WASTELAND: chainsaw aura ===
   if(Game.modeName==='zombiewasteland' && Game.chainsawT > 0 && Game.player){
-    const pulse = (Math.sin(performance.now()*0.025)*0.2+0.5) * clamp(Game.chainsawT/5,0,1);
+    const pulse = (Math.sin(performance.now()*0.025)*0.2+0.5) * clamp(Game.chainsawT/CHAINSAW_DURATION,0,1);
     ctx.globalAlpha = pulse * 0.7;
     ctx.strokeStyle = '#ff8800'; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(Game.player.x, Game.player.y, 100, 0, Math.PI*2); ctx.stroke();
