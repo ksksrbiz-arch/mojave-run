@@ -80,10 +80,10 @@ const COSMETICS = {
     { id:'paint-warlord', name:'WARLORD RED', desc:'Boss-slayer crimson with brutal amber lamps.', unlock:{ kind:'achievement', id:'boss_slayer' }, color:{ body:'#7f1d1d', hood:'#4f1010', cab:'#1a0707', windshield:'#ffb38a', glow:'#ff8a3d' } },
   ],
   trail: [
-    { id:'trail-dust', name:'DUST PLUME', desc:'Classic brown exhaust smoke.', cost:0, colors:['rgba(120,90,60,0.5)'], size:5, speed:50, life:0.45 },
-    { id:'trail-neon', name:'NEON WAKE', desc:'Blue reactor vapor that pops in night runs.', cost:350, colors:['rgba(80,220,255,0.62)','rgba(160,120,255,0.5)'], size:4, speed:70, life:0.5 },
-    { id:'trail-sparks', name:'SPARK SHOWER', desc:'Hot chrome fragments from overloaded pipes.', cost:650, colors:['rgba(255,210,80,0.85)','rgba(255,120,40,0.7)'], size:3, speed:95, life:0.38 },
-    { id:'trail-ghost', name:'GHOST LINE', desc:'Spectral exhaust for proven pathfinders.', unlock:{ kind:'achievement', id:'pathfinder' }, colors:['rgba(170,240,255,0.45)','rgba(210,255,240,0.35)'], size:6, speed:55, life:0.62 },
+    { id:'trail-dust', name:'DUST PLUME', desc:'Classic brown exhaust smoke.', cost:0, colors:['rgba(120,90,60,0.5)'], flameColors:[[255,220,80],[255,115,25]], size:5, speed:50, life:0.45 },
+    { id:'trail-neon', name:'NEON WAKE', desc:'Blue reactor vapor that pops in night runs.', cost:350, colors:['rgba(80,220,255,0.62)','rgba(160,120,255,0.5)'], flameColors:[[80,220,255],[160,120,255]], size:4, speed:70, life:0.5 },
+    { id:'trail-sparks', name:'SPARK SHOWER', desc:'Hot chrome fragments from overloaded pipes.', cost:650, colors:['rgba(255,210,80,0.85)','rgba(255,120,40,0.7)'], flameColors:[[255,210,80],[255,120,40]], size:3, speed:95, life:0.38 },
+    { id:'trail-ghost', name:'GHOST LINE', desc:'Spectral exhaust for proven pathfinders.', unlock:{ kind:'achievement', id:'pathfinder' }, colors:['rgba(170,240,255,0.45)','rgba(210,255,240,0.35)'], flameColors:[[170,240,255],[210,255,240]], size:6, speed:55, life:0.62 },
   ],
   horn: [
     { id:'horn-classic', name:'RUST HORN', desc:'The original busted relay chirp.', cost:0, sfx:'click' },
@@ -150,6 +150,17 @@ function cosmeticSwatchStyle(c) {
   }
   if (c.category === 'trail') return `linear-gradient(90deg, ${c.colors.join(', ')})`;
   return 'linear-gradient(90deg, #1a0f08, #f5d76e, #ff8a3d)';
+}
+
+function cloneCosmeticsState(cosmetics) {
+  const d = defaultCosmetics();
+  const src = cosmetics || d;
+  return {
+    owned: Array.isArray(src.owned) ? src.owned.slice() : d.owned.slice(),
+    equippedPaint: src.equippedPaint || d.equippedPaint,
+    equippedTrail: src.equippedTrail || d.equippedTrail,
+    equippedHorn: src.equippedHorn || d.equippedHorn,
+  };
 }
 
 const VEHICLE_BRANCHES = {
@@ -2563,7 +2574,7 @@ function startRun(mode, level) {
   if (Game.branchState.nitroDamageMul) Game.nitroDamageMul *= Game.branchState.nitroDamageMul;
   Game.vehicle = v;
   Game.vehicleStats = stats;
-  Game.cosmetics = Object.assign(defaultCosmetics(), Profile.equippedCosmetics());
+  Game.cosmetics = cloneCosmeticsState(Profile.equippedCosmetics());
   // sidekick passive effects
   Game.sidekick = profile.activeSidekick || null;
   Game.sidekickHealT = 0;
@@ -4762,8 +4773,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const exFlicker = 0.5 + 0.5 * Math.sin((Game.t || 0) * 28);
   const exLen = 5 + exFlicker * 10;
   const trail = getTrailDef(!opts.noCosmetic && Game.cosmetics ? Game.cosmetics.equippedTrail : null);
-  const hot = trail.id === 'trail-neon' ? [80, 220, 255] : trail.id === 'trail-ghost' ? [170, 240, 255] : [255, 220, 80];
-  const warm = trail.id === 'trail-neon' ? [160, 120, 255] : trail.id === 'trail-ghost' ? [210, 255, 240] : [255, 115, 25];
+  const [hot, warm] = trail.flameColors || [[255, 220, 80], [255, 115, 25]];
   const exGl = ctx.createLinearGradient(0, h / 2 - 2, 0, h / 2 + exLen);
   exGl.addColorStop(0, `rgba(${hot[0]},${hot[1]},${hot[2]},${0.9 * exFlicker + 0.35})`);
   exGl.addColorStop(0.45, `rgba(${warm[0]},${warm[1]},${warm[2]},${0.75 * exFlicker + 0.1})`);
@@ -6333,7 +6343,8 @@ const UI = {
       `;
       list.appendChild(tile);
       // render preview
-      renderVehiclePreview(tile.querySelector('canvas'), v.id, selected ? p.cosmetics : null);
+      const previewCosmetics = selected ? p.cosmetics : null;
+      renderVehiclePreview(tile.querySelector('canvas'), v.id, previewCosmetics);
     });
     this.show('garage');
   },
@@ -6604,7 +6615,7 @@ const UI = {
     const bestMoment = (() => {
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
-      if ((Game.comboBest || 0) >= 30) return 'LEGENDARY ×10 COMBO';
+      if ((Game.comboBest || 0) >= 30) return 'LEGENDARY ×10 MULTIPLIER';
       if ((Game.comboBest || 0) >= 15) return 'HIGH-OCTANE COMBO';
       if (Game.scrapEarned >= 1000) return 'BIG SCRAP HAUL';
       if (Game.kills >= 50) return 'WASTELAND SWEEP';
