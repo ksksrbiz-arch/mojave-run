@@ -128,7 +128,7 @@
 
   <div class="overlay" id="menuTitle">
     <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · CLASSIC RUN</span></div>
-    <div class="subtitle">Race the Mojave, clear campaign sectors, and upgrade your Rust Bucket.<br><b>Zombie Wasteland unlocks mid-campaign.</b></div>
+    <div class="subtitle">Race the Mojave, clear campaign sectors, and upgrade your Rust Bucket.<br><b>Zombie Wasteland unlocks after clearing 6 campaign sectors.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
       <button class="btn" data-act="campaign">CAMPAIGN (12 SECTORS)</button>
@@ -415,6 +415,10 @@ const Game = {
   chainsawT:0,
 };
 
+function isZombieMode(){
+  return Game.modeName === 'zombiewasteland';
+}
+
 // ---------- Player ---------------------------------------------------
 class Player{
   constructor(){
@@ -551,7 +555,7 @@ function tryActivateSpecial(){
 
 // ---------- Zombies ---------------------------------------------------
 // === ZOMBIE WASTELAND MODE ===
-const ZOMBIE_UNLOCK_SECTORS  = 6;  // player must clear 6 campaign sectors (reach sector 7)
+const ZOMBIE_UNLOCK_SECTORS  = 6;  // cleared campaign sectors required; unlocks when advancing to sector 7
 const ZOMBIE_WAVE_BASE       = 10; // kills needed on wave 1
 const ZOMBIE_WAVE_SCALE      = 3;  // extra kills per wave
 const ZOMBIE_OBJ_DURATION    = 60; // seconds for survive_horde objective
@@ -582,7 +586,7 @@ function updateZombieMenuBtn(){
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — unlocked');
     btn.removeAttribute('title');
   } else {
-    const lockText = 'Unlocks at sector '+ZOMBIE_UNLOCK_SECTORS+' of '+SECTORS.length+' ('+cleared+' cleared)';
+    const lockText = 'Unlocks after clearing '+ZOMBIE_UNLOCK_SECTORS+' of '+SECTORS.length+' sectors ('+cleared+' cleared)';
     btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span class="unlock-note">'+lockText+'</span>';
     btn.disabled = true;
     btn.style.borderColor = '';
@@ -852,7 +856,7 @@ class Zombie{
 
 // ---------- Pickups ---------------------------------------------------
 function makePickup(x,y){
-  if(Game.modeName==='zombiewasteland'){
+  if(isZombieMode()){
     // Zombie Wasteland exclusive drop pool (no nitro/multi, add chainsaw/molotov)
     const types=['scrap','scrap','health','health','chainsaw','molotov','shield'];
     return {x,y,t:choose(types),vy:80};
@@ -1030,7 +1034,7 @@ let spawnT = 0;
 function spawnTick(dt){
   spawnT -= dt;
   if(spawnT<=0){
-    if(Game.modeName==='zombiewasteland'){
+    if(isZombieMode()){
       // Wave-based spawning: intensity scales with wave number
       const density = 0.8 + Game.wave * 0.12;
       spawnT = clamp(0.7/density, 0.12, 1.0);
@@ -1209,7 +1213,7 @@ function update(dt){
   // score from distance
   Game.score += Math.floor(Game.speed*dt*0.05);
   // === ZOMBIE WASTELAND wave logic ===
-  if(Game.modeName==='zombiewasteland') updateZombieWasteland(dt);
+  if(isZombieMode()) updateZombieWasteland(dt);
   // hud
   updateHud();
 }
@@ -1247,7 +1251,7 @@ function draw(){
   // player
   if(Game.player) Game.player.draw(ctx);
   // === ZOMBIE WASTELAND: chainsaw aura ===
-  if(Game.modeName==='zombiewasteland' && Game.chainsawT > 0 && Game.player){
+  if(isZombieMode() && Game.chainsawT > 0 && Game.player){
     const pulse = (Math.sin(performance.now()*0.025)*0.2+0.5) * clamp(Game.chainsawT/CHAINSAW_DURATION,0,1);
     ctx.globalAlpha = pulse * 0.7;
     ctx.strokeStyle = '#ff8800'; ctx.lineWidth = 4;
@@ -1280,7 +1284,7 @@ function draw(){
     }
   }
   // === ZOMBIE WASTELAND: blood-red vignette overlay ===
-  if(Game.modeName==='zombiewasteland' && Game.mode==='play'){
+  if(isZombieMode() && Game.mode==='play'){
     const vg = ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.8);
     vg.addColorStop(0,'rgba(120,0,0,0)'); vg.addColorStop(1,'rgba(120,0,0,0.28)');
     ctx.fillStyle = vg; ctx.fillRect(0,0,W,H);
@@ -1324,15 +1328,15 @@ function updateHud(){
   const p = Game.player;
   hud.hp.style.width = Math.max(0,(p.hp/p.maxHp)*100)+'%';
   hud.scrap.textContent = Game.scrap;
-  hud.special.textContent = Game.modeName==='zombiewasteland' ? zombieSpecialText() : specialName(p.special);
+  hud.special.textContent = isZombieMode() ? zombieSpecialText() : specialName(p.special);
   hud.score.textContent = Game.score;
-  hud.sector.textContent = Game.modeName==='zombiewasteland' ? '—' : Game.sector;
+  hud.sector.textContent = isZombieMode() ? '—' : Game.sector;
   hud.kill.textContent = Game.kills;
   // wave counter (zombie wasteland only)
   const waveRow = document.getElementById('waveHudRow');
   const waveEl  = document.getElementById('waveHud');
   if(waveRow && waveEl){
-    if(Game.modeName==='zombiewasteland'){
+    if(isZombieMode()){
       waveRow.classList.remove('hidden');
       waveEl.textContent = Game.wave;
     } else {
@@ -1343,7 +1347,7 @@ function updateHud(){
     hud.specialBtn.textContent = nitroButtonLabel(p);
     hud.specialBtn.disabled = p.specialCd>0;
   } else {
-    hud.specialBtn.textContent = Game.modeName==='zombiewasteland' ? 'ZOMBIE MODE' : specialName(p.special);
+    hud.specialBtn.textContent = isZombieMode() ? 'ZOMBIE MODE' : specialName(p.special);
     hud.specialBtn.disabled = true;
   }
   // combo
@@ -1396,16 +1400,20 @@ function gameOver(win){
   if(Game.sector > SAVE.bestSector) SAVE.bestSector = Game.sector;
   driver().scrap += Math.floor(Game.scrap);
   // === ZOMBIE WASTELAND high scores ===
-  if(Game.modeName==='zombiewasteland'){
+  if(isZombieMode()){
     if(Game.score > SAVE.zombieHi) SAVE.zombieHi = Game.score;
     if(Game.wave  > (SAVE.zombieBestWave||0)) SAVE.zombieBestWave = Game.wave;
   }
   persist();
+  const progressLine = isZombieMode() ? 'WAVE <b>'+Game.wave+'</b>' : 'SECTOR <b>'+Game.sector+'</b>';
+  const bestWaveLine = isZombieMode() && Game.wave>=(SAVE.zombieBestWave||0)
+    ? '<br><b style="color:var(--blood)">NEW BEST WAVE!</b>'
+    : '';
   document.getElementById('gameoverBody').innerHTML =
-    'SCORE <b>'+Game.score+'</b><br>'+(Game.modeName==='zombiewasteland'?'WAVE <b>'+Game.wave+'</b>':'SECTOR <b>'+Game.sector+'</b>')+
+    'SCORE <b>'+Game.score+'</b><br>'+progressLine+
     '<br>KILLS <b>'+Game.kills+'</b><br>SCRAP <b>+'+Game.scrap+'</b>'+
     (win?'<br><b style="color:var(--good)">CAMPAIGN CLEAR</b>':'')+
-    (Game.modeName==='zombiewasteland' && Game.wave>=(SAVE.zombieBestWave||0)?'<br><b style="color:var(--blood)">NEW BEST WAVE!</b>':'');
+    bestWaveLine;
   showOverlay('over');
 }
 
