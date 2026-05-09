@@ -328,8 +328,9 @@ const COMBO_MAX_BONUS = 2.0; // cap multiplier at 1 + 2 = 3.0x
 const COMBO_PER_KILL = 0.1;
 const SHIELD_DURATION = 6.0;
 const BOSS_SECTORS = [4, 8, 12];
-const TOUCH_STEER_BASE = 14;
-const TOUCH_STEER_ENGINE_BONUS = 2;
+const TOUCH_STEER_SPEED = 28;
+const TOUCH_STEER_ENGINE_BONUS = 6;
+const TOUCH_STEER_RESPONSE = 20;
 const TOUCH_STEER_DELTA_CAP = 140;
 function comboMultiplier(combo){
   return 1 + Math.min(combo*COMBO_PER_KILL, COMBO_MAX_BONUS);
@@ -414,7 +415,9 @@ class Player{
     if(Input.down && Input.x!=null){
       const target = clamp(Input.x, 100, W-100);
       const steerDelta = clamp(target - this.x, -TOUCH_STEER_DELTA_CAP, TOUCH_STEER_DELTA_CAP);
-      this.vx += steerDelta * (TOUCH_STEER_BASE + this.spd * TOUCH_STEER_ENGINE_BONUS);
+      const targetVx = steerDelta * (TOUCH_STEER_SPEED + this.spd * TOUCH_STEER_ENGINE_BONUS);
+      const touchFollow = 1 - Math.exp(-dt * TOUCH_STEER_RESPONSE);
+      this.vx += (targetVx - this.vx) * touchFollow;
     }
     if(Input.keys['ArrowLeft']||Input.keys['a']) this.vx -= 1200*dt;
     if(Input.keys['ArrowRight']||Input.keys['d']) this.vx += 1200*dt;
