@@ -94,6 +94,7 @@ const COSMETICS = {
 };
 const COSMETIC_CATEGORIES = ['paint', 'trail', 'horn'];
 const COSMETIC_LABELS = { paint:'PAINTJOB', trail:'EXHAUST TRAIL', horn:'SPAWN HORN' };
+const DEFAULT_PAINT_COLOR = { body:'#a86a2e', hood:'#8a4f1f', cab:'#3a2410', windshield:'#a8d8e8', glow:'#ffe07a' };
 const COSMETIC_BY_ID = Object.fromEntries(COSMETIC_CATEGORIES.flatMap(cat => COSMETICS[cat].map(c => [c.id, Object.assign({ category: cat }, c)])));
 
 function defaultCosmetics() {
@@ -145,7 +146,7 @@ function getTrailDef(trailId) {
 
 function cosmeticSwatchStyle(c) {
   if (c.category === 'paint') {
-    const col = c.color || VEHICLES[0].color;
+    const col = c.color || DEFAULT_PAINT_COLOR;
     return `linear-gradient(90deg, ${col.body}, ${col.hood}, ${col.cab}, ${col.glow})`;
   }
   if (c.category === 'trail') return `linear-gradient(90deg, ${c.colors.join(', ')})`;
@@ -2427,7 +2428,7 @@ function addPopup(text, x, y, color = '#f5d76e', size = 14) {
 
 function emitExhaustTrail(x, y, count = 1) {
   const trail = getTrailDef(Game.cosmetics && Game.cosmetics.equippedTrail);
-  const colors = trail.colors || ['rgba(120,90,60,0.5)'];
+  const colors = (trail.colors && trail.colors.length) ? trail.colors : ['rgba(120,90,60,0.5)'];
   const color = colors[Math.floor(Math.random() * colors.length)] || colors[0];
   emit(x, y, count, {
     color,
@@ -6354,7 +6355,8 @@ const UI = {
     normalizeCosmetics(p);
     const list = document.getElementById('cosmetic-list');
     list.innerHTML = '';
-    const equippedKey = cat === 'paint' ? 'equippedPaint' : cat === 'trail' ? 'equippedTrail' : 'equippedHorn';
+    const equippedKeyMap = { paint: 'equippedPaint', trail: 'equippedTrail', horn: 'equippedHorn' };
+    const equippedKey = equippedKeyMap[cat];
     (COSMETICS[cat] || []).forEach(c => {
       const owned = p.cosmetics.owned.includes(c.id);
       const equipped = p.cosmetics[equippedKey] === c.id;
@@ -6363,9 +6365,10 @@ const UI = {
       const card = document.createElement('div');
       card.className = 'cosmetic-card' + (equipped ? ' equipped' : '') + (!owned && !unlockedByCondition ? ' locked' : '');
       const state = equipped ? 'EQUIPPED' : owned ? 'OWNED' : cosmeticUnlockText(c);
+      const buttonLabel = unlockedByCondition ? `UNLOCK · ${c.cost || 0} SCRAP` : 'LOCKED';
       const action = owned
         ? `<button class="btn${equipped ? ' primary' : ''}" data-cact="equip" data-cid="${c.id}" ${equipped ? 'disabled' : ''}>${equipped ? 'EQUIPPED' : 'EQUIP'}</button>`
-        : `<button class="btn primary" data-cact="buy" data-cid="${c.id}" ${canBuy ? '' : 'disabled'}>${unlockedByCondition ? 'UNLOCK · ' + (c.cost || 0) + ' SCRAP' : 'LOCKED'}</button>`;
+        : `<button class="btn primary" data-cact="buy" data-cid="${c.id}" ${canBuy ? '' : 'disabled'}>${buttonLabel}</button>`;
       card.innerHTML = `
         <div class="cosmetic-head">
           <div>
