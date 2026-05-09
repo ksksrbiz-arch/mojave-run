@@ -71,6 +71,87 @@ const VEHICLES = [
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
+const COSMETICS = {
+  paint: [
+    { id:'paint-stock', name:'FACTORY RUST', desc:'Original wasteland steel.', cost:0, color:null },
+    { id:'paint-sunfire', name:'SUNFIRE ORANGE', desc:'Hot canyon enamel with brighter headlamps.', cost:250, color:{ body:'#d9822f', hood:'#b4561e', cab:'#3f1b08', windshield:'#b9ecff', glow:'#ffe66d' } },
+    { id:'paint-blacktop', name:'BLACKTOP MATTE', desc:'Charcoal bodywork for night road hunters.', cost:600, color:{ body:'#2d3032', hood:'#181b1f', cab:'#0a0c10', windshield:'#86d6ff', glow:'#90f0ff' } },
+    { id:'paint-rift', name:'MIDNIGHT RIFT', desc:'Neon violet panels unlocked by Inferno badge.', unlock:{ kind:'achievement', id:'inferno' }, color:{ body:'#37205f', hood:'#251047', cab:'#120820', windshield:'#c99cff', glow:'#f070ff' } },
+    { id:'paint-warlord', name:'WARLORD RED', desc:'Boss-slayer crimson with brutal amber lamps.', unlock:{ kind:'achievement', id:'boss_slayer' }, color:{ body:'#7f1d1d', hood:'#4f1010', cab:'#1a0707', windshield:'#ffb38a', glow:'#ff8a3d' } },
+  ],
+  trail: [
+    { id:'trail-dust', name:'DUST PLUME', desc:'Classic brown exhaust smoke.', cost:0, colors:['rgba(120,90,60,0.5)'], size:5, speed:50, life:0.45 },
+    { id:'trail-neon', name:'NEON WAKE', desc:'Blue reactor vapor that pops in night runs.', cost:350, colors:['rgba(80,220,255,0.62)','rgba(160,120,255,0.5)'], size:4, speed:70, life:0.5 },
+    { id:'trail-sparks', name:'SPARK SHOWER', desc:'Hot chrome fragments from overloaded pipes.', cost:650, colors:['rgba(255,210,80,0.85)','rgba(255,120,40,0.7)'], size:3, speed:95, life:0.38 },
+    { id:'trail-ghost', name:'GHOST LINE', desc:'Spectral exhaust for proven pathfinders.', unlock:{ kind:'achievement', id:'pathfinder' }, colors:['rgba(170,240,255,0.45)','rgba(210,255,240,0.35)'], size:6, speed:55, life:0.62 },
+  ],
+  horn: [
+    { id:'horn-classic', name:'RUST HORN', desc:'The original busted relay chirp.', cost:0, sfx:'click' },
+    { id:'horn-warcry', name:'WAR CRY', desc:'A harsher launch bark for arena show-offs.', cost:300, sfx:'combo' },
+    { id:'horn-raider', name:'RAIDER SIREN', desc:'Boss Rush clears unlock this intimidation blast.', unlock:{ kind:'achievement', id:'boss_slayer' }, sfx:'boss' },
+    { id:'horn-ghost', name:'PIRATE RADIO', desc:'Hidden station static for campaign pathfinders.', unlock:{ kind:'achievement', id:'pathfinder' }, sfx:'pickup' },
+  ],
+};
+const COSMETIC_CATEGORIES = ['paint', 'trail', 'horn'];
+const COSMETIC_LABELS = { paint:'PAINTJOB', trail:'EXHAUST TRAIL', horn:'SPAWN HORN' };
+const COSMETIC_BY_ID = Object.fromEntries(COSMETIC_CATEGORIES.flatMap(cat => COSMETICS[cat].map(c => [c.id, Object.assign({ category: cat }, c)])));
+
+function defaultCosmetics() {
+  return {
+    owned: ['paint-stock', 'trail-dust', 'horn-classic'],
+    equippedPaint: 'paint-stock',
+    equippedTrail: 'trail-dust',
+    equippedHorn: 'horn-classic',
+  };
+}
+
+function normalizeCosmetics(p) {
+  const d = defaultCosmetics();
+  if (!p.cosmetics || typeof p.cosmetics !== 'object') p.cosmetics = d;
+  if (!Array.isArray(p.cosmetics.owned)) p.cosmetics.owned = [];
+  for (const id of d.owned) {
+    if (!p.cosmetics.owned.includes(id)) p.cosmetics.owned.push(id);
+  }
+  if (!COSMETIC_BY_ID[p.cosmetics.equippedPaint] || !p.cosmetics.owned.includes(p.cosmetics.equippedPaint)) p.cosmetics.equippedPaint = d.equippedPaint;
+  if (!COSMETIC_BY_ID[p.cosmetics.equippedTrail] || !p.cosmetics.owned.includes(p.cosmetics.equippedTrail)) p.cosmetics.equippedTrail = d.equippedTrail;
+  if (!COSMETIC_BY_ID[p.cosmetics.equippedHorn] || !p.cosmetics.owned.includes(p.cosmetics.equippedHorn)) p.cosmetics.equippedHorn = d.equippedHorn;
+  return p.cosmetics;
+}
+
+function cosmeticUnlockText(c) {
+  if (!c.unlock) return c.cost ? `${c.cost} SCRAP` : 'FREE';
+  if (c.unlock.kind === 'achievement') {
+    const a = ACHIEVEMENT_BY_ID[c.unlock.id];
+    return 'BADGE: ' + (a ? a.name : c.unlock.id).toUpperCase();
+  }
+  return 'LOCKED';
+}
+
+function isCosmeticConditionMet(c, p) {
+  if (!c.unlock) return true;
+  if (c.unlock.kind === 'achievement') return !!(p.achievements || []).includes(c.unlock.id);
+  return false;
+}
+
+function getVehiclePaint(vehicle, paintId) {
+  const paint = COSMETIC_BY_ID[paintId || 'paint-stock'];
+  if (!paint || paint.category !== 'paint' || !paint.color) return vehicle.color;
+  return Object.assign({}, vehicle.color, paint.color);
+}
+
+function getTrailDef(trailId) {
+  return COSMETIC_BY_ID[trailId || 'trail-dust'] || COSMETIC_BY_ID['trail-dust'];
+}
+
+function cosmeticSwatchStyle(c) {
+  if (c.category === 'paint') {
+    const col = c.color || VEHICLES[0].color;
+    return `linear-gradient(90deg, ${col.body}, ${col.hood}, ${col.cab}, ${col.glow})`;
+  }
+  if (c.category === 'trail') return `linear-gradient(90deg, ${c.colors.join(', ')})`;
+  return 'linear-gradient(90deg, #1a0f08, #f5d76e, #ff8a3d)';
+}
+
 const VEHICLE_BRANCHES = {
   rustbucket: [
     {
@@ -1104,6 +1185,9 @@ const Profile = {
         if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
         if (p.activeSidekick === undefined) { p.activeSidekick = null; dirty = true; }
         if (!Array.isArray(p.achievements)) { p.achievements = []; dirty = true; }
+        const cosmeticsBefore = JSON.stringify(p.cosmetics || null);
+        normalizeCosmetics(p);
+        if (JSON.stringify(p.cosmetics) !== cosmeticsBefore) dirty = true;
       });
       if (dirty) this.save();
     }
@@ -1148,6 +1232,7 @@ const Profile = {
       activeVehicle: 'rustbucket',
       gauntletCleared: [], // array of cleared level numbers
       achievements: [],    // array of earned achievement IDs
+      cosmetics: defaultCosmetics(),
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -1231,6 +1316,49 @@ const Profile = {
     p.vehicleBranches[vehicleId] = branchId;
     this.save();
     return true;
+  },
+  buyCosmetic(id) {
+    const p = this.active(); if (!p) return false;
+    const c = COSMETIC_BY_ID[id]; if (!c) return false;
+    normalizeCosmetics(p);
+    if (p.cosmetics.owned.includes(id)) return false;
+    if (!isCosmeticConditionMet(c, p)) return false;
+    const cost = c.cost || 0;
+    if (p.scrap < cost) return false;
+    p.scrap -= cost;
+    p.cosmetics.owned.push(id);
+    this.save();
+    return true;
+  },
+  equipCosmetic(id) {
+    const p = this.active(); if (!p) return false;
+    const c = COSMETIC_BY_ID[id]; if (!c) return false;
+    normalizeCosmetics(p);
+    if (!p.cosmetics.owned.includes(id)) return false;
+    if (c.category === 'paint') p.cosmetics.equippedPaint = id;
+    else if (c.category === 'trail') p.cosmetics.equippedTrail = id;
+    else if (c.category === 'horn') p.cosmetics.equippedHorn = id;
+    else return false;
+    this.save();
+    return true;
+  },
+  checkCosmetics() {
+    const p = this.active(); if (!p) return [];
+    normalizeCosmetics(p);
+    const newly = [];
+    for (const c of Object.values(COSMETIC_BY_ID)) {
+      if (p.cosmetics.owned.includes(c.id)) continue;
+      if (c.unlock && isCosmeticConditionMet(c, p)) {
+        p.cosmetics.owned.push(c.id);
+        newly.push(c);
+      }
+    }
+    if (newly.length) this.save();
+    return newly;
+  },
+  equippedCosmetics() {
+    const p = this.active(); if (!p) return defaultCosmetics();
+    return normalizeCosmetics(p);
   },
   character() {
     const p = this.active();
@@ -2278,10 +2406,25 @@ const Game = {
   magnetRangeMul: 1,
   // badges earned at the end of this run (populated by endRun)
   _pendingBadges: [],
+  _pendingCosmetics: [],
+  cosmetics: defaultCosmetics(),
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
   Game.popups.push({ text, x, y, vy: -60, life: 1.0, max: 1.0, color, size });
+}
+
+function emitExhaustTrail(x, y, count = 1) {
+  const trail = getTrailDef(Game.cosmetics && Game.cosmetics.equippedTrail);
+  const colors = trail.colors || ['rgba(120,90,60,0.5)'];
+  const color = colors[Math.floor(Math.random() * colors.length)] || colors[0];
+  emit(x, y, count, {
+    color,
+    speed: trail.speed || 50,
+    life: trail.life || 0.45,
+    size: trail.size || 5,
+    spread: Math.PI / 4,
+  });
 }
 
 function makeDecor(yOverride) {
@@ -2420,6 +2563,7 @@ function startRun(mode, level) {
   if (Game.branchState.nitroDamageMul) Game.nitroDamageMul *= Game.branchState.nitroDamageMul;
   Game.vehicle = v;
   Game.vehicleStats = stats;
+  Game.cosmetics = Object.assign(defaultCosmetics(), Profile.equippedCosmetics());
   // sidekick passive effects
   Game.sidekick = profile.activeSidekick || null;
   Game.sidekickHealT = 0;
@@ -2440,6 +2584,8 @@ function startRun(mode, level) {
   Game.combo = 0;
   Game.comboT = 0;
   Game.comboBest = 0;
+  Game._pendingBadges = [];
+  Game._pendingCosmetics = [];
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
   Game.activeEvent = null;
   Game.eventTimer = 0;
@@ -2481,6 +2627,11 @@ function beginPlaying() {
   Game.player.y = H - 110;
   Game.player.vx = 0;
   pauseBtn.classList.add('show');
+  const horn = COSMETIC_BY_ID[Game.cosmetics && Game.cosmetics.equippedHorn];
+  if (horn && horn.sfx && SFX[horn.sfx]) {
+    if (horn.sfx === 'combo') SFX.combo(3);
+    else SFX[horn.sfx]();
+  }
   // Spawn boss right away in boss levels
   if (Game.levelData && Game.levelData.obj === 'boss') {
     spawnBoss(Game.levelData.boss);
@@ -2525,6 +2676,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   });
   // check achievements earned this run
   Game._pendingBadges = Profile.checkAchievements();
+  Game._pendingCosmetics = Profile.checkCosmetics();
   // SFX already played by death/victory sequences; only play here for time-out
   if (reason === 'time') SFX.victory();
   // small delay to let final FX play
@@ -3116,10 +3268,8 @@ function updateLoading(dt) {
   Game.player.x = W * 0.5;
   // exhaust trail during entry
   if (Math.random() < 0.85) {
-    emit(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1,
-      { color:'rgba(120,90,60,0.5)', speed:50, life:0.45, size:5, spread:Math.PI/4 });
-    emit(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1,
-      { color:'rgba(120,90,60,0.5)', speed:50, life:0.45, size:5, spread:Math.PI/4 });
+    emitExhaustTrail(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1);
+    emitExhaustTrail(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1);
   }
   // drift decor
   for (const d of Game.decor) d.y += Game.speed * dt;
@@ -4554,8 +4704,9 @@ function drawWeather() {
   }
 }
 
-function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64) {
-  const c = vehicle.color;
+function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
+  const paintId = opts.noCosmetic ? null : (opts.paintId || (vehicle === Game.vehicle && Game.cosmetics ? Game.cosmetics.equippedPaint : null));
+  const c = getVehiclePaint(vehicle, paintId);
   ctx.save();
   ctx.translate(x, y);
   const tilt = clamp(vx / 460, -1, 1) * 0.18;
@@ -4610,9 +4761,12 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64) {
   // exhaust flames — animated flicker
   const exFlicker = 0.5 + 0.5 * Math.sin((Game.t || 0) * 28);
   const exLen = 5 + exFlicker * 10;
+  const trail = getTrailDef(!opts.noCosmetic && Game.cosmetics ? Game.cosmetics.equippedTrail : null);
+  const hot = trail.id === 'trail-neon' ? [80, 220, 255] : trail.id === 'trail-ghost' ? [170, 240, 255] : [255, 220, 80];
+  const warm = trail.id === 'trail-neon' ? [160, 120, 255] : trail.id === 'trail-ghost' ? [210, 255, 240] : [255, 115, 25];
   const exGl = ctx.createLinearGradient(0, h / 2 - 2, 0, h / 2 + exLen);
-  exGl.addColorStop(0, `rgba(255,220,80,${0.9 * exFlicker + 0.35})`);
-  exGl.addColorStop(0.45, `rgba(255,115,25,${0.75 * exFlicker + 0.1})`);
+  exGl.addColorStop(0, `rgba(${hot[0]},${hot[1]},${hot[2]},${0.9 * exFlicker + 0.35})`);
+  exGl.addColorStop(0.45, `rgba(${warm[0]},${warm[1]},${warm[2]},${0.75 * exFlicker + 0.1})`);
   exGl.addColorStop(1, 'rgba(255,35,0,0)');
   ctx.fillStyle = exGl;
   ctx.fillRect(-11, h / 2 - 2, 6, exLen);
@@ -5842,6 +5996,10 @@ function render() {
     if (Game.state === 'dying') {
       drawWreck();
     } else if (Game.player && Game.state !== 'gameover') {
+      if (Game.state === 'playing' && Math.random() < 0.22) {
+        emitExhaustTrail(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1);
+        emitExhaustTrail(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1);
+      }
       // hit flash overlay on the vehicle: tint white briefly
       drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx);
       if (Game.hitFlash > 0) {
@@ -5903,7 +6061,7 @@ function render() {
 // ============================================================
 // VEHICLE PREVIEW (used in garage/upgrade)
 // ============================================================
-function renderVehiclePreview(canvas, vehicleId) {
+function renderVehiclePreview(canvas, vehicleId, cosmetics = null) {
   const v = VEHICLE_BY_ID[vehicleId];
   const c = canvas.getContext('2d');
   const cw = canvas.width = 80;
@@ -5913,7 +6071,19 @@ function renderVehiclePreview(canvas, vehicleId) {
   // dummy ctx swap — do simplified inline draw
   const cx = cw/2, cy = ch/2;
   const w = 38, h = 60;
-  const col = v.color;
+  const col = getVehiclePaint(v, cosmetics && cosmetics.equippedPaint);
+  if (cosmetics && cosmetics.equippedTrail) {
+    const trail = getTrailDef(cosmetics.equippedTrail);
+    const colors = trail.colors || ['rgba(120,90,60,0.5)'];
+    for (let i = 0; i < 7; i++) {
+      c.fillStyle = colors[i % colors.length];
+      c.globalAlpha = 0.25 + (i / 7) * 0.35;
+      c.beginPath();
+      c.arc(cx + (i % 2 ? 9 : -9), cy + h/2 + 5 + i * 4, Math.max(2, (trail.size || 5) - i * 0.35), 0, Math.PI * 2);
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  }
   c.fillStyle = 'rgba(0,0,0,0.45)';
   c.fillRect(cx - w/2 + 3, cy - h/2 + 5, w, h);
   c.fillStyle = col.body;     c.fillRect(cx - w/2, cy - h/2, w, h);
@@ -6104,11 +6274,26 @@ const UI = {
   },
 
   // ---- GARAGE ----
-  showGarage() {
+  showGarage(tab) {
     const p = Profile.active(); if (!p) return;
+    normalizeCosmetics(p);
+    if (tab) this._garageTab = tab;
+    if (!this._garageTab) this._garageTab = 'vehicles';
     document.getElementById('garage-scrap').textContent = p.scrap;
+    document.querySelectorAll('[data-garage-tab]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.garageTab === this._garageTab);
+    });
     const list = document.getElementById('vehicle-list');
+    const cosmeticList = document.getElementById('cosmetic-list');
+    list.style.display = this._garageTab === 'vehicles' ? 'flex' : 'none';
+    cosmeticList.style.display = this._garageTab === 'vehicles' ? 'none' : 'flex';
+    if (this._garageTab !== 'vehicles') {
+      this.showCosmeticTab(this._garageTab);
+      this.show('garage');
+      return;
+    }
     list.innerHTML = '';
+    cosmeticList.innerHTML = '';
     VEHICLES.forEach(v => {
       const owned = !!p.ownedVehicles[v.id];
       const selected = p.activeVehicle === v.id;
@@ -6148,9 +6333,42 @@ const UI = {
       `;
       list.appendChild(tile);
       // render preview
-      renderVehiclePreview(tile.querySelector('canvas'), v.id);
+      renderVehiclePreview(tile.querySelector('canvas'), v.id, selected ? p.cosmetics : null);
     });
     this.show('garage');
+  },
+
+  showCosmeticTab(cat) {
+    const p = Profile.active(); if (!p) return;
+    normalizeCosmetics(p);
+    const list = document.getElementById('cosmetic-list');
+    list.innerHTML = '';
+    const equippedKey = cat === 'paint' ? 'equippedPaint' : cat === 'trail' ? 'equippedTrail' : 'equippedHorn';
+    (COSMETICS[cat] || []).forEach(c => {
+      const owned = p.cosmetics.owned.includes(c.id);
+      const equipped = p.cosmetics[equippedKey] === c.id;
+      const unlockedByCondition = isCosmeticConditionMet(c, p);
+      const canBuy = !owned && unlockedByCondition && p.scrap >= (c.cost || 0);
+      const card = document.createElement('div');
+      card.className = 'cosmetic-card' + (equipped ? ' equipped' : '') + (!owned && !unlockedByCondition ? ' locked' : '');
+      const state = equipped ? 'EQUIPPED' : owned ? 'OWNED' : cosmeticUnlockText(c);
+      const action = owned
+        ? `<button class="btn${equipped ? ' primary' : ''}" data-cact="equip" data-cid="${c.id}" ${equipped ? 'disabled' : ''}>${equipped ? 'EQUIPPED' : 'EQUIP'}</button>`
+        : `<button class="btn primary" data-cact="buy" data-cid="${c.id}" ${canBuy ? '' : 'disabled'}>${unlockedByCondition ? 'UNLOCK · ' + (c.cost || 0) + ' SCRAP' : 'LOCKED'}</button>`;
+      card.innerHTML = `
+        <div class="cosmetic-head">
+          <div>
+            <div class="cosmetic-name">${escapeHtml(c.name)}</div>
+            <div class="cosmetic-desc">${escapeHtml(COSMETIC_LABELS[cat])}</div>
+          </div>
+          <div class="cosmetic-state">${escapeHtml(state)}</div>
+        </div>
+        <div class="cosmetic-swatch"><span style="background:${cosmeticSwatchStyle(c)}"></span></div>
+        <div class="cosmetic-desc">${escapeHtml(c.desc)}</div>
+        ${action}
+      `;
+      list.appendChild(card);
+    });
   },
 
   // ---- UPGRADE ----
@@ -6382,6 +6600,17 @@ const UI = {
       }
     }
     rows.push(['KILLS', Game.kills, false]);
+    rows.push(['TOP COMBO', (Game.comboBest || 0) + ' KILL STREAK', false]);
+    const bestMoment = (() => {
+      if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
+      if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
+      if ((Game.comboBest || 0) >= 30) return 'LEGENDARY ×10 COMBO';
+      if ((Game.comboBest || 0) >= 15) return 'HIGH-OCTANE COMBO';
+      if (Game.scrapEarned >= 1000) return 'BIG SCRAP HAUL';
+      if (Game.kills >= 50) return 'WASTELAND SWEEP';
+      return Game.distance >= 2000 ? 'LONG HAUL SURVIVAL' : 'ANOTHER RUN IN THE BOOKS';
+    })();
+    rows.push(['BEST MOMENT', bestMoment, false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
 
     document.getElementById('res-rows').innerHTML = rows.map(([l,v,big]) =>
@@ -6439,16 +6668,23 @@ const UI = {
     const badgesEl = document.getElementById('res-badges');
     if (badgesEl) {
       const nb = Game._pendingBadges || [];
-      if (nb.length) {
+      const nc = Game._pendingCosmetics || [];
+      if (nb.length || nc.length) {
         badgesEl.style.display = '';
-        badgesEl.innerHTML = '<div class="res-badge-title">BADGE' + (nb.length > 1 ? 'S' : '') + ' EARNED</div>' +
+        const badgeHtml = nb.length ? '<div class="res-badge-title">BADGE' + (nb.length > 1 ? 'S' : '') + ' EARNED</div>' +
           nb.map(a =>
             `<div class="res-badge-item"><span class="res-badge-icon">${a.icon}</span><div><div class="res-badge-name">${escapeHtml(a.name)}</div><div class="res-badge-desc">${escapeHtml(a.desc)}</div></div></div>`
-          ).join('');
+          ).join('') : '';
+        const cosmeticHtml = nc.length ? '<div class="res-badge-title">CUSTOMIZATION UNLOCKED</div>' +
+          nc.map(c =>
+            `<div class="res-badge-item"><span class="res-badge-icon">✦</span><div><div class="res-badge-name">${escapeHtml(c.name)}</div><div class="res-badge-desc">${escapeHtml(COSMETIC_LABELS[c.category] || 'COSMETIC')}</div></div></div>`
+          ).join('') : '';
+        badgesEl.innerHTML = badgeHtml + cosmeticHtml;
       } else {
         badgesEl.style.display = 'none';
       }
       Game._pendingBadges = [];
+      Game._pendingCosmetics = [];
     }
 
     this.show('results');
@@ -6984,6 +7220,29 @@ document.addEventListener('click', e => {
     }
     return;
   }
+  const gt = e.target.closest('[data-garage-tab]');
+  if (gt) {
+    SFX.click();
+    UI.showGarage(gt.dataset.garageTab);
+    return;
+  }
+  const ca = e.target.closest('[data-cact]');
+  if (ca) {
+    SFX.click();
+    const cid = ca.dataset.cid;
+    const c = COSMETIC_BY_ID[cid];
+    if (!c) return;
+    if (ca.dataset.cact === 'buy') {
+      if (Profile.buyCosmetic(cid)) {
+        UI.toast('UNLOCKED ' + c.name);
+        Profile.equipCosmetic(cid);
+      } else UI.toast('LOCKED OR NOT ENOUGH SCRAP');
+    } else if (ca.dataset.cact === 'equip') {
+      if (Profile.equipCosmetic(cid)) UI.toast('EQUIPPED ' + c.name);
+    }
+    UI.showGarage(c.category);
+    return;
+  }
   // garage actions
   const va = e.target.closest('[data-vact]');
   if (va) {
@@ -6994,6 +7253,7 @@ document.addEventListener('click', e => {
       if (Profile.unlock(vid)) {
         UI.toast('UNLOCKED ' + VEHICLE_BY_ID[vid].name);
         Profile.checkAchievements().forEach(a => UI.toast(a.icon + ' BADGE: ' + a.name, 2500));
+        Profile.checkCosmetics().forEach(c => UI.toast('CUSTOM: ' + c.name, 2500));
         UI.showGarage();
       }
       else UI.toast('NOT ENOUGH SCRAP');
@@ -7014,6 +7274,7 @@ document.addEventListener('click', e => {
       SFX.levelUp();
       UI.toast('UPGRADED');
       Profile.checkAchievements().forEach(a => UI.toast(a.icon + ' BADGE: ' + a.name, 2500));
+      Profile.checkCosmetics().forEach(c => UI.toast('CUSTOM: ' + c.name, 2500));
       UI.showUpgrade(vid);
     } else UI.toast('NOT ENOUGH SCRAP');
     return;
@@ -7370,7 +7631,7 @@ function drawMpGhosts() {
     const stale = Math.max(0, now - p.recvAt - 250);
     const alpha = Math.max(0.12, 0.45 - stale / 4000);
     ctx.globalAlpha = alpha;
-    drawVehicle(x, y, v, s.vx || 0);
+    drawVehicle(x, y, v, s.vx || 0, 42, 64, { noCosmetic: true });
     ctx.globalAlpha = 1;
     // name tag
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
