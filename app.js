@@ -8026,7 +8026,7 @@ function cloudModal(title, bodyHtml, { showInput = false, inputPlaceholder = '',
   bEl.innerHTML   = bodyHtml;
   eEl.textContent = '';
   iEl.value       = '';
-  iEl.placeholder = inputPlaceholder || 'XXXX-XXXX';
+  iEl.placeholder = inputPlaceholder || 'XXXXXX-XXXXXX';
   iEl.style.display = showInput ? '' : 'none';
   okEl.textContent  = okLabel;
   m.style.display   = 'flex';
@@ -8101,13 +8101,17 @@ function cloudRestore() {
     : 'ENTER THE CLOUD CODE YOU WERE GIVEN WHEN YOU SAVED.';
   cloudModal('☁ CLOUD RESTORE', hintHtml, {
     showInput: true,
-    inputPlaceholder: 'XXXX-XXXX',
+    inputPlaceholder: 'XXXXXX-XXXXXX',
     okLabel: 'RESTORE',
     onOk: (code) => {
-      if (!code || !code.includes('-')) { UI.toast('INVALID CLOUD CODE'); return; }
+      if (!code) { UI.toast('INVALID CLOUD CODE'); return; }
       const parts = code.split('-');
+      if (parts.length !== 2 || parts[0].length < 4 || parts[1].length < 4) {
+        UI.toast('INVALID CLOUD CODE — FORMAT MUST BE XXXXXX-XXXXXX');
+        return;
+      }
       const id    = parts[0];
-      const token = parts.slice(1).join('-');
+      const token = parts[1];
       fetch(base + '/api/accounts/load?id=' + encodeURIComponent(id) + '&token=' + encodeURIComponent(token))
         .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
         .then(resp => {

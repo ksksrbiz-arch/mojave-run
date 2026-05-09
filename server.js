@@ -23,6 +23,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT, 10) || 8787;
@@ -112,11 +113,27 @@ loadScores();
 let accounts = {}; // id -> { token, savedAt, data }
 let accountsSavePending = false;
 
+// Cryptographically random cloud code component.
 function genCode(len) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(len);
   let s = '';
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < len; i++) s += chars[bytes[i] % chars.length];
   return s;
+}
+
+// Constant-time string equality to guard against timing attacks.
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bA = Buffer.from(a);
+  const bB = Buffer.from(b);
+  if (bA.length !== bB.length) return false;
+  return crypto.timingSafeEqual(bA, bB);
+}
+
+// Parse and normalise an account credential from a raw string value.
+function parseCredential(raw, len) {
+  return String(raw == null ? '' : raw).slice(0, len).toUpperCase();
 }
 
 function loadAccounts() {
@@ -141,6 +158,23 @@ function saveAccountsDebounced() {
       console.warn('[accounts] failed to write accounts.json:', e.message);
     }
   }, 2000);
+}
+
+// Simple in-memory rate limiter for the register endpoint.
+const registerRateMap = new Map(); // ip -> { count, windowStart }
+const REGISTER_WINDOW_MS = 60000;
+const REGISTER_MAX_PER_WINDOW = 10;
+
+function isRegisterRateLimited(ip) {
+  const now = Date.now();
+  const entry = registerRateMap.get(ip) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > REGISTER_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count++;
+  registerRateMap.set(ip, entry);
+  return entry.count > REGISTER_MAX_PER_WINDOW;
 }
 
 loadAccounts();
@@ -197,13 +231,19 @@ const server = http.createServer((req, res) => {
 
   // ---- Accounts API ----
   if (urlPathApi === '/api/accounts/register' && req.method === 'POST') {
+    const clientIp = req.socket.remoteAddress || '';
+    if (isRegisterRateLimited(clientIp)) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'too many registrations' }));
+      return;
+    }
     if (Object.keys(accounts).length >= MAX_ACCOUNTS) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'server full' }));
       return;
     }
-    const id    = genCode(4);
-    const token = genCode(4);
+    const id    = genCode(6);
+    const token = genCode(6);
     accounts[id] = { token, savedAt: Date.now(), data: null };
     saveAccountsDebounced();
     res.writeHead(201, { 'Content-Type': 'application/json' });
@@ -213,16 +253,27 @@ const server = http.createServer((req, res) => {
 
   if (urlPathApi === '/api/accounts/save' && req.method === 'POST') {
     let body = '';
+    let tooBig = false;
     req.on('data', chunk => {
-      if (body.length + chunk.length > MAX_PROFILE_BYTES) { req.destroy(); return; }
+      if (tooBig) return;
+      if (body.length + chunk.length > MAX_PROFILE_BYTES) {
+        tooBig = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'payload too large' }));
+        req.destroy();
+        return;
+      }
       body += chunk;
     });
     req.on('end', () => {
+      if (tooBig) return;
       try {
         const { id, token, data } = JSON.parse(body);
         if (!id || !token || !data) throw new Error('missing fields');
-        const acc = accounts[String(id).slice(0, 4)];
-        if (!acc || acc.token !== String(token).slice(0, 4)) {
+        const normId    = parseCredential(id, 6);
+        const normToken = parseCredential(token, 6);
+        const acc = accounts[normId];
+        if (!acc || !safeEqual(acc.token, normToken)) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
           return;
@@ -242,11 +293,11 @@ const server = http.createServer((req, res) => {
   }
 
   if (urlPathApi === '/api/accounts/load' && req.method === 'GET') {
-    const qs    = new URLSearchParams(urlParsed[1] || '');
-    const id    = String(qs.get('id') || '').slice(0, 4).toUpperCase();
-    const token = String(qs.get('token') || '').slice(0, 4).toUpperCase();
-    const acc   = accounts[id];
-    if (!acc || acc.token !== token) {
+    const qs       = new URLSearchParams(urlParsed[1] || '');
+    const normId   = parseCredential(qs.get('id'), 6);
+    const normTok  = parseCredential(qs.get('token'), 6);
+    const acc      = accounts[normId];
+    if (!acc || !safeEqual(acc.token, normTok)) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
       return;
