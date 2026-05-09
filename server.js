@@ -1,7 +1,7 @@
 // MOJAVE RUN — multiplayer relay + static file server
 // Run: `node server.js` (optional `PORT=8787 node server.js`)
-// Friends connect to http://<your-ip>:8787 on LAN, or expose to internet via
-// `cloudflared tunnel --url http://localhost:8787` and share the public URL.
+// Deployed on Render at https://mojave-run-lw3g.onrender.com as the
+// multiplayer back-end for the Netlify-hosted frontend.
 //
 // Single dependency: `ws`. Install with `npm install` once.
 //
@@ -11,6 +11,14 @@
 //   * room peer cap (prevents one room flooding the relay)
 //   * graceful SIGINT/SIGTERM shutdown
 //   * permissive CORS so the static site can be served separately from the WS
+//
+// Endpoints:
+//   GET  /healthz                  — health check
+//   GET  /api/scores?mode=…        — top-10 scoreboard for a mode
+//   POST /api/scores               — submit a run score
+//   POST /api/accounts/register    — create a cloud account, returns { id, token }
+//   POST /api/accounts/save        — save profile data { id, token, data }
+//   GET  /api/accounts/load?id=&token= — restore profile data
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -27,6 +35,9 @@ const ROOM_PEER_CAP = parseInt(process.env.MP_ROOM_CAP, 10) || 16;
 const HEARTBEAT_MS = parseInt(process.env.MP_HEARTBEAT_MS, 10) || 15000;
 const SCORES_FILE = path.join(ROOT, 'scores.json');
 const MAX_SCORES_PER_MODE = 50;
+const ACCOUNTS_FILE = path.join(ROOT, 'accounts.json');
+const MAX_ACCOUNTS = 50000;
+const MAX_PROFILE_BYTES = 65536; // 64 KB per cloud save
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -95,6 +106,45 @@ function addScore(entry) {
 
 loadScores();
 
+// ============================================================
+// ACCOUNTS — cloud save/restore for driver profiles
+// ============================================================
+let accounts = {}; // id -> { token, savedAt, data }
+let accountsSavePending = false;
+
+function genCode(len) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function loadAccounts() {
+  try {
+    if (fs.existsSync(ACCOUNTS_FILE)) {
+      accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8')) || {};
+    }
+  } catch (e) {
+    console.warn('[accounts] failed to load accounts.json:', e.message);
+    accounts = {};
+  }
+}
+
+function saveAccountsDebounced() {
+  if (accountsSavePending) return;
+  accountsSavePending = true;
+  setTimeout(() => {
+    accountsSavePending = false;
+    try {
+      fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts));
+    } catch (e) {
+      console.warn('[accounts] failed to write accounts.json:', e.message);
+    }
+  }, 2000);
+}
+
+loadAccounts();
+
 const server = http.createServer((req, res) => {
   // Permissive CORS — read-only static assets.
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -145,7 +195,68 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  // ---- Accounts API ----
+  if (urlPathApi === '/api/accounts/register' && req.method === 'POST') {
+    if (Object.keys(accounts).length >= MAX_ACCOUNTS) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'server full' }));
+      return;
+    }
+    const id    = genCode(4);
+    const token = genCode(4);
+    accounts[id] = { token, savedAt: Date.now(), data: null };
+    saveAccountsDebounced();
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, id, token }));
+    return;
+  }
+
+  if (urlPathApi === '/api/accounts/save' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      if (body.length + chunk.length > MAX_PROFILE_BYTES) { req.destroy(); return; }
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const { id, token, data } = JSON.parse(body);
+        if (!id || !token || !data) throw new Error('missing fields');
+        const acc = accounts[String(id).slice(0, 4)];
+        if (!acc || acc.token !== String(token).slice(0, 4)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
+          return;
+        }
+        acc.data = data;
+        acc.savedAt = Date.now();
+        saveAccountsDebounced();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'bad request' }));
+      }
+    });
+    req.on('error', () => {});
+    return;
+  }
+
+  if (urlPathApi === '/api/accounts/load' && req.method === 'GET') {
+    const qs    = new URLSearchParams(urlParsed[1] || '');
+    const id    = String(qs.get('id') || '').slice(0, 4).toUpperCase();
+    const token = String(qs.get('token') || '').slice(0, 4).toUpperCase();
+    const acc   = accounts[id];
+    if (!acc || acc.token !== token) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, data: acc.data }));
+    return;
+  }
+
+
   if (urlPath === '/') urlPath = '/index.html';
   // prevent path traversal
   const filePath = path.normalize(path.join(ROOT, urlPath));
