@@ -1661,6 +1661,8 @@ const Game = {
   lightning: 0,
   // muzzle-flash timer
   muzzleT: 0,
+  // new-record flag set by endRun() before recording, read by showResults()
+  isNewRecord: false,
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -1834,6 +1836,19 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   }
   Game.scrapEarned = baseScrap + bonus;
   Profile.earn(Game.scrapEarned);
+  // detect personal best BEFORE recording so we can show the badge
+  Game.isNewRecord = false;
+  const _p = Profile.active();
+  if (_p) {
+    const sc = Math.floor(Game.score);
+    if (Game.mode === 'classic'    && sc > (_p.bestClassic || 0)) Game.isNewRecord = true;
+    if (Game.mode === 'timeattack' && sc > (_p.bestTime    || 0)) Game.isNewRecord = true;
+    if (Game.mode === 'bossrush'   && sc > (_p.bestBossRush|| 0)) Game.isNewRecord = true;
+    if (Game.mode === 'daily' && Game.dailySeedKey) {
+      const prev = (_p.dailyBest && _p.dailyBest[Game.dailySeedKey]) || 0;
+      if (sc > prev) Game.isNewRecord = true;
+    }
+  }
   // record stats
   Profile.recordRunResult({
     mode: Game.mode,
@@ -3833,18 +3848,33 @@ function drawHUD() {
   ctx.fillStyle = '#f5d76e';
   ctx.font = `bold ${fs}px "Courier New", monospace`;
   let mainR = '';
+  let objPct = -1; // -1 means no bar; 0..1 draws a thin progress bar
   if (Game.mode === 'classic') {
     const lvl = 1 + Math.floor(Game.distance / 1500);
     mainR = 'SECTOR ' + lvl;
   } else if (Game.mode === 'timeattack') {
     const remain = Math.max(0, 60 - Game.t);
+    // flash red when under 10 s
+    if (remain < 10) {
+      ctx.fillStyle = Math.floor(remain * 5) % 2 === 0 ? '#ff5050' : '#f5d76e';
+    }
     mainR = remain.toFixed(1) + 'S';
+    objPct = remain / 60;
   } else if (Game.mode === 'gauntlet' && Game.levelData) {
     const L = Game.levelData;
-    if (L.obj === 'survive') mainR = Math.max(0, L.target - Game.t).toFixed(1) + 'S';
-    else if (L.obj === 'kills') mainR = `${Game.kills}/${L.target}`;
-    else if (L.obj === 'distance') mainR = `${Math.floor(Game.distance)}/${L.target}M`;
-    else if (L.obj === 'boss') mainR = 'BOSS';
+    if (L.obj === 'survive') {
+      const elapsed = clamp(Game.t, 0, L.target);
+      mainR = Math.max(0, L.target - Game.t).toFixed(1) + 'S';
+      objPct = elapsed / L.target;
+    } else if (L.obj === 'kills') {
+      mainR = `${Game.kills}/${L.target}`;
+      objPct = clamp(Game.kills / L.target, 0, 1);
+    } else if (L.obj === 'distance') {
+      mainR = `${Math.floor(Game.distance)}/${L.target}M`;
+      objPct = clamp(Game.distance / L.target, 0, 1);
+    } else if (L.obj === 'boss') {
+      mainR = 'BOSS';
+    }
   } else if (Game.mode === 'bossrush') {
     mainR = `BOSS ${Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length)}/${BOSS_RUSH_STAGES.length}`;
   }
@@ -3852,6 +3882,16 @@ function drawHUD() {
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
   ctx.font = `bold ${fs - 2}px "Courier New", monospace`;
   ctx.fillText('+' + Math.floor(Game.score / 10) + ' SCRAP', W - 50, hudH * 0.72);
+
+  // objective progress bar — thin strip on right side below the right text
+  if (objPct >= 0) {
+    const obW = Math.min(100, W * 0.22), obH = 3;
+    const obX = W - 50 - obW, obY = hudH * 0.32 + fs * 0.6 + 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(obX, obY, obW, obH);
+    ctx.fillStyle = Game.mode === 'timeattack' && objPct < 0.17 ? '#ff5050' : '#f5d76e';
+    ctx.fillRect(obX, obY, obW * objPct, obH);
+  }
 
   // hull bar
   const hbW = Math.min(180, W * 0.42), hbH = 10, hbX = (W - hbW) / 2, hbY = hudH * 0.4 - hbH/2;
@@ -4443,6 +4483,7 @@ const UI = {
           <div>
             <div class="vt-name">${v.name}${selected ? ' ◀' : ''}</div>
             <div class="vt-cost">${owned ? (selected ? 'EQUIPPED' : 'OWNED') : 'COST <b>' + v.cost + '</b> SCRAP'}</div>
+            ${owned ? '<div class="vt-tier-badge">' + totalUpgradeTiers(p.vehicleUpgrades[v.id]) + '/20 TIERS' + (p.vehicleBranches && p.vehicleBranches[v.id] ? ' · ' + (getVehicleBranchDef(v.id, p.vehicleBranches[v.id]) || {name:''}).name : '') + '</div>' : ''}
           </div>
         </div>
         <div class="vt-preview"><canvas></canvas></div>
@@ -4539,13 +4580,36 @@ const UI = {
     document.getElementById('mode-vehicle').textContent = v.name;
     const list = document.getElementById('mode-list');
     list.innerHTML = '';
+    const today = todaySeedString();
     MODES.forEach(m => {
+      // compute personal best label per mode
+      let bestLabel = '';
+      if (m.id === 'classic' && p.bestClassic > 0)
+        bestLabel = 'BEST <b>' + p.bestClassic + '</b>';
+      else if (m.id === 'timeattack' && p.bestTime > 0)
+        bestLabel = 'BEST <b>' + p.bestTime + '</b>';
+      else if (m.id === 'bossrush' && (p.bestBossRush || 0) > 0)
+        bestLabel = 'BEST <b>' + p.bestBossRush + '</b>';
+      else if (m.id === 'gauntlet')
+        bestLabel = '<b>' + p.gauntletCleared.length + '</b>/' + LEVELS.length + ' SECTORS';
+      else if (m.id === 'daily') {
+        const todayBest = (p.dailyBest && p.dailyBest[today]) || 0;
+        // hours until UTC midnight reset
+        const now = new Date();
+        const msLeft = new Date(now.toISOString().slice(0,10) + 'T23:59:59.999Z').getTime() - now.getTime() + 1000;
+        const hLeft = Math.ceil(msLeft / 3600000);
+        if (todayBest > 0)
+          bestLabel = 'TODAY <b>' + todayBest + '</b> · RESETS IN ' + hLeft + 'H';
+        else
+          bestLabel = 'RESETS IN <b>' + hLeft + 'H</b>';
+      }
       const tile = document.createElement('button');
       tile.className = 'mode-tile';
       tile.dataset.mid = m.id;
       tile.innerHTML = `
         <div class="mt-name">${m.name}</div>
         <div class="mt-desc">${m.desc}</div>
+        ${bestLabel ? '<div class="mt-best">' + bestLabel + '</div>' : ''}
       `;
       list.appendChild(tile);
     });
@@ -4558,24 +4622,38 @@ const UI = {
     document.getElementById('gauntlet-progress').textContent = `${p.gauntletCleared.length} / ${LEVELS.length}`;
     const grid = document.getElementById('gauntlet-grid');
     grid.innerHTML = '';
+    // biome color dots for quick map-scanning
+    const BIOME_COLORS = {
+      wastes: '#a86a2e', saltflats: '#8c7f68', ash: '#5a5040',
+      redcanyon: '#aa5830', midnight: '#304a60',
+    };
     LEVELS.forEach(L => {
       const cleared = p.gauntletCleared.includes(L.num);
       const unlocked = Profile.isLevelUnlocked(L.num);
       const isBoss = L.obj === 'boss';
       const tile = document.createElement('button');
       tile.className = 'level-tile' + (cleared ? ' cleared' : '') + (!unlocked ? ' locked' : '') + (isBoss ? ' boss' : '');
+      // apply biome border tint on unlocked, uncleared tiles
+      if (unlocked && !cleared && !isBoss) {
+        const bc = BIOME_COLORS[L.map || 'wastes'];
+        if (bc) tile.style.borderColor = bc;
+      }
       let objLabel = '';
       if (L.obj === 'survive') objLabel = L.target + 'S';
       else if (L.obj === 'kills') objLabel = L.target + ' KILLS';
       else if (L.obj === 'distance') objLabel = (L.target/1000).toFixed(1) + 'KM';
       else if (L.obj === 'boss') objLabel = 'BOSS';
-      const mapLabel = (L.map || 'wastes').toUpperCase();
+      // night/storm modifier icons
+      const mods = (L.night ? '🌙' : '') + (L.storm ? '⚡' : '');
+      const dotColor = BIOME_COLORS[L.map || 'wastes'] || '#a86a2e';
       tile.innerHTML = `
         <div class="ln">${L.num}</div>
         <div class="lname">${L.name}</div>
-        <div class="lobj">${objLabel} - ${mapLabel}</div>
+        <div class="lobj">${objLabel}</div>
+        ${mods ? '<div class="lmod">' + mods + '</div>' : ''}
         ${cleared ? '<div class="lcheck">✓</div>' : ''}
         ${isBoss && !cleared ? '<div class="star">★</div>' : ''}
+        <div class="biome-dot" style="background:${dotColor}"></div>
       `;
       tile.dataset.level = L.num;
       grid.appendChild(tile);
@@ -4592,6 +4670,11 @@ const UI = {
     const ownedCount = Object.keys(p.ownedVehicles).length;
     const ttlUpgrades = Object.values(p.vehicleUpgrades).reduce(
       (s, ups) => s + (ups.engine||0) + (ups.plating||0) + (ups.weapons||0) + (ups.reactor||0), 0);
+    const today = todaySeedString();
+    const todayBest = (p.dailyBest && p.dailyBest[today]) || 0;
+    const bestDistance = p.bestDistance >= 1000
+      ? (p.bestDistance / 1000).toFixed(1) + ' KM'
+      : p.bestDistance + ' M';
     const rows = [
       ['CREATED', created],
       ['SCRAP CURRENT', p.scrap],
@@ -4600,7 +4683,8 @@ const UI = {
       ['BEST CLASSIC', p.bestClassic],
       ['BEST TIME ATK', p.bestTime],
       ['BEST BOSS RUSH', p.bestBossRush || 0],
-      ['LONGEST RUN', p.bestDistance + ' M'],
+      ['DAILY BEST TODAY', todayBest || '—'],
+      ['LONGEST RUN', bestDistance],
       ['VEHICLES OWNED', ownedCount + ' / ' + VEHICLES.length],
       ['UPGRADES BUILT', ttlUpgrades],
       ['GAUNTLET', p.gauntletCleared.length + ' / ' + LEVELS.length],
@@ -4648,11 +4732,22 @@ const UI = {
       rows.push(['LEVEL', Game.levelData.num + ' · ' + Game.levelData.name, false]);
     }
     rows.push(['KILLS', Game.kills, false]);
+    const _bestComboMult = (() => {
+      const c = Game.comboBest | 0; let m = 1;
+      for (let i = 0; i < COMBO_THRESHOLDS.length; i++) if (c >= COMBO_THRESHOLDS[i]) m = COMBO_MULTS[i];
+      return m;
+    })();
+    rows.push(['BEST COMBO', Game.comboBest > 1 ? '×' + _bestComboMult + '  ' + Game.comboBest + ' KILLS' : '—', false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
 
-    document.getElementById('res-rows').innerHTML = rows.map(([l,v,big]) =>
+    const rowsHtml = rows.map(([l,v,big]) =>
       `<div class="res-row${big ? ' big' : ''}"><div class="lbl">${l}</div><div class="val">${v}</div></div>`
     ).join('');
+    // new record badge injected at top of result rows
+    const recordHtml = Game.isNewRecord
+      ? '<div class="new-record">★ NEW RECORD ★</div>'
+      : '';
+    document.getElementById('res-rows').innerHTML = recordHtml + rowsHtml;
 
     // next sector button (gauntlet victory)
     const nextBtn = document.getElementById('res-next');

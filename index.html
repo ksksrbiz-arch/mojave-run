@@ -495,6 +495,43 @@
   .victory{color:var(--good)}
   .defeat{color:var(--danger)}
 
+  /* NEW RECORD badge on results screen */
+  .new-record{
+    text-align:center;
+    font-size:16px;font-weight:bold;letter-spacing:3px;
+    color:var(--gold);
+    padding:10px;
+    border:2px solid var(--gold);
+    border-radius:4px;
+    background:rgba(245,215,110,.1);
+    animation:record-pulse 1s ease-in-out infinite;
+  }
+  @keyframes record-pulse{
+    0%,100%{box-shadow:0 0 0 rgba(245,215,110,0)}
+    50%{box-shadow:0 0 18px rgba(245,215,110,.5)}
+  }
+
+  /* Mode tile personal best */
+  .mode-tile .mt-best{
+    font-size:10px;letter-spacing:1.5px;color:var(--gold-dim);margin-top:6px;
+  }
+  .mode-tile .mt-best b{color:var(--gold)}
+
+  /* Gauntlet biome badge on level tiles */
+  .level-tile .biome-dot{
+    position:absolute;bottom:4px;left:4px;
+    width:6px;height:6px;border-radius:50%;opacity:.75;
+  }
+  .level-tile .lmod{
+    font-size:8px;letter-spacing:0;color:rgba(245,215,110,.55);
+    margin-top:2px;
+  }
+
+  /* Upgrade tier count badge on garage vehicle tiles */
+  .vt-tier-badge{
+    font-size:10px;letter-spacing:1px;color:var(--good);margin-top:2px;
+  }
+
   /* small screens */
   @media (max-height:600px){
     h1{font-size:32px}
