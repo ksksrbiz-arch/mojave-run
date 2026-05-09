@@ -25,6 +25,8 @@ const MAX_PAYLOAD_BYTES = parseInt(process.env.MP_MAX_PAYLOAD, 10) || 4096;
 const MAX_MSGS_PER_SEC = parseInt(process.env.MP_MAX_MPS, 10) || 60;
 const ROOM_PEER_CAP = parseInt(process.env.MP_ROOM_CAP, 10) || 16;
 const HEARTBEAT_MS = parseInt(process.env.MP_HEARTBEAT_MS, 10) || 15000;
+const SCORES_FILE = path.join(ROOT, 'scores.json');
+const MAX_SCORES_PER_MODE = 50;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -38,10 +40,66 @@ const MIME = {
   '.txt':  'text/plain; charset=utf-8',
 };
 
+// ============================================================
+// GLOBAL SCOREBOARD — in-memory, persisted to scores.json
+// ============================================================
+let scoreboards = {}; // mode -> [{ name, score, mode, kills, distance, vehicle, ts }]
+let scoresSavePending = false;
+
+function loadScores() {
+  try {
+    if (fs.existsSync(SCORES_FILE)) {
+      const raw = fs.readFileSync(SCORES_FILE, 'utf8');
+      scoreboards = JSON.parse(raw) || {};
+    }
+  } catch (e) {
+    console.warn('[scores] failed to load scores.json:', e.message);
+    scoreboards = {};
+  }
+}
+
+function saveScores() {
+  if (scoresSavePending) return;
+  scoresSavePending = true;
+  setTimeout(() => {
+    scoresSavePending = false;
+    try {
+      fs.writeFileSync(SCORES_FILE, JSON.stringify(scoreboards, null, 2));
+    } catch (e) {
+      console.warn('[scores] failed to write scores.json:', e.message);
+    }
+  }, 2000); // debounce: batch writes within 2 seconds
+}
+
+function addScore(entry) {
+  const mode = String(entry.mode || 'classic').slice(0, 24);
+  if (!scoreboards[mode]) scoreboards[mode] = [];
+  const board = scoreboards[mode];
+  // sanitize
+  const row = {
+    name: String(entry.name || 'DRIVER').slice(0, 14).toUpperCase(),
+    score: Math.max(0, Math.floor(Number(entry.score) || 0)),
+    mode,
+    kills: Math.max(0, Math.floor(Number(entry.kills) || 0)),
+    distance: Math.max(0, Math.floor(Number(entry.distance) || 0)),
+    vehicle: String(entry.vehicle || '').slice(0, 16),
+    ts: Date.now(),
+  };
+  if (row.score <= 0) return; // ignore zero scores
+  board.push(row);
+  // keep top N by score
+  board.sort((a, b) => b.score - a.score);
+  if (board.length > MAX_SCORES_PER_MODE) board.splice(MAX_SCORES_PER_MODE);
+  saveScores();
+}
+
+loadScores();
+
 const server = http.createServer((req, res) => {
   // Permissive CORS — read-only static assets.
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   // Tiny health endpoint — useful for status pages and uptime monitors.
@@ -50,6 +108,40 @@ const server = http.createServer((req, res) => {
     for (const m of rooms.values()) totalPeers += m.size;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size, peers: totalPeers, uptime: process.uptime() }));
+    return;
+  }
+
+  // ---- Scoreboard API ----
+  const urlParsed = (req.url || '/').split('?');
+  const urlPathApi = urlParsed[0];
+
+  if (urlPathApi === '/api/scores' && req.method === 'GET') {
+    const qs = new URLSearchParams(urlParsed[1] || '');
+    const mode = (qs.get('mode') || 'classic').slice(0, 24);
+    const board = (scoreboards[mode] || []).slice(0, 10);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, mode, scores: board }));
+    return;
+  }
+
+  if (urlPathApi === '/api/scores' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      if (body.length + chunk.length > 2048) { req.destroy(); return; }
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const entry = JSON.parse(body);
+        addScore(entry);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'bad request' }));
+      }
+    });
+    req.on('error', () => {});
     return;
   }
 

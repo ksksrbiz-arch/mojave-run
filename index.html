@@ -703,6 +703,7 @@
       <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
       <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
       <button class="btn" data-act="menu-stats">STATS</button>
+      <button class="btn" data-act="menu-scoreboard">🏆 SCOREBOARD</button>
       <button class="btn" data-act="menu-achievements">BADGES <span class="sub" id="menu-ach-sub"></span></button>
       <button class="btn" data-act="menu-settings">SETTINGS</button>
       <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">CO-OP GHOST RUN</span></button>
@@ -860,6 +861,22 @@
     .mp-peer.self{border-color:var(--gold)}
   </style>
 
+  <!-- ===== SCOREBOARD ===== -->
+  <div class="screen" id="screen-scoreboard">
+    <div class="inner">
+      <h1 style="font-size:28px">🏆 SCOREBOARD</h1>
+      <div class="profile-bar" style="flex-direction:column;gap:6px;align-items:flex-start">
+        <div class="name" id="scoreboard-mode">CLASSIC</div>
+        <div id="scoreboard-modes" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
+      </div>
+      <div id="scoreboard-list" style="display:flex;flex-direction:column"></div>
+      <div style="height:8px"></div>
+      <div class="small center" style="opacity:.5;line-height:1.5">TOP SCORES FROM ALL DRIVERS WORLDWIDE<br>SUBMITTED AT END OF EACH RUN</div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-scoreboard">◄ BACK</button>
+    </div>
+  </div>
+
   <!-- ===== RESULTS ===== -->
   <div class="screen" id="screen-results">
     <div class="inner">
@@ -872,6 +889,7 @@
       <button class="btn primary" data-act="res-again">▶ RUN AGAIN</button>
       <button class="btn" id="res-next" data-act="res-next" style="display:none">NEXT SECTOR ►</button>
       <button class="btn" id="res-share" data-act="res-share" style="display:none">SHARE SCORE</button>
+      <button class="btn" data-act="res-scoreboard">🏆 SCOREBOARD</button>
       <button class="btn" data-act="back-menu">◄ MENU</button>
     </div>
   </div>
