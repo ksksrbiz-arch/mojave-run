@@ -1419,11 +1419,11 @@ function restoreRng() {
 
 const BIOME_KEYS = Object.keys(BIOME_THEMES);
 const BIOME_MODIFIERS = {
-  wastes:    { id:'heatwave',   eventId:'mirage_cache',    name:'HEATWAVE',     desc:'Shimmering air favors mirage caches and sand ambushes.', color:'#ffb36a', handlingMul:1.00 },
-  saltflats: { id:'slicksalt',  eventId:'salt_glare',      name:'SLICK SALT',   desc:'Glare and loose salt reduce handling, but magnets appear more often.', color:'#e8f2ff', handlingMul:0.90 },
-  ash:       { id:'ashfall',    eventId:'ash_squall',      name:'ASHFALL',      desc:'Ash haze thickens visibility and throws more volatile debris into the road.', color:'#c8a8a0', handlingMul:0.96 },
-  redcanyon: { id:'rockfall',   eventId:'canyon_rockfall', name:'ROCKFALL ZONE',desc:'Canyon walls shed debris and reward nitro timing.', color:'#ff8a5a', handlingMul:1.00 },
-  midnight:  { id:'neonsurge',  eventId:'neon_surge',      name:'NEON SURGE',   desc:'Signal ghosts boost pulse tech and attract drones.', color:'#8ec5ff', handlingMul:1.03 },
+  wastes:    { id:'heatwave',   eventId:'mirage_cache',    eventExtras:['ambush'],       name:'HEATWAVE',      desc:'Shimmering air favors mirage caches and sand ambushes.', color:'#ffb36a', handlingMul:1.00 },
+  saltflats: { id:'slicksalt',  eventId:'salt_glare',      eventExtras:['convoy'],       name:'SLICK SALT',    desc:'Glare and loose salt reduce handling, but magnets appear more often.', color:'#e8f2ff', handlingMul:0.90 },
+  ash:       { id:'ashfall',    eventId:'ash_squall',      eventExtras:['hazard'],       name:'ASHFALL',       desc:'Ash haze thickens visibility and throws more volatile debris into the road.', color:'#c8a8a0', handlingMul:0.96 },
+  redcanyon: { id:'rockfall',   eventId:'canyon_rockfall', eventExtras:['hazard'],       name:'ROCKFALL ZONE', desc:'Canyon walls shed debris and reward nitro timing.', color:'#ff8a5a', handlingMul:1.00 },
+  midnight:  { id:'neonsurge',  eventId:'neon_surge',      eventExtras:['drone_strike'], name:'NEON SURGE',    desc:'Signal ghosts boost pulse tech and attract drones.', color:'#8ec5ff', handlingMul:1.03 },
 };
 const BIOME_EVENT_TUNING = {
   pickupMargin: 40,
@@ -2605,12 +2605,10 @@ function maybeTriggerDynamicEvent() {
   if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
   const dist = Game.distance;
   const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
-  if (Game.biomeModifier && Game.biomeModifier.eventId) pool.push(Game.biomeModifier.eventId);
-  if (Game.biome === 'wastes') pool.push('ambush');
-  if (Game.biome === 'saltflats') pool.push('convoy');
-  if (Game.biome === 'ash') pool.push('hazard');
-  if (Game.biome === 'redcanyon') pool.push('hazard');
-  if (Game.biome === 'midnight') pool.push('drone_strike');
+  if (Game.biomeModifier && Game.biomeModifier.eventId) {
+    pool.push(Game.biomeModifier.eventId);
+    (Game.biomeModifier.eventExtras || []).forEach(id => pool.push(id));
+  }
   if (dist > 1500) pool.push('drone_strike');
   if (dist > 4000) pool.push('tank_column');
   if (Game.mode === 'classic' && dist > 1000) pool.push('civilian_convoy');
@@ -3338,7 +3336,10 @@ function update(dt) {
   if (Game.activeEvent && Game.activeEvent.id === 'salt_glare') handlingMul *= BIOME_EVENT_TUNING.saltGlareHandlingMul;
   if (Game.activeEvent && Game.activeEvent.id === 'ash_squall') handlingMul *= BIOME_EVENT_TUNING.ashSquallHandlingMul;
   const accel = stats.accel * handlingMul;
-  const maxV = stats.maxV * (handlingMul < 1 ? BIOME_EVENT_TUNING.maxVLowHandlingMul : BIOME_EVENT_TUNING.maxVHighHandlingMul);
+  let maxVMul = 1;
+  if (handlingMul < 1) maxVMul = BIOME_EVENT_TUNING.maxVLowHandlingMul;
+  else if (handlingMul > 1) maxVMul = BIOME_EVENT_TUNING.maxVHighHandlingMul;
+  const maxV = stats.maxV * maxVMul;
   const drag = 6.5;
   if (input.left)  p.vx -= accel * dt;
   if (input.right) p.vx += accel * dt;
