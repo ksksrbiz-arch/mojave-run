@@ -552,6 +552,61 @@
   @media (orientation:landscape) and (max-height:480px){
     #rotate{display:flex}
   }
+
+  /* CAMPAIGN MAP DOTS */
+  .camp-dot{cursor:pointer}
+  .camp-dot.unlocked{animation:camp-dot-pulse 2.4s ease-in-out infinite}
+  @keyframes camp-dot-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+  /* CAMPAIGN LOCATION DETAIL */
+  .camp-loc-header{
+    background:rgba(0,0,0,.4);border:1px solid var(--gold-faint);
+    border-radius:4px;padding:10px 12px;margin-bottom:8px;
+  }
+  .camp-loc-name{font-weight:bold;font-size:15px;letter-spacing:2px}
+  .camp-loc-state{font-size:9px;color:var(--rust);letter-spacing:1.5px;margin-top:2px}
+  .camp-locked-msg{color:var(--danger);font-size:10px;letter-spacing:1px;margin-top:4px}
+  .camp-cleared-msg{color:var(--good);font-size:10px;letter-spacing:1px;margin-top:4px}
+  .camp-loc-intro{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;line-height:1.55;margin-bottom:10px}
+
+  /* CAMPAIGN LEVEL TILES */
+  .camp-levels-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px}
+  .camp-level-tile{
+    background:rgba(0,0,0,.5);border:1px solid var(--gold-faint);
+    border-radius:4px;padding:10px 8px;text-align:center;
+    cursor:pointer;position:relative;transition:border-color .15s,background .15s;
+  }
+  .camp-level-tile:active{transform:scale(.97);background:rgba(245,215,110,.08)}
+  .camp-level-tile.cleared{border-color:var(--good);background:rgba(122,240,122,.08)}
+  .camp-level-tile.locked{opacity:.38;pointer-events:none}
+  .camp-level-tile.boss{border-color:var(--danger)}
+  .camp-level-tile.boss.cleared{border-color:var(--good)}
+  .camp-level-tile .clt-num{font-size:19px;font-weight:bold}
+  .camp-level-tile .clt-name{font-size:8px;letter-spacing:1px;color:var(--gold-dim);margin-top:3px;line-height:1.2}
+  .camp-level-tile .clt-obj{font-size:8px;letter-spacing:1px;color:var(--gold-dim);margin-top:2px}
+  .camp-level-tile .clt-check{position:absolute;top:3px;right:5px;color:var(--good);font-size:12px}
+  .camp-level-tile .clt-star{position:absolute;top:3px;right:5px;font-size:10px}
+
+  /* SIDEKICK CARDS */
+  .sidekick-card{
+    background:rgba(0,0,0,.5);border:2px solid var(--gold-faint);
+    border-radius:6px;padding:14px;transition:border-color .15s,background .15s;
+  }
+  .sidekick-card.active{border-color:var(--gold);background:rgba(245,215,110,.06)}
+  .sidekick-card.locked{opacity:.5}
+  .sk-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+  .sk-name{font-weight:bold;font-size:15px;letter-spacing:2px}
+  .sk-title{font-size:9px;letter-spacing:1.5px;color:var(--rust);margin-top:2px}
+  .sk-bio{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;line-height:1.4;margin-bottom:6px}
+  .sk-perk{font-size:10px;letter-spacing:1px;margin-bottom:4px}
+  .sk-unlock-hint{font-size:9px;color:var(--danger);letter-spacing:1px;margin-top:4px}
+  .sk-badge{background:var(--gold);color:var(--bg);font-size:9px;letter-spacing:1px;padding:3px 7px;border-radius:3px;font-weight:bold}
+  .sk-lock{font-size:16px;opacity:.6}
+
+  /* STORY OVERLAY */
+  .story-title{font-size:18px;font-weight:bold;letter-spacing:3px;color:var(--gold);margin-bottom:10px;text-align:center}
+  .story-text{font-size:13px;letter-spacing:1px;color:var(--gold-dim);line-height:1.7;max-width:340px;margin:0 auto;text-align:center}
+  .story-sk-line{font-size:12px;font-weight:bold;letter-spacing:2px;margin-top:14px;text-align:center;color:var(--good)}
 </style>
 </head>
 <body>
@@ -618,8 +673,10 @@
       </div>
       <h1 style="font-size:36px;margin-top:8px">MOJAVE RUN</h1>
       <button class="btn primary" data-act="menu-play">▶ PLAY</button>
+      <button class="btn" data-act="menu-campaign">CAMPAIGN <span class="sub">US ROAD STORY</span></button>
       <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
       <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
+      <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
       <button class="btn" data-act="menu-stats">STATS</button>
       <button class="btn" data-act="menu-scoreboard">🏆 SCOREBOARD</button>
       <button class="btn" data-act="menu-settings">SETTINGS</button>
@@ -796,6 +853,43 @@
       <button class="btn" id="res-share" data-act="res-share" style="display:none">SHARE SCORE</button>
       <button class="btn" data-act="res-scoreboard">🏆 SCOREBOARD</button>
       <button class="btn" data-act="back-menu">◄ MENU</button>
+    </div>
+  </div>
+
+  <!-- ===== CAMPAIGN MAP ===== -->
+  <div class="screen" id="screen-campaign">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">CAMPAIGN</div>
+        <div class="scrap" id="campaign-progress">0 / 72</div>
+      </div>
+      <div class="small center" style="margin-bottom:6px">TAP A LOCATION TO VIEW · TAP A LEVEL TO START</div>
+      <div id="campaign-map" style="border:1px solid var(--gold-faint);border-radius:4px;overflow:hidden;background:#0d0a06;margin-bottom:10px"></div>
+      <div id="campaign-detail"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-mode">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== SIDEKICK SELECT ===== -->
+  <div class="screen" id="screen-sidekick">
+    <div class="inner">
+      <h1 style="font-size:28px">SIDEKICKS</h1>
+      <div class="small center">UNLOCK BY CLEARING CAMPAIGN REGIONS · ONE ACTIVE AT A TIME</div>
+      <div id="sidekick-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== STORY OVERLAY ===== -->
+  <div class="screen" id="screen-story" style="z-index:8;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)">
+    <div class="inner" style="margin:auto 0;text-align:center">
+      <div class="portrait xl" id="story-portrait" style="margin:0 auto 18px"></div>
+      <div class="story-title" id="story-title">LEVEL CLEARED</div>
+      <div class="story-text" id="story-text"></div>
+      <div class="story-sk-line" id="story-sk-line" style="display:none"></div>
+      <div class="small" style="margin-top:28px;opacity:.45">TAP TO CONTINUE</div>
     </div>
   </div>
 
