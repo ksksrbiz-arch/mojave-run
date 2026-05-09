@@ -1079,6 +1079,8 @@ const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
 const DPR_CAP = IS_MOBILE ? 1.5 : 2;
+// Keep mobile floor lower for thermal/battery headroom; keep desktop floor
+// higher so text/HUD stay sharp on larger screens.
 const MIN_RENDER_SCALE = IS_MOBILE ? 0.7 : 0.85;
 const MIN_DPR = IS_MOBILE ? 0.75 : 1;
 const DPR_CHANGE_THRESHOLD = 0.01;
@@ -1164,7 +1166,9 @@ function resize() {
   const nextH = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
   const wantedDpr = (window.devicePixelRatio || 1) * renderScale;
   const nextDpr = Math.round(Math.min(DPR_CAP, Math.max(MIN_DPR, wantedDpr)) * 100) / 100;
-  if (nextW === W && nextH === H && Math.abs(nextDpr - DPR) < DPR_CHANGE_THRESHOLD) return;
+  const sameSize = (nextW === W && nextH === H);
+  const tinyDprChange = Math.abs(nextDpr - DPR) < DPR_CHANGE_THRESHOLD;
+  if (sameSize && tinyDprChange) return;
   DPR = nextDpr;
   W = nextW;
   H = nextH;
@@ -5135,6 +5139,10 @@ const PerfMon = {
 
 const QUALITY_PRESETS = { low: 0, medium: 0.5, high: 1 };
 const QUALITY_KEY = 'mojaverun.quality.v1';
+// Frame-cost thresholds: >28ms (~35fps) means severe pressure, >22ms (~45fps)
+// means moderate pressure, <13ms means enough headroom to recover sharpness.
+// Ramp-down is intentionally stronger than ramp-up to quickly stabilize jank
+// while avoiding visible oscillation on recovery.
 const SCALE_ADJUST_INTERVAL_MS = 1200;
 const SCALE_THRESHOLD_SEVERE_MS = 28;
 const SCALE_THRESHOLD_HIGH_MS = 22;
@@ -5262,6 +5270,8 @@ function frame(now) {
   if (now - PerfMon.lastScaleAdjustAt > SCALE_ADJUST_INTERVAL_MS) {
     PerfMon.lastScaleAdjustAt = now;
     const prev = renderScale;
+    // Intentional deadband between high and recover thresholds to avoid
+    // oscillating scale around borderline frame times.
     if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS) {
       renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN_SEVERE);
     } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS) {
