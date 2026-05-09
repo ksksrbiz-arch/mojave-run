@@ -3969,16 +3969,43 @@ function drawBackground() {
     ctx.stroke();
   }
 
-  // stars at night (parallax-light)
+  // stars at night (parallax-light) — varied sizes, twinkling, shooting star
   if (Game.isNight) {
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
     const seedY = Math.floor(Game.bgScroll * 0.05);
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       const sx = (i * 137 + seedY * 23) % W;
-      const sy = ((i * 71) % (H * 0.3));
-      const tw = Math.sin(Game.t * 2 + i) * 0.5 + 0.5;
-      ctx.globalAlpha = 0.3 + tw * 0.5;
-      ctx.fillRect(sx, sy, 1, 1);
+      const sy = ((i * 71) % (H * 0.38));
+      const tw = Math.sin(Game.t * (1.1 + (i % 5) * 0.28) + i) * 0.5 + 0.5;
+      const sz = i % 7 === 0 ? 1.4 : i % 3 === 0 ? 0.9 : 0.5;
+      ctx.globalAlpha = (0.2 + tw * 0.65) * (i % 5 === 0 ? 1 : 0.75);
+      ctx.fillStyle = i % 9 === 0 ? 'rgba(180,210,255,1)' : i % 6 === 0 ? 'rgba(255,240,195,1)' : 'rgba(255,255,255,1)';
+      ctx.beginPath();
+      ctx.arc(sx, sy, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // shooting star — streaks across the sky every ~9 seconds
+    const starPeriod = 9;
+    const starPhase = (Game.t + 2.7) % starPeriod;
+    if (starPhase < 1.0) {
+      const p = starPhase;
+      const seedStar = Math.floor((Game.t + 2.7) / starPeriod);
+      const sx0 = ((seedStar * 173) % (W * 0.65)) + W * 0.08;
+      const sy0 = ((seedStar * 89) % (H * 0.2));
+      const ex = sx0 + 140 * p;
+      const ey = sy0 + 55 * p;
+      const alpha = Math.min(p * 4, (1 - p) * 2.5, 1);
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.85;
+      const sg = ctx.createLinearGradient(ex, ey, ex - 50 * p, ey - 20 * p);
+      sg.addColorStop(0, 'rgba(255,255,255,0.95)');
+      sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.strokeStyle = sg;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 50 * p, ey - 20 * p);
+      ctx.stroke();
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
   }
@@ -4030,15 +4057,61 @@ function drawBackground() {
   ctx.closePath();
   ctx.fill();
 
+  // horizon heat shimmer — warm band at ground-sky boundary (daytime only)
+  if (!Game.isNight && !Game.isStorm) {
+    const hmY = H * 0.42;
+    const heatAlpha = 0.035 + 0.018 * Math.sin(Game.t * 2.8);
+    ctx.fillStyle = `rgba(255,195,110,${heatAlpha})`;
+    ctx.fillRect(0, hmY - H * 0.05, W, H * 0.08);
+  }
+
   // sun / moon
   if (Game.isNight) {
-    ctx.fillStyle = 'rgba(220,220,250,0.7)';
-    ctx.beginPath(); ctx.arc(W * 0.7, H * 0.18, 30, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(220,220,250,0.15)';
-    ctx.beginPath(); ctx.arc(W * 0.7, H * 0.18, 60, 0, Math.PI * 2); ctx.fill();
+    const mx = W * 0.7, my = H * 0.16;
+    // outer halos
+    ctx.fillStyle = 'rgba(190,205,255,0.06)';
+    ctx.beginPath(); ctx.arc(mx, my, 72, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(205,215,255,0.12)';
+    ctx.beginPath(); ctx.arc(mx, my, 50, 0, Math.PI * 2); ctx.fill();
+    // moon disc — radial gradient for gentle limb darkening
+    const mg = ctx.createRadialGradient(mx - 7, my - 7, 2, mx, my, 28);
+    mg.addColorStop(0, 'rgba(245,248,255,0.96)');
+    mg.addColorStop(0.7, 'rgba(210,220,255,0.88)');
+    mg.addColorStop(1, 'rgba(175,192,240,0.72)');
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(mx, my, 28, 0, Math.PI * 2); ctx.fill();
+    // crater details
+    ctx.fillStyle = 'rgba(130,148,200,0.28)';
+    ctx.beginPath(); ctx.arc(mx + 8, my - 8, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx - 10, my + 10, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 14, my + 12, 3, 0, Math.PI * 2); ctx.fill();
   } else {
-    ctx.fillStyle = 'rgba(245,180,90,0.18)';
-    ctx.beginPath(); ctx.arc(W * 0.7, H * 0.22, 90, 0, Math.PI * 2); ctx.fill();
+    const sx = W * 0.7, sy = H * 0.20;
+    // outer ambient glow
+    ctx.fillStyle = 'rgba(245,175,55,0.06)';
+    ctx.beginPath(); ctx.arc(sx, sy, 95, 0, Math.PI * 2); ctx.fill();
+    // slowly rotating faint rays
+    ctx.save();
+    ctx.translate(sx, sy);
+    const numRays = 14;
+    for (let ri = 0; ri < numRays; ri++) {
+      const ang = ri * (Math.PI * 2 / numRays) + Game.t * 0.014;
+      const outerR = 62 + (ri % 3) * 18;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * 22, Math.sin(ang) * 22);
+      ctx.lineTo(Math.cos(ang) * outerR, Math.sin(ang) * outerR);
+      ctx.strokeStyle = `rgba(245,188,75,0.045)`;
+      ctx.lineWidth = 5 - (ri % 2) * 1.5;
+      ctx.stroke();
+    }
+    // sun disc — radial gradient bright center
+    const sunG = ctx.createRadialGradient(0, 0, 0, 0, 0, 24);
+    sunG.addColorStop(0, 'rgba(255,248,220,0.78)');
+    sunG.addColorStop(0.5, 'rgba(255,210,95,0.58)');
+    sunG.addColorStop(1, 'rgba(245,165,50,0.28)');
+    ctx.fillStyle = sunG;
+    ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -4208,10 +4281,16 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64) {
   ctx.fillRect( w/2 - 1, -h/2 + 11, 4, 8);
   ctx.fillRect(-w/2 - 3,  h/2 - 18, 4, 9);
   ctx.fillRect( w/2 - 1,  h/2 - 18, 4, 9);
-  // exhaust glow
-  ctx.fillStyle = 'rgba(255,140,60,0.6)';
-  ctx.fillRect(-10, h/2 - 4, 6, 4);
-  ctx.fillRect(  4, h/2 - 4, 6, 4);
+  // exhaust flames — animated flicker
+  const exFlicker = 0.5 + 0.5 * Math.sin((Game.t || 0) * 28);
+  const exLen = 5 + exFlicker * 10;
+  const exGl = ctx.createLinearGradient(0, h / 2 - 2, 0, h / 2 + exLen);
+  exGl.addColorStop(0, `rgba(255,220,80,${0.9 * exFlicker + 0.35})`);
+  exGl.addColorStop(0.45, `rgba(255,115,25,${0.75 * exFlicker + 0.1})`);
+  exGl.addColorStop(1, 'rgba(255,35,0,0)');
+  ctx.fillStyle = exGl;
+  ctx.fillRect(-11, h / 2 - 2, 6, exLen);
+  ctx.fillRect(5, h / 2 - 2, 6, exLen);
 
   ctx.restore();
 }
@@ -4729,7 +4808,9 @@ function drawParticles() {
     const a = Math.max(0, pr.life / pr.max);
     ctx.globalAlpha = a;
     ctx.fillStyle = pr.color;
-    ctx.fillRect(pr.x - pr.size/2, pr.y - pr.size/2, pr.size, pr.size);
+    ctx.beginPath();
+    ctx.arc(pr.x, pr.y, pr.size / 2, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 }
@@ -4741,6 +4822,12 @@ function drawShockwaves() {
     ctx.strokeStyle = s.color;
     ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
+    // inner ring — trails slightly behind
+    if (s.r > 16) {
+      ctx.globalAlpha = a * 0.38;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 0.52, 0, Math.PI * 2); ctx.stroke();
+    }
   }
   ctx.globalAlpha = 1; ctx.lineWidth = 1;
 }
@@ -4937,11 +5024,17 @@ function drawHUD() {
 
   // hull bar
   const hbW = Math.min(180, W * 0.42), hbH = 10, hbX = (W - hbW) / 2, hbY = hudH * 0.4 - hbH/2;
+  // critical health — pulsing red glow behind bar
+  const pct = clamp(Game.health / Game.maxHealth, 0, 1);
+  if (pct <= 0.25) {
+    const glowA = 0.28 + 0.28 * Math.sin(Game.t * 8);
+    ctx.fillStyle = `rgba(255,50,50,${glowA})`;
+    ctx.fillRect(hbX - 4, hbY - 4, hbW + 8, hbH + 8);
+  }
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(hbX - 2, hbY - 2, hbW + 4, hbH + 4);
   ctx.fillStyle = '#3a1a0a';
   ctx.fillRect(hbX, hbY, hbW, hbH);
-  const pct = clamp(Game.health / Game.maxHealth, 0, 1);
   const col = pct > 0.5 ? '#7af07a' : pct > 0.25 ? '#f5d76e' : '#ff5050';
   ctx.fillStyle = col;
   ctx.fillRect(hbX, hbY, hbW * pct, hbH);
