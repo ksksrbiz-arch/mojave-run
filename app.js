@@ -2444,6 +2444,12 @@ const Game = {
   spawnTimer: 0,
   pickupTimer: 0,
   shake: 0,
+  // Smoothed screen-shake offsets — interpolate toward a random target so the
+  // camera vibrates instead of strobing one pixel per frame. Updated in render().
+  shakeOX: 0, shakeOY: 0, shakeTX: 0, shakeTY: 0, shakeRetargetT: 0,
+  // Brief positional snapshots of the player while NITRO is active — drawn as
+  // a fading silhouette trail behind the live vehicle. Capped to TRAIL_MAX.
+  playerTrail: [],
   flash: 0,
   hitFlash: 0,            // brief vehicle hit indicator
   hintTime: 0,
@@ -2649,6 +2655,9 @@ function startRun(mode, level) {
   Game.spawnTimer = 0.6;
   Game.pickupTimer = 3;
   Game.shake = 0; Game.flash = 0; Game.hitFlash = 0;
+  Game.shakeOX = Game.shakeOY = Game.shakeTX = Game.shakeTY = 0;
+  Game.shakeRetargetT = 0;
+  Game.playerTrail.length = 0;
   Game.hintTime = IS_TOUCH ? 4.5 : 0;
   Game.bullets.length = 0; Game.enemies.length = 0; Game.obstacles.length = 0;
   Game.pickups.length = 0; Game.enemyBullets.length = 0;
@@ -3735,6 +3744,32 @@ function update(dt) {
       x: sx, y: sy, vx: 0, vy: 1100,
       life: 0.18, max: 0.18, size: 2, color: 'rgba(122,240,255,0.7)',
     });
+  }
+
+  // ---- nitro afterimage trail snapshot ----
+  // While NITRO is active we keep a short ring buffer of recent player
+  // positions; render() stamps them as fading silhouettes for a motion-blur
+  // feel. We sample at most every ~30ms so the trail is a clear smear rather
+  // than overlapping rectangles.
+  if (Game.player) {
+    if (isPowerupActive('nitro')) {
+      Game._trailAccum = (Game._trailAccum || 0) + dt;
+      if (Game._trailAccum >= 0.03) {
+        Game._trailAccum = 0;
+        Game.playerTrail.push({
+          x: Game.player.x, y: Game.player.y,
+          w: Game.player.w, h: Game.player.h,
+        });
+        const TRAIL_MAX = 6;
+        if (Game.playerTrail.length > TRAIL_MAX) {
+          Game.playerTrail.splice(0, Game.playerTrail.length - TRAIL_MAX);
+        }
+      }
+    } else if (Game.playerTrail.length > 0) {
+      // No nitro → fade the trail out one snapshot per frame so it dissolves
+      // smoothly instead of popping.
+      Game.playerTrail.shift();
+    }
   }
 
   // difficulty ramp (classic: by distance; gauntlet: fixed per level; timeattack: aggressive)
@@ -5559,6 +5594,23 @@ function drawPickup(pk) {
 }
 
 function drawBullets() {
+  // Player bullets — additive glow halo behind the bright core for a punchier
+  // tracer look. Quality-gated: skipped when the perf governor has shed
+  // particle budget aggressively (q < ~0.3) to keep low-end devices smooth.
+  const glowOn = (PerfMon.quality > 0.25) && (Settings.particles > 0.4);
+  if (glowOn && Game.bullets.length > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of Game.bullets) {
+      const r = (b.big ? 14 : 9);
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r);
+      g.addColorStop(0, 'rgba(255,220,140,0.55)');
+      g.addColorStop(1, 'rgba(255,180,80,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
   for (const b of Game.bullets) {
     if (b.big) {
       ctx.fillStyle = 'rgba(255,180,80,0.3)';
@@ -5568,6 +5620,22 @@ function drawBullets() {
     ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
     ctx.fillStyle = 'rgba(255,180,80,0.5)';
     ctx.fillRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4);
+  }
+  // Enemy bullets — same additive halo trick, tinted red so threats remain
+  // easy to read against the player's warm tracers.
+  if (glowOn && Game.enemyBullets.length > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of Game.enemyBullets) {
+      if (b.mortar) continue;
+      const r = (b.big ? 14 : 9);
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r);
+      g.addColorStop(0, 'rgba(255,120,120,0.55)');
+      g.addColorStop(1, 'rgba(255,60,60,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
   for (const b of Game.enemyBullets) {
     if (b.mortar) {
@@ -5758,6 +5826,80 @@ function drawPowerupStrip() {
   }
   ctx.lineWidth = 1;
   ctx.restore();
+}
+
+// Soft elliptical drop shadow under the player vehicle. Pure visual polish —
+// no game logic depends on it. We draw a radial gradient so the edge is
+// feathered rather than a hard offset rectangle.
+function drawPlayerGroundShadow() {
+  const p = Game.player;
+  if (!p) return;
+  if (Settings.particles <= 0.05) return; // respect "no extras" preference
+  const w = p.w + 14;
+  const h = (p.h + 12) * 0.32;
+  const cx = p.x + 4;
+  const cy = p.y + p.h / 2 + 6;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, 0.45); // squashed ellipse via gradient + transform
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.6);
+  g.addColorStop(0, 'rgba(0,0,0,0.45)');
+  g.addColorStop(0.6, 'rgba(0,0,0,0.18)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w * 0.6, h, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// Ghost silhouettes of the player chassis stamped at recent positions while
+// NITRO is active. Snapshots are pushed in update(); rendered oldest-first
+// so the live vehicle paints over them cleanly.
+function drawPlayerNitroTrail() {
+  const trail = Game.playerTrail;
+  if (!trail || trail.length === 0) return;
+  if (Settings.particles <= 0.1) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < trail.length; i++) {
+    const s = trail[i];
+    const a = (i + 1) / trail.length; // newest = brightest
+    ctx.globalAlpha = a * 0.28;
+    // simple cyan-tinted rectangle echoing the chassis footprint — much
+    // cheaper than re-drawing the full vehicle each frame and reads as a
+    // motion smear instead of a duplicate sprite.
+    ctx.fillStyle = 'rgba(122,240,255,0.75)';
+    ctx.fillRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+// Pulsing chromatic vignette that builds with the kill streak. Stays subtle
+// at low combos and ramps to a noticeable color halo at the highest tiers,
+// reinforcing the score multiplier without obscuring the play field.
+function drawComboAura() {
+  if (!Game.player || Game.combo < 3) return;
+  const m = comboMult();
+  // Map multiplier (1..10) into 0..1 intensity; clamp to avoid a fully solid
+  // overlay even at legendary streaks.
+  const intensity = clamp((m - 1) / 9, 0, 1);
+  if (intensity <= 0) return;
+  const pulse = 0.85 + 0.15 * Math.sin((Game.t || 0) * 6);
+  // Color shifts warmer as the multiplier climbs: gold → orange → red.
+  const hue = m >= 7 ? [255, 80, 80]
+            : m >= 4 ? [255, 150, 60]
+            :          [255, 220, 110];
+  const baseA = 0.05 + intensity * 0.18;
+  const grad = ctx.createRadialGradient(
+    W * 0.5, H * 0.55, Math.min(W, H) * 0.30,
+    W * 0.5, H * 0.55, Math.max(W, H) * 0.75
+  );
+  grad.addColorStop(0, `rgba(${hue[0]},${hue[1]},${hue[2]},0)`);
+  grad.addColorStop(1, `rgba(${hue[0]},${hue[1]},${hue[2]},${baseA * pulse})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
 }
 
 function drawNitroOverlay() {
@@ -6180,8 +6322,27 @@ function render() {
       || Game.state === 'loading' || Game.state === 'dying') {
     ctx.save();
     if (Game.shake > 0 && !Game.paused) {
-      const s = Game.shake * 14 * Settings.shake;
-      ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+      // Smoothed shake: interpolate offsets toward a randomly-picked target so
+      // the camera oscillates instead of strobing one pixel per frame. We
+      // re-pick a target every ~50ms (timer driven by Game.t) and lerp in
+      // render() using a frame-rate independent factor.
+      const amp = Game.shake * 14 * Settings.shake;
+      const nowT = Game.t || 0;
+      if (nowT >= Game.shakeRetargetT) {
+        Game.shakeTX = (Math.random() - 0.5) * 2;
+        Game.shakeTY = (Math.random() - 0.5) * 2;
+        Game.shakeRetargetT = nowT + 0.05;
+      }
+      // Exponential approach (~70% of remaining gap per ~16ms frame); cheap
+      // and stable across variable frame times.
+      const k = 0.35;
+      Game.shakeOX += (Game.shakeTX - Game.shakeOX) * k;
+      Game.shakeOY += (Game.shakeTY - Game.shakeOY) * k;
+      ctx.translate(Game.shakeOX * amp, Game.shakeOY * amp);
+    } else {
+      // Decay the smoothed offsets so the camera glides back to center after
+      // the shake source ends, instead of snapping.
+      Game.shakeOX *= 0.7; Game.shakeOY *= 0.7;
     }
     drawBackground();
     drawRoad();
@@ -6207,6 +6368,14 @@ function render() {
         emitExhaustTrail(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1);
         emitExhaustTrail(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1);
       }
+      // Soft elliptical ground shadow — replaces the harsh square shadow that
+      // used to sit behind the chassis. Quality-gated via Settings.particles
+      // so very-low quality skips the extra fill.
+      drawPlayerGroundShadow();
+      // NITRO afterimage trail: faint vehicle silhouettes at recent player
+      // positions, oldest = most transparent. Captured in update() and only
+      // drawn while at least one entry exists.
+      drawPlayerNitroTrail();
       // hit flash overlay on the vehicle: tint white briefly
       drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx);
       if (Game.hitFlash > 0) {
@@ -6236,6 +6405,10 @@ function render() {
     drawPopups();
     drawWeather();
     drawNitroOverlay();
+    // Combo aura — pulsing chromatic vignette when the kill streak is hot.
+    // Drawn after weather/nitro so it composites on top of the world but
+    // still sits below the HUD layer.
+    drawComboAura();
 
     if (Game.flash > 0) {
       ctx.fillStyle = `rgba(255,80,80,${Game.flash * 0.4})`;
