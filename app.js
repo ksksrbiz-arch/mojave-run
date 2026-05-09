@@ -1629,7 +1629,7 @@ const BOSS_RUSH_REWARD_BASE = 1200;
 const BOSS_RUSH_REWARD_PER_STAGE = 250;
 const BASE_RAM_DAMAGE = 10;
 const PULSE_DAMAGE = { normal: 1.5, elite: 2 };
-const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 175, tank: 350 };
+const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350 };
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
@@ -2431,6 +2431,7 @@ function spawnEnemy(forceKind, forceElite) {
   if (!pick) {
     // Civilians only appear in classic/endless mode after a short distance
     const isCivMode = Game.mode === 'classic';
+    // Civilian spawn chance scales gradually from 2% at 1km to 10% cap at ~6km
     const civChance = isCivMode ? Math.min(0.10, 0.02 + dist / 60000) : 0;
     if (isCivMode && dist > 1000 && r < civChance) {
       pick = 'civilian';
@@ -2508,7 +2509,7 @@ function spawnEnemy(forceKind, forceElite) {
       kind: 'civilian',
       x: rand(x0 + margin, x1 - margin),
       y: -60, w: 36, h: 54,
-      vy: rand(30, 70),   // own slower drift speed
+      vy: rand(30, 70),   // their own slower drift speed on top of road scroll
       color: colors[Math.floor(Math.random() * colors.length)],
     });
   } else if (pick === 'wreck') {
@@ -3949,7 +3950,7 @@ function drawObstacle(o) {
     ctx.fillRect( o.w/2 - 2, -o.h/2 + 8, 5, 10);
     ctx.fillRect(-o.w/2 - 3,  o.h/2 - 16, 5, 10);
     ctx.fillRect( o.w/2 - 2,  o.h/2 - 16, 5, 10);
-    // "CIVI" warning badge
+    // "CIV" warning badge
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 8px monospace';
     ctx.textAlign = 'center';
