@@ -130,7 +130,7 @@
   <div class="toast" id="toast"></div>
 
   <div class="overlay" id="menuTitle">
-    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WebGL CLASSIC</span></div>
+    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WebGL Classic</span></div>
     <div class="subtitle">Race raiders, dust storms, bosses, and neon road effects across the Mojave.<br><b>Zombie Wasteland is an unlockable side mode after 6 campaign sectors.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
@@ -260,6 +260,7 @@ window.addEventListener('resize', fit); fit();
 
 // ---------- WebGL presentation layer -----------------------------------
 const WebGLFX = (() => {
+  // Visual-only WebGL road glow speed limits, derived from the current vehicle speed.
   const MIN_SPEED_FACTOR = 0.3;
   const MAX_SPEED_FACTOR = 1.8;
   const SPEED_DIVISOR = 700;
@@ -794,7 +795,7 @@ class Zombie{
     this.x=x; this.y=y; this.hp=t.hp; this.maxHp=t.hp;
     this.w=t.w; this.h=t.h;
     this.zig = Math.random()*Math.PI*2;
-    this.isZombie = t.classic !== true;
+    this.usesZombieEffects = t.classic !== true;
     this.alive=true;
   }
   update(dt,player){
@@ -846,8 +847,8 @@ class Zombie{
   }
   hit(d){
     this.hp -= d;
-    const hitCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.spark;
-    const markCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.oil;
+    const hitCol = this.usesZombieEffects ? MARK_COLORS.zombie : MARK_COLORS.spark;
+    const markCol = this.usesZombieEffects ? MARK_COLORS.zombie : MARK_COLORS.oil;
     burst(this.x,this.y,4,hitCol,180,0.4,3);
     decal(this.x,this.y,8,markCol);
     if(this.hp<=0){ this.kill(true); }
@@ -865,15 +866,15 @@ class Zombie{
     if(this.t.boss){
       Game.scrap += 200;
       Game.shake = Math.max(Game.shake, 30);
-      burst(this.x,this.y,80,this.isZombie?'#ff5050':'#ffaa44',520,1.0,6,300);
+      burst(this.x,this.y,80,this.usesZombieEffects?'#ff5050':'#ffaa44',520,1.0,6,300);
       burst(this.x,this.y,40,'#ffaa44',420,0.8,5);
       Audio.explode();
       toast('BOSS DOWN +200 SCRAP');
       if(Game.boss===this) Game.boss=null;
     }
     if(Math.random()<(this.t.boss?1.0:0.3)) Game.pickups.push(makePickup(this.x,this.y));
-    const killCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.fire;
-    const markCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.oil;
+    const killCol = this.usesZombieEffects ? MARK_COLORS.zombie : MARK_COLORS.fire;
+    const markCol = this.usesZombieEffects ? MARK_COLORS.zombie : MARK_COLORS.oil;
     burst(this.x,this.y,16,killCol,300,0.6,4,400);
     decal(this.x,this.y,16,markCol);
     if(this.t.explosive){
@@ -904,7 +905,7 @@ class Zombie{
     const x=this.x, y=this.y, w=this.w, h=this.h;
     c.fillStyle='rgba(0,0,0,.4)';
     c.fillRect(x-w/2+3,y+h/2-3,w,6);
-    if(!this.isZombie){
+    if(!this.usesZombieEffects){
       c.fillStyle=this.t.col;
       if(this.type==='drone'){
         c.fillRect(x-w/2,y-h/2+h*0.25,w,h*0.5);
