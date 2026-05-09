@@ -1629,9 +1629,10 @@ const BOSS_RUSH_REWARD_BASE = 1200;
 const BOSS_RUSH_REWARD_PER_STAGE = 250;
 const BASE_RAM_DAMAGE = 10;
 const PULSE_DAMAGE = { normal: 1.5, elite: 2 };
-const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250 };
+const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350 };
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
+const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -1665,6 +1666,18 @@ function applyKill(x, y, baseScore) {
   }
   const label = (x2 > 1 ? 'x2 ' : '') + '+' + score + (mult > 1 ? ' ×' + mult : '');
   addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
+}
+
+function applyCivilianPenalty(x, y) {
+  const penalty = CIVILIAN_PENALTY;
+  Game.score = Math.max(0, Game.score - penalty);
+  // break combo
+  Game.combo = 0;
+  Game.comboT = 0;
+  SFX.hit();
+  Game.flash = Math.max(Game.flash, 0.6);
+  addPopup('⚠ CIVILIAN! -' + penalty, x, y - 22, '#4aa8e8', 16);
+  shockwave(x, y, 'rgba(74,168,232,0.5)', 80);
 }
 
 function isPowerupActive(id) {
@@ -1773,7 +1786,7 @@ function firePulseBurst() {
       e.hp -= pulseDmg;
       if (Settings.damageNumbers) addPopup('-' + pulseDmg, e.x, e.y - 10, '#8ec5ff', 12);
       if (e.hp <= 0) {
-        applyKill(e.x, e.y, e.kind === 'mortar' ? ENEMY_SCORE.mortar : e.kind === 'bike' ? ENEMY_SCORE.bike : ENEMY_SCORE.buggy);
+        applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy);
         emit(e.x, e.y, 18, { color:'#8ec5ff', speed:300, life:0.55, size:3 });
         Game.enemies.splice(i, 1);
       }
@@ -2324,12 +2337,42 @@ function startDynamicEvent(id) {
     Game.activeEvent = { id, name:'STORM FRONT', t: 9, max: 9 };
     Game.isStorm = true;
     announceEvent('STORM FRONT', '#8ec5ff');
+  } else if (id === 'drone_strike') {
+    Game.activeEvent = { id, name:'DRONE STRIKE', t: 8, max: 8 };
+    for (let i = 0; i < 4; i++) spawnEnemyWave('drone');
+    announceEvent('DRONE STRIKE', '#c87af0');
+  } else if (id === 'tank_column') {
+    Game.activeEvent = { id, name:'TANK COLUMN', t: 10, max: 10 };
+    spawnEnemyWave('tank', true);
+    spawnEnemyWave('tank');
+    announceEvent('TANK COLUMN', '#ff6060');
+  } else if (id === 'civilian_convoy') {
+    Game.activeEvent = { id, name:'CIVILIANS ON ROAD', t: 10, max: 10 };
+    const { x0, x1 } = roadBounds();
+    const margin = 32;
+    const colors = ['#4aa8e8', '#e8c84a', '#4ae870', '#e88a4a'];
+    for (let i = 0; i < 4; i++) {
+      const col = colors[i % colors.length];
+      Game.obstacles.push({
+        kind: 'civilian',
+        x: rand(x0 + margin, x1 - margin),
+        y: -60 - i * 70,
+        w: 36, h: 54,
+        vy: rand(30, 60),
+        color: col,
+      });
+    }
+    announceEvent('⚠ CIVILIANS ON ROAD', '#4aa8e8');
   }
 }
 
 function maybeTriggerDynamicEvent() {
   if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
+  const dist = Game.distance;
   const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
+  if (dist > 1500) pool.push('drone_strike');
+  if (dist > 4000) pool.push('tank_column');
+  if (Game.mode === 'classic' && dist > 1000) pool.push('civilian_convoy');
   const pick = pool[Math.floor(Math.random() * pool.length)];
   startDynamicEvent(pick);
 }
@@ -2376,16 +2419,30 @@ function spawnEnemy(forceKind, forceElite) {
   const margin = 32;
   const r = Math.random();
   const lvlMul = Game.levelData ? Game.levelData.diff : 1;
+  const dist = Game.distance;
   // unlock new enemies as difficulty increases
-  const unlockBike   = lvlMul >= 1.1 || Game.distance > 800;
-  const unlockMortar = lvlMul >= 1.4 || Game.distance > 2400;
-  // pick spawn type
+  const unlockBike   = lvlMul >= 1.1 || dist > 800;
+  const unlockMortar = lvlMul >= 1.4 || dist > 2400;
+  const unlockDrone  = lvlMul >= 1.2 || dist > 1500;
+  const unlockTank   = lvlMul >= 1.8 || dist > 4000;
+
+  // pick spawn type — probabilities shift with distance phase
   let pick = forceKind || null;
-  if (!pick && unlockMortar && r < 0.10) pick = 'mortar';
-  else if (!pick && unlockBike && r < 0.30) pick = 'bikes';
-  else if (!pick && r < 0.55) pick = 'buggy';
-  else if (!pick && r < 0.85) pick = 'wreck';
-  else if (!pick) pick = 'barrels';
+  if (!pick) {
+    // Civilians only appear in classic/endless mode after a short distance
+    const isCivMode = Game.mode === 'classic';
+    // Civilian spawn chance scales gradually from 2% at 1km to 10% cap at ~6km
+    const civChance = isCivMode ? Math.min(0.10, 0.02 + dist / 60000) : 0;
+    if (isCivMode && dist > 1000 && r < civChance) {
+      pick = 'civilian';
+    } else if (unlockTank   && r < 0.07) pick = 'tank';
+    else if (unlockMortar   && r < 0.14) pick = 'mortar';
+    else if (unlockDrone    && r < 0.26) pick = 'drone';
+    else if (unlockBike     && r < 0.42) pick = 'bikes';
+    else if (r < 0.62) pick = 'buggy';
+    else if (r < 0.82) pick = 'wreck';
+    else pick = 'barrels';
+  }
 
   if (pick === 'buggy') {
     Game.enemies.push(maybeEliteEnemy({
@@ -2422,6 +2479,39 @@ function spawnEnemy(forceKind, forceElite) {
       vx: 0, vy: 0, hp: 3, fireT: rand(1.4, 2.4),
       stationary: true,
     }, forceElite));
+  } else if (pick === 'drone') {
+    // fast diagonal-strafing flier — bounces between road edges, fires rapid bursts
+    const startSide = Math.random() < 0.5 ? 1 : -1;
+    Game.enemies.push(maybeEliteEnemy({
+      kind: 'drone',
+      x: startSide > 0 ? x0 + margin : x1 - margin,
+      y: -40, w: 28, h: 20,
+      vx: rand(80, 130) * startSide * -1,
+      vy: rand(160, 220) * Math.min(1.3, 1 + (lvlMul-1)*0.15),
+      hp: 1, fireT: rand(0.5, 1.0),
+      burstCount: 0,   // shots remaining in current burst
+      burstT: 0,       // time between burst shots
+    }, forceElite));
+  } else if (pick === 'tank') {
+    // slow heavy armored vehicle — high HP, fires spread shots
+    Game.enemies.push(maybeEliteEnemy({
+      kind: 'tank',
+      x: rand(x0 + margin + 10, x1 - margin - 10),
+      y: -70, w: 52, h: 72,
+      vx: rand(-20, 20),
+      vy: rand(35, 60) * Math.min(1.4, 1 + (lvlMul-1)*0.25),
+      hp: 6, fireT: rand(1.8, 2.8),
+    }, forceElite));
+  } else if (pick === 'civilian') {
+    // innocent civilian car — do NOT hit!
+    const colors = ['#4aa8e8', '#e8c84a', '#4ae870', '#e88a4a', '#c87af0'];
+    Game.obstacles.push({
+      kind: 'civilian',
+      x: rand(x0 + margin, x1 - margin),
+      y: -60, w: 36, h: 54,
+      vy: rand(30, 70),   // their own slower drift speed on top of road scroll
+      color: colors[Math.floor(Math.random() * colors.length)],
+    });
   } else if (pick === 'wreck') {
     Game.obstacles.push({
       kind:'wreck',
@@ -3031,8 +3121,37 @@ function update(dt) {
   // ---- obstacles ----
   for (let i = Game.obstacles.length - 1; i >= 0; i--) {
     const o = Game.obstacles[i];
-    o.y += Game.speed * dt;
+    // civilians drift at their own speed, others scroll with road
+    if (o.kind === 'civilian') {
+      o.y += (Game.speed + (o.vy || 0)) * dt;
+    } else {
+      o.y += Game.speed * dt;
+    }
     if (o.y > H + 80) { Game.obstacles.splice(i,1); continue; }
+
+    if (o.kind === 'civilian') {
+      // bullets hitting a civilian = penalty
+      for (let j = Game.bullets.length - 1; j >= 0; j--) {
+        const b = Game.bullets[j];
+        if (aabb(o, b)) {
+          Game.bullets.splice(j,1);
+          applyCivilianPenalty(o.x, o.y);
+          emit(o.x, o.y, 10, { color: o.color || '#4aa8e8', speed:180, life:0.5, size:3 });
+          Game.obstacles.splice(i,1);
+          break;
+        }
+      }
+      if (!Game.obstacles[i]) continue;
+      // player collision = penalty + slight damage
+      if (aabb(o, Game.player)) {
+        applyCivilianPenalty(o.x, o.y);
+        damagePlayer(20);
+        emit(o.x, o.y, 16, { color: o.color || '#4aa8e8', speed:220, life:0.5, size:3 });
+        Game.obstacles.splice(i,1);
+        Game.shake = Math.max(Game.shake, 0.5);
+      }
+      continue;
+    }
 
     if (o.kind === 'barrel') {
       for (let j = Game.bullets.length - 1; j >= 0; j--) {
@@ -3075,12 +3194,19 @@ function update(dt) {
     } else if (e.kind === 'mortar') {
       // stationary roadside; scrolls with road
       e.y += Game.speed * dt;
+    } else if (e.kind === 'drone') {
+      // fast diagonal flier — bounces off road edges
+      e.y += (e.vy + Game.speed * 0.12) * dt;
+      e.x += e.vx * dt;
+      const { x0:dx0, x1:dx1 } = roadBounds();
+      if (e.x < dx0 + 18) { e.x = dx0 + 18; e.vx = Math.abs(e.vx); }
+      if (e.x > dx1 - 18) { e.x = dx1 - 18; e.vx = -Math.abs(e.vx); }
     } else {
       e.y += (e.vy + Game.speed * 0.15) * dt;
       e.x += e.vx * dt;
     }
-    // road clamp (skipped for mortar which sits off-road)
-    if (e.kind !== 'mortar') {
+    // road clamp (skipped for mortar which sits off-road; drone uses own bounds above)
+    if (e.kind !== 'mortar' && e.kind !== 'drone') {
       const { x0:rx0, x1:rx1 } = roadBounds();
       if (e.x < rx0 + 24) { e.x = rx0 + 24; if (e.vx) e.vx = Math.abs(e.vx); }
       if (e.x > rx1 - 24) { e.x = rx1 - 24; if (e.vx) e.vx = -Math.abs(e.vx); }
@@ -3104,6 +3230,40 @@ function update(dt) {
         // light side-shots
         Game.enemyBullets.push({ x:e.x, y:e.y+12, w:4, h:8, vx: rand(-30,30), vy: 360, dmg: 6 });
         e.fireT = rand(1.4, 2.4);
+      } else if (e.kind === 'drone') {
+        // rapid burst: 3 quick shots toward player
+        const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sp = 400;
+        for (let k = 0; k < 3; k++) {
+          const spread = (k - 1) * 0.12;
+          Game.enemyBullets.push({
+            x: e.x, y: e.y + e.h/2,
+            w: 4, h: 7,
+            vx: (dx/dist + spread) * sp,
+            vy: (dy/dist) * sp,
+            dmg: 5,
+          });
+        }
+        e.fireT = rand(0.7, 1.3);
+      } else if (e.kind === 'tank') {
+        // spread shot: 3 bullets fanned out toward player
+        const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sp = 300;
+        const angles = [-0.22, 0, 0.22];
+        for (const ang of angles) {
+          const cos = Math.cos(ang), sin_ = Math.sin(ang);
+          const nx = dx/dist * cos - dy/dist * sin_;
+          const ny = dx/dist * sin_ + dy/dist * cos;
+          Game.enemyBullets.push({
+            x: e.x, y: e.y + e.h/2,
+            w: 7, h: 12,
+            vx: nx * sp, vy: ny * sp,
+            dmg: 12,
+          });
+        }
+        e.fireT = rand(2.0, 3.2);
       } else {
         const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
         const dist = Math.hypot(dx, dy) || 1;
@@ -3126,17 +3286,20 @@ function update(dt) {
           SFX.explode();
           const isBike = e.kind === 'bike';
           const isMortar = e.kind === 'mortar';
-          const baseScore = (isBike ? ENEMY_SCORE.bike : isMortar ? ENEMY_SCORE.mortar : ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
-          emit(e.x, e.y, isMortar ? 36 : 28, { color:'#ff6a2b', speed:360, life:0.8, size:4 });
+          const isDrone = e.kind === 'drone';
+          const isTank = e.kind === 'tank';
+          const baseScore = (ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
+          const bigExplosion = isMortar || isTank;
+          emit(e.x, e.y, bigExplosion ? 40 : isDrone ? 18 : 28, { color: isDrone ? '#c87af0' : '#ff6a2b', speed:360, life:0.8, size: isDrone ? 3 : 4 });
           emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
-          shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', isMortar ? 110 : 70);
-          if (isMortar) Game.shake = Math.max(Game.shake, 0.7);
+          shockwave(e.x, e.y, isDrone ? 'rgba(200,122,240,0.4)' : 'rgba(255,140,60,0.4)', bigExplosion ? 120 : isDrone ? 50 : 70);
+          if (bigExplosion) Game.shake = Math.max(Game.shake, 0.7);
           else Game.shake = Math.max(Game.shake, 0.5);
           applyKill(e.x, e.y, baseScore);
           // drops
           const dropR = Math.random();
           const salvageBoost = isPowerupActive('salvage') || Game.runMutators.some(m => m.id === 'scavenger');
-          if ((isMortar || e.elite) && dropR < (salvageBoost ? 0.8 : 0.5)) {
+          if ((isMortar || isTank || e.elite) && dropR < (salvageBoost ? 0.8 : 0.5)) {
             Game.pickups.push({ kind:'powerup', power: rollPowerup(), x:e.x, y:e.y, w:26, h:26, t:0 });
           } else if (dropR < (salvageBoost ? 0.7 : 0.4)) {
             Game.pickups.push({ kind:'scrap', x:e.x, y:e.y, w:22, h:22, t:0 });
@@ -3155,15 +3318,15 @@ function update(dt) {
       if (isPowerupActive('shield')) {
         emit(e.x, e.y, 24, { color:'#7aaaff', speed: 280, life: 0.5, size: 3 });
         shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 80);
-        applyKill(e.x, e.y, e.kind === 'bike' ? 200 : 150);
+        applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         Game.enemies.splice(i,1);
         Game.shake = Math.max(Game.shake, 0.5);
       } else if (e.hp <= 0) {
-        applyKill(e.x, e.y, e.kind === 'bike' ? 200 : 150);
+        applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         emit(e.x, e.y, 16, { color:'#ffb36a', speed:280, life:0.5, size:3 });
         Game.enemies.splice(i,1);
       } else {
-        damagePlayer(e.kind === 'bike' ? 28 : 40);
+        damagePlayer(e.kind === 'bike' || e.kind === 'drone' ? 28 : e.kind === 'tank' ? 55 : 40);
         SFX.explode();
         emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
         Game.enemies.splice(i,1);
@@ -3422,7 +3585,7 @@ function splashDamage(x, y, r, dmg) {
       if (e.hp <= 0) {
         SFX.explode();
         emit(e.x, e.y, 22, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
-        applyKill(e.x, e.y, e.kind === 'bike' ? 200 : e.kind === 'mortar' ? 250 : 120);
+        applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 120);
         Game.enemies.splice(i,1);
       }
     }
@@ -3430,7 +3593,11 @@ function splashDamage(x, y, r, dmg) {
   for (let i = Game.obstacles.length - 1; i >= 0; i--) {
     const o = Game.obstacles[i];
     if (!o) continue;
-    if (o.kind === 'barrel' && Math.hypot(o.x - x, o.y - y) < r) {
+    if (o.kind === 'civilian' && Math.hypot(o.x - x, o.y - y) < r) {
+      applyCivilianPenalty(o.x, o.y);
+      emit(o.x, o.y, 10, { color: o.color || '#4aa8e8', speed:180, life:0.5, size:3 });
+      Game.obstacles.splice(i,1);
+    } else if (o.kind === 'barrel' && Math.hypot(o.x - x, o.y - y) < r) {
       emit(o.x, o.y, 18, { color:'#ff8a3d', speed:280, life:0.6, size:4 });
       shockwave(o.x, o.y, 'rgba(255,140,60,0.4)', 70);
       Game.obstacles.splice(i,1);
@@ -3757,12 +3924,52 @@ function drawObstacle(o) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', o.x, o.y);
+  } else if (o.kind === 'civilian') {
+    // Bright, friendly-looking car — clearly NOT an enemy
+    const col = o.color || '#4aa8e8';
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(-o.w/2 + 3, -o.h/2 + 5, o.w, o.h);
+    // body
+    ctx.fillStyle = col;
+    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    // hood highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(-o.w/2 + 3, -o.h/2, o.w - 6, 10);
+    // cab roof
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(-o.w/2 + 5, -o.h/2 + 14, o.w - 10, 18);
+    // windshield (bright blue = civilians going away from player)
+    ctx.fillStyle = 'rgba(180,230,255,0.75)';
+    ctx.fillRect(-o.w/2 + 7, -o.h/2 + 16, o.w - 14, 6);
+    // wheels
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(-o.w/2 - 3, -o.h/2 + 8, 5, 10);
+    ctx.fillRect( o.w/2 - 2, -o.h/2 + 8, 5, 10);
+    ctx.fillRect(-o.w/2 - 3,  o.h/2 - 16, 5, 10);
+    ctx.fillRect( o.w/2 - 2,  o.h/2 - 16, 5, 10);
+    // "CIV" warning badge
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 8px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CIV', 0, 0);
+    // pulsing warning halo
+    const pulse = 0.5 + 0.5 * Math.sin(Game.t * 6);
+    ctx.strokeStyle = `rgba(255,255,100,${0.4 + 0.4 * pulse})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-o.w/2 - 3, -o.h/2 - 3, o.w + 6, o.h + 6);
+    ctx.restore();
   }
 }
 
 function drawEnemy(e) {
   if (e.kind === 'bike')   { drawBike(e);   return; }
   if (e.kind === 'mortar') { drawMortar(e); return; }
+  if (e.kind === 'drone')  { drawDrone(e);  return; }
+  if (e.kind === 'tank')   { drawTank(e);   return; }
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -3870,6 +4077,100 @@ function drawMortar(e) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
     ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
+  }
+  ctx.restore();
+}
+
+function drawDrone(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  // tilt in direction of horizontal travel
+  const tilt = clamp(e.vx / 160, -1, 1) * 0.3;
+  ctx.rotate(tilt);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.ellipse(3, e.h/2 + 2, e.w/2, 4, 0, 0, Math.PI*2); ctx.fill();
+  // wings (angled rects)
+  ctx.fillStyle = '#2a1a40';
+  ctx.beginPath();
+  ctx.moveTo(-e.w/2 - 8, 0);
+  ctx.lineTo(-4, -e.h/4);
+  ctx.lineTo(-4,  e.h/4);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(e.w/2 + 8, 0);
+  ctx.lineTo(4, -e.h/4);
+  ctx.lineTo(4,  e.h/4);
+  ctx.closePath(); ctx.fill();
+  // fuselage body
+  const bg = ctx.createLinearGradient(0, -e.h/2, 0, e.h/2);
+  bg.addColorStop(0, '#4a2870'); bg.addColorStop(0.5, '#6a3a9a'); bg.addColorStop(1, '#4a2870');
+  ctx.fillStyle = bg;
+  ctx.fillRect(-e.w/4, -e.h/2, e.w/2, e.h);
+  // engine glow
+  ctx.fillStyle = 'rgba(200,122,240,0.7)';
+  ctx.beginPath(); ctx.arc(0, e.h/2 - 4, 4, 0, Math.PI*2); ctx.fill();
+  // sensor eye
+  ctx.fillStyle = '#ff40ff';
+  ctx.beginPath(); ctx.arc(0, -e.h/4, 3, 0, Math.PI*2); ctx.fill();
+  if (e.elite) {
+    ctx.strokeStyle = '#ffb36a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-e.w/2 - 10, -e.h/2 - 2, e.w + 20, e.h + 4);
+  }
+  ctx.restore();
+}
+
+function drawTank(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(-e.w/2 + 5, -e.h/2 + 8, e.w, e.h);
+  // tracks (sides)
+  ctx.fillStyle = '#0d0d08';
+  ctx.fillRect(-e.w/2 - 5, -e.h/2 + 6, 8, e.h - 12);
+  ctx.fillRect( e.w/2 - 3, -e.h/2 + 6, 8, e.h - 12);
+  // track links
+  ctx.fillStyle = '#1a1a10';
+  for (let i = 0; i < 5; i++) {
+    const ty = -e.h/2 + 10 + i * 10;
+    ctx.fillRect(-e.w/2 - 5, ty, 8, 2);
+    ctx.fillRect( e.w/2 - 3, ty, 8, 2);
+  }
+  // hull body
+  const hg = ctx.createLinearGradient(-e.w/2, 0, e.w/2, 0);
+  hg.addColorStop(0, '#2a3010'); hg.addColorStop(0.5, '#3a4018'); hg.addColorStop(1, '#2a3010');
+  ctx.fillStyle = hg;
+  ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
+  // armor plates (angled front)
+  ctx.fillStyle = '#1a2008';
+  ctx.beginPath();
+  ctx.moveTo(-e.w/2, e.h/2);
+  ctx.lineTo(0, e.h/2 + 12);
+  ctx.lineTo(e.w/2, e.h/2);
+  ctx.closePath(); ctx.fill();
+  // turret base
+  ctx.fillStyle = '#1a2010';
+  ctx.fillRect(-e.w/4, -e.h/4, e.w/2, e.h/2.2);
+  // turret top (rotated slightly toward player)
+  ctx.fillStyle = '#252c10';
+  ctx.fillRect(-e.w/4 + 2, -e.h/4, e.w/2 - 4, e.h/4);
+  // cannon barrel
+  ctx.fillStyle = '#0d0d08';
+  ctx.fillRect(-3, e.h/4, 6, 18);
+  // muzzle glow when firing
+  if (e.fireT < 0.4) {
+    ctx.fillStyle = 'rgba(255,220,80,0.6)';
+    ctx.beginPath(); ctx.arc(0, e.h/4 + 18, 6, 0, Math.PI*2); ctx.fill();
+  }
+  // hatch
+  ctx.fillStyle = '#3a4020';
+  ctx.beginPath(); ctx.arc(-e.w/4 + 8, -e.h/4 + 6, 5, 0, Math.PI*2); ctx.fill();
+  if (e.elite) {
+    ctx.strokeStyle = '#ffb36a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
   }
   ctx.restore();
 }
