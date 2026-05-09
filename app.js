@@ -1514,9 +1514,21 @@ if (window.visualViewport) {
 // AUDIO
 // ============================================================
 let audioCtx = null;
+const GUNSHOT_PITCH_JITTER_RANGE = 32;
+const gunshotCrackBufferCache = new Map();
 function ensureAudio() {
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+}
+function getGunshotCrackBuffer(length) {
+  if (!audioCtx || length <= 0) return null;
+  let buf = gunshotCrackBufferCache.get(length);
+  if (buf) return buf;
+  buf = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  gunshotCrackBufferCache.set(length, buf);
+  return buf;
 }
 function blip(freq, dur, type='square', vol=0.08, slide=0) {
   if (!audioCtx) return;
@@ -1554,7 +1566,7 @@ function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
   const outVol = vol * Settings.master * Settings.sfx;
   if (outVol <= 0.0001) return;
   const t = audioCtx.currentTime;
-  const pitchJitter = (Math.random() - 0.5) * 32;
+  const pitchJitter = (Math.random() - 0.5) * GUNSHOT_PITCH_JITTER_RANGE;
 
   const out = audioCtx.createGain();
   out.gain.setValueAtTime(outVol, t);
@@ -1584,9 +1596,9 @@ function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
   snap.stop(t + dur * 0.35);
 
   const crackDur = Math.max(0.014, dur * 0.35);
-  const crackBuf = audioCtx.createBuffer(1, Math.max(1, Math.floor(audioCtx.sampleRate * crackDur)), audioCtx.sampleRate);
-  const crackData = crackBuf.getChannelData(0);
-  for (let i = 0; i < crackData.length; i++) crackData[i] = (Math.random() * 2 - 1) * (1 - i / crackData.length);
+  const crackSamples = Math.max(1, Math.floor(audioCtx.sampleRate * crackDur));
+  const crackBuf = getGunshotCrackBuffer(crackSamples);
+  if (!crackBuf) return;
   const crack = audioCtx.createBufferSource();
   crack.buffer = crackBuf;
   const crackFilter = audioCtx.createBiquadFilter();
