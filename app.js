@@ -4478,12 +4478,19 @@ const UI = {
       const fireN  = norm(1 / stats.fireRate, 11);
       const dmgN   = norm(stats.dmg * stats.guns, 4);
 
+      const tierCount = totalUpgradeTiers(p.vehicleUpgrades[v.id]);
+      const branchDef = p.vehicleBranches && p.vehicleBranches[v.id]
+        ? getVehicleBranchDef(v.id, p.vehicleBranches[v.id]) : null;
+      const tierBadgeHtml = owned
+        ? '<div class="vt-tier-badge">' + tierCount + '/20 TIERS' + (branchDef ? ' · ' + branchDef.name : '') + '</div>'
+        : '';
+
       tile.innerHTML = `
         <div class="vt-head">
           <div>
             <div class="vt-name">${v.name}${selected ? ' ◀' : ''}</div>
             <div class="vt-cost">${owned ? (selected ? 'EQUIPPED' : 'OWNED') : 'COST <b>' + v.cost + '</b> SCRAP'}</div>
-            ${owned ? '<div class="vt-tier-badge">' + totalUpgradeTiers(p.vehicleUpgrades[v.id]) + '/20 TIERS' + (p.vehicleBranches && p.vehicleBranches[v.id] ? ' · ' + (getVehicleBranchDef(v.id, p.vehicleBranches[v.id]) || {name:''}).name : '') + '</div>' : ''}
+            ${tierBadgeHtml}
           </div>
         </div>
         <div class="vt-preview"><canvas></canvas></div>
@@ -4596,7 +4603,7 @@ const UI = {
         const todayBest = (p.dailyBest && p.dailyBest[today]) || 0;
         // hours until UTC midnight reset
         const now = new Date();
-        const msLeft = new Date(now.toISOString().slice(0,10) + 'T23:59:59.999Z').getTime() - now.getTime() + 1000;
+        const msLeft = new Date(now.toISOString().slice(0,10) + 'T23:59:59.999Z').getTime() - now.getTime();
         const hLeft = Math.ceil(msLeft / 3600000);
         if (todayBest > 0)
           bestLabel = 'TODAY <b>' + todayBest + '</b> · RESETS IN ' + hLeft + 'H';
@@ -4672,8 +4679,9 @@ const UI = {
       (s, ups) => s + (ups.engine||0) + (ups.plating||0) + (ups.weapons||0) + (ups.reactor||0), 0);
     const today = todaySeedString();
     const todayBest = (p.dailyBest && p.dailyBest[today]) || 0;
-    const bestDistance = p.bestDistance >= 1000
-      ? (p.bestDistance / 1000).toFixed(1) + ' KM'
+    const METERS_PER_KM = 1000;
+    const bestDistance = p.bestDistance >= METERS_PER_KM
+      ? (p.bestDistance / METERS_PER_KM).toFixed(1) + ' KM'
       : p.bestDistance + ' M';
     const rows = [
       ['CREATED', created],
