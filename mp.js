@@ -56,6 +56,36 @@
     emit('status', { code, detail: detail || '' });
   }
 
+  function normalizeWebSocketUrl(raw) {
+    const value = String(raw == null ? '' : raw).trim();
+    if (!value) return '';
+    let candidate = value;
+    const schemeMatch = /^([a-z][a-z0-9+.-]*):\/\//i.exec(candidate);
+    if (schemeMatch) {
+      const scheme = schemeMatch[1].toLowerCase();
+      if (scheme === 'http' || scheme === 'https') {
+        candidate = candidate.replace(/^[a-z][a-z0-9+.-]*/i, scheme === 'https' ? 'wss' : 'ws');
+      }
+    // If the user enters only host[:port][/optional-path], infer ws/wss from page protocol.
+    } else {
+      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+      if (candidate.startsWith('/')) {
+        candidate = `${proto}${location.host}${candidate}`;
+      } else {
+        candidate = `${proto}${candidate}`;
+      }
+    }
+    try {
+      const u = new URL(candidate, location.href);
+      if (u.protocol !== 'ws:' && u.protocol !== 'wss:') return '';
+      // Mojave Run's relay endpoint is fixed at /ws. Treat empty/root paths as shorthand.
+      const pathname = u.pathname === '/' ? '/ws' : u.pathname;
+      return `${u.protocol}//${u.host}${pathname}${u.search}${u.hash}`;
+    } catch (_err) {
+      return '';
+    }
+  }
+
   function defaultUrl() {
     // Priority order:
     //   1. window.MP_DEFAULT_URL (lets a build/host inject it at runtime)
@@ -65,7 +95,8 @@
     const metaEl = document.querySelector('meta[name="mp-server-url"]');
     const fromMeta = (metaEl && metaEl.content && metaEl.content.trim()) || '';
     const configured = fromWindow || fromMeta;
-    if (configured) return configured;
+    const normalized = normalizeWebSocketUrl(configured);
+    if (normalized) return normalized;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}/ws`;
   }
@@ -269,7 +300,7 @@
     MP.name = (name || 'DRIVER').slice(0, 14);
     MP.vehicleId = vehicleId || 'rust';
     if (color) MP.color = color;
-    MP.url = url || defaultUrl();
+    MP.url = normalizeWebSocketUrl(url || '') || defaultUrl();
     MP._wantConnected = true;
     MP._reconnectAttempts = 0;
     setStatus('connecting', `RAISING THE ANTENNA…`);
