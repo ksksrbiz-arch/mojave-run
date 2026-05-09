@@ -289,6 +289,7 @@ cvs.addEventListener('pointerdown', e=>{
   const r=cvs.getBoundingClientRect();
   Input.x = (e.clientX - r.left) * (W/r.width);
   Input.lastX = Input.x;
+  Input.dx = 0;
 });
 cvs.addEventListener('pointermove', e=>{
   if(!Input.down) return;
@@ -406,10 +407,10 @@ class Player{
     this.specialMaxCd = 8;
   }
   update(dt){
-    // Steering: hold-anywhere drag toward x; relative dx influences too
+    // Steering: touch input should closely track the held pointer position
     if(Input.down && Input.x!=null){
       const target = clamp(Input.x, 100, W-100);
-      this.vx += (target - this.x) * 4 * dt;
+      this.x += (target - this.x) * Math.min(1, dt * (14 + this.spd * 2));
     }
     if(Input.keys['ArrowLeft']||Input.keys['a']) this.vx -= 1200*dt;
     if(Input.keys['ArrowRight']||Input.keys['d']) this.vx += 1200*dt;
