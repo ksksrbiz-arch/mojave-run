@@ -4,14 +4,14 @@ A wasteland arcade driver. Survive the Mojave.
 
 🎮 **Live:** https://mojave-run.netlify.app
 
-Mobile-first browser game. Zero deps, zero build, zero backend. Single-page app, ~80KB JS.
+Mobile-first browser game. Zero build for the client, with an optional Node relay for multiplayer ghost co-op.
 
 ## Features
 
 - **Driver profiles** — up to 6 named drivers per device, persistent locally
 - **7 vehicles** — Rust Bucket / Junker / Roadrunner / Goliath / Phantom / Sand Viper / Ironclad — each with unique stats
 - **4 upgrade tracks × 5 tiers + specialization branches** — Engine, Plating, Weapons, Reactor plus unlockable per-vehicle build branches
-- **5 modes** — Classic (endless), Gauntlet (18 tiered sectors with 5 bosses), Time Attack (60s frenzy), **Daily Challenge** (seeded run, same world for everyone, shareable score), Boss Rush (5 chained bosses)
+- **7 modes** — Classic (endless), Campaign (18-location story road trip), Gauntlet (18 tiered sectors with 5 bosses), Time Attack (60s frenzy), **Daily Challenge** (seeded run, same world for everyone, shareable score), Boss Rush (5 chained bosses), Zombie Horde
 - **18-level Gauntlet** — survive / kill / distance / boss objectives across multiple biome maps
 - **5 boss tiers** — Alpha Raider, Twin Demons, The Overlord, Warlord Titan, The Chimera — each with unique attack patterns and enrage at 30% HP
 - **Biome map themes** — Wastes, Salt Flats, Ash Fields, Red Canyon, Midnight Rift with distinct visual palettes
