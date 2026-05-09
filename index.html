@@ -260,9 +260,13 @@ window.addEventListener('resize', fit); fit();
 
 // ---------- WebGL presentation layer -----------------------------------
 const WebGLFX = (() => {
+  const MIN_SPEED_FACTOR = 0.3;
+  const MAX_SPEED_FACTOR = 1.8;
+  const SPEED_DIVISOR = 700;
   const gl = glCvs.getContext('webgl', {alpha:true, antialias:false});
   if(!gl){
     glCvs.style.display = 'none';
+    console.info('WebGL effects unavailable; Mojave Run is continuing with the HTML5 canvas renderer.');
     return {ok:false, render(){}};
   }
   const vert = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
@@ -319,7 +323,7 @@ const WebGLFX = (() => {
       gl.enableVertexAttribArray(locP);
       gl.vertexAttribPointer(locP, 2, gl.FLOAT, false, 0, 0);
       gl.uniform1f(locT, performance.now()*0.001);
-      gl.uniform1f(locSpeed, Math.max(0.3, Math.min(1.8, speedValue/700)));
+      gl.uniform1f(locSpeed, Math.max(MIN_SPEED_FACTOR, Math.min(MAX_SPEED_FACTOR, speedValue/SPEED_DIVISOR)));
       gl.uniform1f(locZombie, zombieValue ? 1 : 0);
       gl.uniform2f(locRes, glCvs.width, glCvs.height);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -471,7 +475,12 @@ function burst(x,y,n,col,spd=200,life=0.5,size=4,grav=0){
 // ---------- Decals (blood / oil on road) -------------------------------
 const Decals = [];
 const MARK_COLORS = {zombie:'#5a0808', oil:'#111', spark:'#ffaa44', fire:'#ffcc66'};
-function decal(x,y,r,col=MARK_COLORS.zombie){ Decals.push({x,y,r,t:6,col}); if(Decals.length>40) Decals.shift(); }
+const DECAL_DECAY_TIME = 6;
+const MAX_DECALS = 40;
+function decal(x,y,r,col=MARK_COLORS.zombie){
+  Decals.push({x,y,r,t:DECAL_DECAY_TIME,col});
+  if(Decals.length>MAX_DECALS) Decals.shift();
+}
 
 // ---------- Game state -----------------------------------------------
 const Game = {
@@ -837,8 +846,10 @@ class Zombie{
   }
   hit(d){
     this.hp -= d;
-    burst(this.x,this.y,4,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.spark,180,0.4,3);
-    decal(this.x,this.y,8,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.oil);
+    const hitCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.spark;
+    const markCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.oil;
+    burst(this.x,this.y,4,hitCol,180,0.4,3);
+    decal(this.x,this.y,8,markCol);
     if(this.hp<=0){ this.kill(true); }
   }
   kill(byShot){
@@ -861,8 +872,10 @@ class Zombie{
       if(Game.boss===this) Game.boss=null;
     }
     if(Math.random()<(this.t.boss?1.0:0.3)) Game.pickups.push(makePickup(this.x,this.y));
-    burst(this.x,this.y,16,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.fire,300,0.6,4,400);
-    decal(this.x,this.y,16,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.oil);
+    const killCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.fire;
+    const markCol = this.isZombie ? MARK_COLORS.zombie : MARK_COLORS.oil;
+    burst(this.x,this.y,16,killCol,300,0.6,4,400);
+    decal(this.x,this.y,16,markCol);
     if(this.t.explosive){
       Audio.explode(); Game.shake=Math.max(Game.shake,20);
       burst(this.x,this.y,40,'#ffaa44',500,0.8,5);
@@ -1351,7 +1364,7 @@ function draw(){
   drawRoad(ctx, night);
   // decals (blood)
   for(const d of Decals){
-    ctx.globalAlpha = clamp(d.t/6,0,1)*0.6;
+    ctx.globalAlpha = clamp(d.t/DECAL_DECAY_TIME,0,1)*0.6;
     ctx.fillStyle = d.col || '#5a0808';
     ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,Math.PI*2); ctx.fill();
   }
