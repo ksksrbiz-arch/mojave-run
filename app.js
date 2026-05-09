@@ -1081,12 +1081,14 @@ let W = 0, H = 0, DPR = 1;
 const DPR_CAP = IS_MOBILE ? 1.5 : 2;
 const MIN_RENDER_SCALE = IS_MOBILE ? 0.7 : 0.85;
 const MIN_DPR = IS_MOBILE ? 0.75 : 1;
+const SCALE_PENALTY_LOW_MEMORY = 0.15;
+const SCALE_PENALTY_LOW_CORES = 0.1;
 let renderScale = (() => {
   let scale = IS_MOBILE ? 0.95 : 1;
   const mem = Number(navigator.deviceMemory || 0);
   const cores = Number(navigator.hardwareConcurrency || 0);
-  if (mem && mem <= 2) scale -= 0.15;
-  if (cores && cores <= 4) scale -= 0.1;
+  if (mem && mem <= 2) scale -= SCALE_PENALTY_LOW_MEMORY;
+  if (cores && cores <= 4) scale -= SCALE_PENALTY_LOW_CORES;
   return Math.min(1, Math.max(MIN_RENDER_SCALE, scale));
 })();
 let _resizeRaf = 0;
@@ -5130,6 +5132,13 @@ const PerfMon = {
 
 const QUALITY_PRESETS = { low: 0, medium: 0.5, high: 1 };
 const QUALITY_KEY = 'mojaverun.quality.v1';
+const SCALE_ADJUST_INTERVAL_MS = 1200;
+const SCALE_THRESHOLD_SEVERE_MS = 28;
+const SCALE_THRESHOLD_HIGH_MS = 22;
+const SCALE_THRESHOLD_RECOVER_MS = 13;
+const SCALE_STEP_DOWN_SEVERE = 0.12;
+const SCALE_STEP_DOWN = 0.06;
+const SCALE_STEP_UP = 0.04;
 const DEBUG_HUD = (() => {
   try {
     const p = new URLSearchParams(window.location.search);
@@ -5246,15 +5255,15 @@ function frame(now) {
   // Adaptive render scale: changes canvas pixel density (not gameplay logic)
   // so low-end phones/tablets can stay smooth while high-end devices regain
   // sharpness when there's headroom.
-  if (now - PerfMon.lastScaleAdjustAt > 1200) {
+  if (now - PerfMon.lastScaleAdjustAt > SCALE_ADJUST_INTERVAL_MS) {
     PerfMon.lastScaleAdjustAt = now;
     const prev = renderScale;
-    if (PerfMon.ewmaMs > 28 && renderScale > MIN_RENDER_SCALE) {
-      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.12);
-    } else if (PerfMon.ewmaMs > 22 && renderScale > MIN_RENDER_SCALE) {
-      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.06);
-    } else if (PerfMon.ewmaMs < 13 && renderScale < 1) {
-      renderScale = Math.min(1, renderScale + 0.04);
+    if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS && renderScale > MIN_RENDER_SCALE) {
+      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN_SEVERE);
+    } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS && renderScale > MIN_RENDER_SCALE) {
+      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN);
+    } else if (PerfMon.ewmaMs < SCALE_THRESHOLD_RECOVER_MS && renderScale < 1) {
+      renderScale = Math.min(1, renderScale + SCALE_STEP_UP);
     }
     if (Math.abs(renderScale - prev) > 0.001) resize();
   }
