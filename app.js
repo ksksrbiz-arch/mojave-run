@@ -690,8 +690,8 @@ const CHARACTERS = [
   {
     id: 'opal',
     name: 'OPAL',
-    title: 'THE IRONHEART',
-    bio: 'Quick on the trigger, quicker on the throttle. Buried more raiders than the dust storms have. Drives like she owes the devil money.',
+    title: 'THE CIVILIAN DESTROYER',
+    bio: 'No badge, no banner, no rules of engagement — just a flatbed full of grudges. The Mojave learned to clear the road when her headlights crested the dunes.',
     perk: '+5% STARTING SCRAP',
     palette: { skin:'#c89770', skinDark:'#7a4a2a', hair:'#1a0f08', hairHi:'#3a230f', accent:'#ff5050', cloth:'#5a2a18', metal:'#a86a2e', bg1:'#3a1410', bg2:'#1a0808' },
   },
