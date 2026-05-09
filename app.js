@@ -1,1 +1,5 @@
-[PHASE 1 ZOMBIE WASTELAND: Added ZOMBIE_MODE logic, unlock check, basic zombie enemy types, wave spawning system, and exclusive power-ups. Clean, non-breaking addition to existing codebase.]
+'use strict';
+
+if (typeof window !== 'undefined') {
+  window.MOJAVE_RUN_ENTRY = 'index-inline';
+}
