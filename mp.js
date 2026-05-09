@@ -56,7 +56,7 @@
     emit('status', { code, detail: detail || '' });
   }
 
-  function normalizeWsUrl(raw) {
+  function normalizeWebSocketUrl(raw) {
     const value = String(raw == null ? '' : raw).trim();
     if (!value) return '';
     let candidate = value;
@@ -75,7 +75,7 @@
       if (u.protocol !== 'ws:' && u.protocol !== 'wss:') return '';
       const pathname = (!u.pathname || u.pathname === '/') ? '/ws' : u.pathname;
       return `${u.protocol}//${u.host}${pathname}${u.search}${u.hash}`;
-    } catch (_) {
+    } catch (_err) {
       return '';
     }
   }
@@ -89,7 +89,7 @@
     const metaEl = document.querySelector('meta[name="mp-server-url"]');
     const fromMeta = (metaEl && metaEl.content && metaEl.content.trim()) || '';
     const configured = fromWindow || fromMeta;
-    const normalized = normalizeWsUrl(configured);
+    const normalized = normalizeWebSocketUrl(configured);
     if (normalized) return normalized;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}/ws`;
@@ -294,7 +294,7 @@
     MP.name = (name || 'DRIVER').slice(0, 14);
     MP.vehicleId = vehicleId || 'rust';
     if (color) MP.color = color;
-    MP.url = normalizeWsUrl(url || '') || defaultUrl();
+    MP.url = normalizeWebSocketUrl(url || '') || defaultUrl();
     MP._wantConnected = true;
     MP._reconnectAttempts = 0;
     setStatus('connecting', `RAISING THE ANTENNA…`);
