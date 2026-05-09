@@ -415,7 +415,8 @@ class Player{
     if(Input.down && Input.x!=null){
       const target = clamp(Input.x, 100, W-100);
       const steerDelta = clamp(target - this.x, -TOUCH_STEER_DELTA_CAP, TOUCH_STEER_DELTA_CAP);
-      const targetVx = steerDelta * (TOUCH_STEER_SPEED + this.spd * TOUCH_STEER_ENGINE_BONUS);
+      const touchSpeedGain = TOUCH_STEER_SPEED + this.spd * TOUCH_STEER_ENGINE_BONUS;
+      const targetVx = steerDelta * touchSpeedGain; // px/s target from horizontal pointer distance
       const touchFollow = 1 - Math.exp(-dt * TOUCH_STEER_RESPONSE);
       this.vx += (targetVx - this.vx) * touchFollow;
     }
