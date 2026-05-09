@@ -125,7 +125,7 @@
   <div class="toast" id="toast"></div>
 
   <div class="overlay" id="menuTitle">
-    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · DESERT RUN</span></div>
+    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · CLASSIC RUN</span></div>
     <div class="subtitle">Race the Mojave, clear campaign sectors, and upgrade your Rust Bucket.<br><b>Zombie Wasteland unlocks mid-campaign.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
@@ -561,20 +561,24 @@ const MOLOTOV_DAMAGE         = 70;  // damage dealt to zombies in radius
 const ZOMBIE_POWERUPS = ['chainsaw','molotov'];
 const ZOMBIE_OBJECTIVES = ['survive_horde','kill_tank'];
 
+function getClearedCampaignSectors(){
+  return Math.max(0, SAVE.gauntletProgress - 1);
+}
+
 function isZombieUnlocked(){
-  return (SAVE.gauntletProgress - 1) >= ZOMBIE_UNLOCK_SECTORS;
+  return getClearedCampaignSectors() >= ZOMBIE_UNLOCK_SECTORS;
 }
 
 function updateZombieMenuBtn(){
   const btn = document.getElementById('zombieBtn'); if(!btn) return;
-  const cleared = Math.max(0, SAVE.gauntletProgress - 1);
+  const cleared = getClearedCampaignSectors();
   if(isZombieUnlocked()){
     btn.innerHTML = 'ZOMBIE WASTELAND';
     btn.style.opacity = ''; btn.style.borderColor = 'var(--blood)';
     btn.classList.remove('primary');
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — unlocked');
   } else {
-    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks after '+ZOMBIE_UNLOCK_SECTORS+'/12 Campaign Sectors ('+cleared+'/'+ZOMBIE_UNLOCK_SECTORS+')</span>';
+    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks after '+ZOMBIE_UNLOCK_SECTORS+'/'+SECTORS.length+' Campaign Sectors ('+cleared+'/'+ZOMBIE_UNLOCK_SECTORS+')</span>';
     btn.style.opacity = '0.75'; btn.style.borderColor = '';
     btn.classList.remove('primary');
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — locked. Complete '+ZOMBIE_UNLOCK_SECTORS+' campaign sectors to unlock. Progress: '+cleared+' of '+ZOMBIE_UNLOCK_SECTORS);
@@ -1305,11 +1309,15 @@ function hudShow(on){
     if(wr) wr.classList.add('hidden');
   }
 }
+function zombieSpecialText(){
+  if(Game.chainsawT > 0) return 'CHAINSAW '+Math.ceil(Game.chainsawT)+'s';
+  return '—';
+}
 function updateHud(){
   const p = Game.player;
   hud.hp.style.width = Math.max(0,(p.hp/p.maxHp)*100)+'%';
   hud.scrap.textContent = Game.scrap;
-  hud.special.textContent = Game.modeName==='zombiewasteland' ? (Game.chainsawT>0?'CHAINSAW '+Math.ceil(Game.chainsawT)+'s':'—') : specialName(p.special);
+  hud.special.textContent = Game.modeName==='zombiewasteland' ? zombieSpecialText() : specialName(p.special);
   hud.score.textContent = Game.score;
   hud.sector.textContent = Game.modeName==='zombiewasteland' ? '—' : Game.sector;
   hud.kill.textContent = Game.kills;
@@ -1328,7 +1336,7 @@ function updateHud(){
     hud.specialBtn.textContent = nitroButtonLabel(p);
     hud.specialBtn.disabled = p.specialCd>0;
   } else {
-    hud.specialBtn.textContent = Game.modeName==='zombiewasteland' ? 'ZOMBIE' : specialName(p.special);
+    hud.specialBtn.textContent = Game.modeName==='zombiewasteland' ? 'ZOMBIE MODE' : specialName(p.special);
     hud.specialBtn.disabled = true;
   }
   // combo
@@ -1403,7 +1411,7 @@ document.addEventListener('click', e=>{
   // === ZOMBIE WASTELAND unlock check ===
   else if(act==='zombie'){
     if(!isZombieUnlocked()){
-      const cleared = Math.max(0, SAVE.gauntletProgress - 1);
+      const cleared = getClearedCampaignSectors();
       toast('COMPLETE '+(ZOMBIE_UNLOCK_SECTORS-cleared)+' MORE CAMPAIGN SECTORS TO UNLOCK');
       return;
     }
@@ -1511,12 +1519,12 @@ function renderStats(){
     'TOTAL KILLS <b>'+SAVE.totalKills+'</b><br>'+
     'TOTAL DISTANCE <b>'+Math.floor(SAVE.totalDist)+'M</b><br>'+
     'BEST SECTOR <b>'+SAVE.bestSector+'</b><br>'+
-    'CAMPAIGN PROGRESS <b>'+(SAVE.gauntletProgress-1)+'/'+SECTORS.length+'</b><br>'+
+    'CAMPAIGN PROGRESS <b>'+getClearedCampaignSectors()+'/'+SECTORS.length+'</b><br>'+
     'DRIVERS <b>'+SAVE.drivers.length+'</b><br>'+
     '— ZOMBIE WASTELAND —<br>'+
     'BEST WAVE <b>'+(SAVE.zombieBestWave||0)+'</b><br>'+
     'ZOMBIE HI-SCORE <b>'+(SAVE.zombieHi||0)+'</b><br>'+
-    'UNLOCKED <b>'+(isZombieUnlocked()?'YES':'NO — '+Math.max(0,SAVE.gauntletProgress-1)+'/'+ZOMBIE_UNLOCK_SECTORS+' SECTORS')+'</b>';
+    'UNLOCKED <b>'+(isZombieUnlocked()?'YES':'NO — '+getClearedCampaignSectors()+'/'+ZOMBIE_UNLOCK_SECTORS+' SECTORS')+'</b>';
 }
 
 // ---------- MP UI ----------------------------------------------------
