@@ -367,6 +367,26 @@
   .vehicle-tile .vt-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;letter-spacing:1px;color:var(--gold-dim)}
   .vehicle-tile .vt-stats div{display:flex;justify-content:space-between}
   .vehicle-tile .vt-stats b{color:var(--gold);font-weight:normal}
+  .garage-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .garage-tab{
+    min-height:38px;padding:8px 6px;font-size:10px;letter-spacing:1px;
+  }
+  .garage-tab.active{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+  .cosmetic-card{
+    background:rgba(0,0,0,.45);
+    border:1px solid var(--gold-faint);
+    border-radius:6px;
+    padding:12px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .cosmetic-card.equipped{border-color:var(--gold);background:rgba(245,215,110,.06)}
+  .cosmetic-card.locked{opacity:.55}
+  .cosmetic-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+  .cosmetic-name{font-size:13px;font-weight:bold;letter-spacing:1.5px}
+  .cosmetic-state{font-size:9px;letter-spacing:1px;color:var(--gold-dim);text-align:right}
+  .cosmetic-desc{font-size:10px;color:var(--gold-dim);letter-spacing:.8px;line-height:1.4}
+  .cosmetic-swatch{height:22px;border-radius:3px;border:1px solid var(--gold-faint);background:rgba(0,0,0,.4);overflow:hidden}
+  .cosmetic-swatch span{display:block;height:100%}
 
   .stat-bar{
     display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:1px;
@@ -788,7 +808,14 @@
         <div class="name">GARAGE</div>
         <div class="scrap">SCRAP <b id="garage-scrap">0</b></div>
       </div>
+      <div class="garage-tabs">
+        <button class="btn garage-tab" data-garage-tab="vehicles">RIDES</button>
+        <button class="btn garage-tab" data-garage-tab="paint">PAINT</button>
+        <button class="btn garage-tab" data-garage-tab="trail">TRAIL</button>
+        <button class="btn garage-tab" data-garage-tab="horn">HORN</button>
+      </div>
       <div id="vehicle-list" style="display:flex;flex-direction:column;gap:12px"></div>
+      <div id="cosmetic-list" style="display:none;flex-direction:column;gap:10px"></div>
       <div style="height:8px"></div>
       <button class="btn" data-act="back-menu">◄ BACK TO MENU</button>
     </div>
