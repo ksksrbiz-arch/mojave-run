@@ -269,46 +269,28 @@ const MODES = [
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
   { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
-  { id: 'zombie',     name: 'ZOMBIE HORDE',     desc: 'The dead walk the Mojave. No bullets — just claws, teeth, and numbers. Survive the endless shamble.' },
-];
-
-// Zombie enemy definitions for ZOMBIE HORDE mode
-const ZOMBIE_DEFS = [
-  { id:'walker',  w:20, h:30, hp:2, vy:42,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10' },
-  { id:'runner',  w:16, h:26, hp:1, vy:90,  vxRange:36, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410' },
-  { id:'bruiser', w:32, h:38, hp:5, vy:26,  vxRange:8,  contact:22, score:220, color:'#4a3828', goreColor:'#3a2818', accent:'#1a1210' },
-];
-
-// Story chapters shown during classic mode as milestones
-const STORY_CHAPTERS = [
-  { distance: 0,     title: 'THE LAST ROAD',    text: 'The Mojave never forgave anyone who stopped moving. You keep driving.' },
-  { distance: 2000,  title: 'PAST THE WIRE',    text: 'The old checkpoints are gone. Past here the law gave up. You didn\'t.' },
-  { distance: 5000,  title: 'DEAD RECKONING',   text: 'Fuel\'s getting low but the raiders are thicker. Kill more. Take theirs.' },
-  { distance: 9000,  title: 'THE HOLLOW MILES', text: 'Three hundred kilometers of nothing but heat and the dead. You\'ve driven every one.' },
-  { distance: 14000, title: 'VOID REACH',        text: 'No signal. No signs. Just the engine and whatever comes over the hill.' },
-  { distance: 20000, title: 'LEGEND',            text: 'They\'ll carve your name on the mile markers. If anyone\'s left to do the carving.' },
 ];
 
 // 18 gauntlet levels. obj: 'survive' (seconds), 'kills' (count), 'distance' (meters), 'boss' (boss tier)
 const LEVELS = [
-  { num:1,  name:'OUTSKIRTS',       obj:'survive',  target:30,   reward:75,   diff:1.0,  map:'wastes',    story:'The highway out of the settlement is already burning. You don\'t look back.' },
-  { num:2,  name:'BROKEN HIGHWAY',  obj:'kills',    target:8,    reward:100,  diff:1.1,  map:'wastes',    story:'Raider scouts have been tracking your dust trail for two days. Time to thin the pack.' },
-  { num:3,  name:'DUST FIELDS',     obj:'distance', target:1500, reward:125,  diff:1.2,  map:'wastes',    story:'The flats stretch forever. Nothing to do but drive and let the engine decide who lives.' },
-  { num:4,  name:'ALPHA RAIDER',    obj:'boss',     target:1,    reward:300,  diff:1.4,  boss:1, map:'wastes',    story:'They say the Alpha Raider controls every pass west of the ridge. They say wrong.' },
-  { num:5,  name:'SCORCHED FLATS',  obj:'survive',  target:45,   reward:175,  diff:1.5,  map:'saltflats', story:'Salt and bone. The Scorched Flats have swallowed whole convoys. You keep your foot down.' },
-  { num:6,  name:'CANYON RUN',      obj:'kills',    target:14,   reward:225,  diff:1.7,  map:'saltflats', story:'Canyon walls funnel traffic into kill zones. The gangs know this. Now so do you.' },
-  { num:7,  name:'THE BONEYARD',    obj:'distance', target:2500, reward:275,  diff:1.9,  map:'saltflats', story:'Thousands of rusted hulks mark the miles. You navigate the maze they left behind.' },
-  { num:8,  name:'TWIN DEMONS',     obj:'boss',     target:1,    reward:500,  diff:2.1,  boss:2, map:'saltflats', story:'The Twin Demons operate in sync — no one survives taking both on. Until now.' },
-  { num:9,  name:'NIGHT WATCH',     obj:'survive',  target:60,   reward:325,  diff:2.3,  map:'ash', night:true,  story:'In the ash sector darkness is their weapon. Your headlights make you a target. Drive anyway.' },
-  { num:10, name:'STORM FRONT',     obj:'kills',    target:22,   reward:425,  diff:2.6,  map:'ash', storm:true,  story:'The storm rolled in off the Deadlands. The raiders use it for cover. So will you.' },
-  { num:11, name:'DEAD ZONE',       obj:'distance', target:3500, reward:550,  diff:3.0,  map:'ash', night:true, storm:true, story:'Forty kilometers of dead air and dead men. Your radio went silent three sectors back. Keep driving.' },
-  { num:12, name:'THE OVERLORD',    obj:'boss',     target:1,    reward:1500, diff:3.5,  boss:3, map:'ash', night:true, story:'The Overlord hasn\'t lost a road fight in six years. The highway is watching.' },
-  { num:13, name:'SUNSCAR BASIN',   obj:'survive',  target:70,   reward:650,  diff:3.7,  map:'redcanyon', storm:true, story:'The Basin burns red at noon and blood-black by dusk. The canyon walls trap sound. And screaming.' },
-  { num:14, name:'IRON SPINE',      obj:'kills',    target:30,   reward:760,  diff:4.0,  map:'redcanyon', night:true, story:'The Iron Spine corridor: a hundred kilometers of ambush points. You stop counting kills.' },
-  { num:15, name:'RAVEN CHASM',     obj:'distance', target:4600, reward:900,  diff:4.4,  map:'redcanyon', night:true, storm:true, story:'The Chasm drops four hundred meters on both sides. One slip and even the ravens won\'t find you.' },
-  { num:16, name:'WARLORD TITAN',   obj:'boss',     target:1,    reward:1900, diff:4.8,  boss:4, map:'redcanyon', storm:true, story:'The Titan commands three hundred fighters and seventeen armored vehicles. He commands them from the front.' },
-  { num:17, name:'VOID MILE',       obj:'survive',  target:85,   reward:1150, diff:5.2,  map:'midnight', night:true, storm:true, story:'The Void Mile. No maps. No signals. The last driver who came through left their boots on the median.' },
-  { num:18, name:'THE CHIMERA',     obj:'boss',     target:1,    reward:3000, diff:6.0,  boss:5, map:'midnight', night:true, storm:true, story:'Endpoint. The Chimera is what the Mojave dreamed up when it got tired of killing people slowly.' },
+  { num:1,  name:'OUTSKIRTS',       obj:'survive',  target:30,   reward:75,   diff:1.0,  map:'wastes' },
+  { num:2,  name:'BROKEN HIGHWAY',  obj:'kills',    target:8,    reward:100,  diff:1.1,  map:'wastes' },
+  { num:3,  name:'DUST FIELDS',     obj:'distance', target:1500, reward:125,  diff:1.2,  map:'wastes' },
+  { num:4,  name:'ALPHA RAIDER',    obj:'boss',     target:1,    reward:300,  diff:1.4,  boss:1, map:'wastes' },
+  { num:5,  name:'SCORCHED FLATS',  obj:'survive',  target:45,   reward:175,  diff:1.5,  map:'saltflats' },
+  { num:6,  name:'CANYON RUN',      obj:'kills',    target:14,   reward:225,  diff:1.7,  map:'saltflats' },
+  { num:7,  name:'THE BONEYARD',    obj:'distance', target:2500, reward:275,  diff:1.9,  map:'saltflats' },
+  { num:8,  name:'TWIN DEMONS',     obj:'boss',     target:1,    reward:500,  diff:2.1,  boss:2, map:'saltflats' },
+  { num:9,  name:'NIGHT WATCH',     obj:'survive',  target:60,   reward:325,  diff:2.3,  map:'ash', night:true },
+  { num:10, name:'STORM FRONT',     obj:'kills',    target:22,   reward:425,  diff:2.6,  map:'ash', storm:true },
+  { num:11, name:'DEAD ZONE',       obj:'distance', target:3500, reward:550,  diff:3.0,  map:'ash', night:true, storm:true },
+  { num:12, name:'THE OVERLORD',    obj:'boss',     target:1,    reward:1500, diff:3.5,  boss:3, map:'ash', night:true },
+  { num:13, name:'SUNSCAR BASIN',   obj:'survive',  target:70,   reward:650,  diff:3.7,  map:'redcanyon', storm:true },
+  { num:14, name:'IRON SPINE',      obj:'kills',    target:30,   reward:760,  diff:4.0,  map:'redcanyon', night:true },
+  { num:15, name:'RAVEN CHASM',     obj:'distance', target:4600, reward:900,  diff:4.4,  map:'redcanyon', night:true, storm:true },
+  { num:16, name:'WARLORD TITAN',   obj:'boss',     target:1,    reward:1900, diff:4.8,  boss:4, map:'redcanyon', storm:true },
+  { num:17, name:'VOID MILE',       obj:'survive',  target:85,   reward:1150, diff:5.2,  map:'midnight', night:true, storm:true },
+  { num:18, name:'THE CHIMERA',     obj:'boss',     target:1,    reward:3000, diff:6.0,  boss:5, map:'midnight', night:true, storm:true },
 ];
 
 // ============================================================
@@ -1116,7 +1098,6 @@ const Profile = {
       bestTime: 0,
       bestBossRush: 0,
       bestDistance: 0,
-      bestZombie: 0,
       ownedVehicles: { rustbucket: true },
       vehicleUpgrades: { rustbucket: { engine: 0, plating: 0, weapons: 0, reactor: 0 } },
       vehicleBranches: { rustbucket: null },
@@ -1234,7 +1215,6 @@ const Profile = {
     if (result.mode === 'timeattack' && result.score > p.bestTime) p.bestTime = result.score;
     if (result.mode === 'bossrush' && result.score > (p.bestBossRush || 0)) p.bestBossRush = result.score;
     if (result.mode === 'classic' && result.distance > p.bestDistance) p.bestDistance = result.distance;
-    if (result.mode === 'zombie' && result.score > (p.bestZombie || 0)) p.bestZombie = result.score;
     if (result.mode === 'daily' && result.dailySeedKey) {
       p.dailyBest = p.dailyBest || {};
       const prev = p.dailyBest[result.dailySeedKey] || 0;
@@ -1814,13 +1794,10 @@ const BOSS_RUSH_REWARD_BASE = 1200;
 const BOSS_RUSH_REWARD_PER_STAGE = 250;
 const BASE_RAM_DAMAGE = 10;
 const PULSE_DAMAGE = { normal: 1.5, elite: 2 };
-const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350, zombie: 80 };
+const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350 };
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
-// Zombie horde burst spawn distance thresholds — horde grows denser past these
-const ZOMBIE_BURST_DIST_1 = 4000;  // first burst tier: occasional double-spawn
-const ZOMBIE_BURST_DIST_2 = 10000; // second burst tier: triple-spawn waves
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -2050,9 +2027,6 @@ window.addEventListener('keydown', e => {
   }
 }, { passive:false });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-// Clear all held keys when the window loses focus so keys don't get "stuck"
-// (keyup events are never fired for keys held while the window is blurred)
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 function onPointerDown(e) {
   ensureAudio();
@@ -2237,6 +2211,8 @@ const Game = {
   lightning: 0,
   // muzzle-flash timer
   muzzleT: 0,
+  // new-record flag set by endRun() before recording, read by showResults()
+  isNewRecord: false,
   // campaign
   campaignLevelId: null,
   // sidekick
@@ -2321,7 +2297,6 @@ function startRun(mode, level) {
   Game.popups.length = 0;
   Game.decor.length = 0;
   Game.laneOffset = 0;
-  Game._lastStoryDistance = 0; // reset story chapter tracker
   Game.isNight = !!(Game.levelData && Game.levelData.night);
   Game.isStorm = !!(Game.levelData && Game.levelData.storm);
   if (Game.runMutators.some(m => m.id === 'blackout')) Game.isNight = true;
@@ -2438,6 +2413,19 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   }
   Game.scrapEarned = baseScrap + bonus;
   Profile.earn(Game.scrapEarned);
+  // detect personal best BEFORE recording so we can show the badge
+  Game.isNewRecord = false;
+  const _p = Profile.active();
+  if (_p) {
+    const sc = Math.floor(Game.score);
+    if (Game.mode === 'classic'    && sc > (_p.bestClassic || 0)) Game.isNewRecord = true;
+    if (Game.mode === 'timeattack' && sc > (_p.bestTime    || 0)) Game.isNewRecord = true;
+    if (Game.mode === 'bossrush'   && sc > (_p.bestBossRush|| 0)) Game.isNewRecord = true;
+    if (Game.mode === 'daily' && Game.dailySeedKey) {
+      const prev = (_p.dailyBest && _p.dailyBest[Game.dailySeedKey]) || 0;
+      if (sc > prev) Game.isNewRecord = true;
+    }
+  }
   // record stats
   Profile.recordRunResult({
     mode: Game.mode,
@@ -2616,41 +2604,6 @@ function spawnEnemy(forceKind, forceElite) {
   const r = Math.random();
   const lvlMul = Game.levelData ? Game.levelData.diff : 1;
   const dist = Game.distance;
-
-  // ZOMBIE HORDE MODE — only spawns zombies, never vehicles
-  if (Game.mode === 'zombie') {
-    const waveDiff = Math.min(3.0, 1 + dist / 8000);
-    // pick zombie type based on difficulty
-    let def;
-    const zr = Math.random();
-    if (waveDiff > 2.0 && zr < 0.18) def = ZOMBIE_DEFS[2]; // bruiser
-    else if (waveDiff > 1.2 && zr < 0.35) def = ZOMBIE_DEFS[1]; // runner
-    else def = ZOMBIE_DEFS[0]; // walker
-    const { x0: zx0, x1: zx1 } = roadBounds();
-    // spawn zombies spread across the full width, including shoulders
-    const spread = W * 0.12;
-    const cx = rand(Math.max(def.w, zx0 - spread), Math.min(W - def.w, zx1 + spread));
-    const count = waveDiff > 2.5 ? irand(2,4) : waveDiff > 1.5 ? irand(1,3) : 1;
-    for (let z = 0; z < count; z++) {
-      const zx = clamp(cx + (z - (count-1)/2) * (def.w + 8) + rand(-8,8), def.w, W - def.w);
-      Game.enemies.push({
-        kind: 'zombie',
-        zombieType: def.id,
-        x: zx, y: -def.h - z * 24,
-        w: def.w, h: def.h,
-        vx: rand(-def.vxRange, def.vxRange),
-        vy: def.vy * (0.85 + Math.random() * 0.3) * Math.min(1.6, waveDiff),
-        hp: def.hp, fireT: 999, // zombies never shoot
-        contact: def.contact,
-        zombieScore: def.score * (waveDiff > 2 ? 1.4 : 1),
-        color: def.color, goreColor: def.goreColor, accent: def.accent,
-        wobble: rand(0, Math.PI * 2), wobbleSpeed: rand(2.5, 5.0),
-        elite: !!(forceElite && Math.random() < 0.2),
-      });
-    }
-    return;
-  }
-
   // unlock new enemies as difficulty increases
   const unlockBike   = lvlMul >= 1.1 || dist > 800;
   const unlockMortar = lvlMul >= 1.4 || dist > 2400;
@@ -3240,22 +3193,6 @@ function update(dt) {
     }
   }
 
-  // ---- story chapter milestones (classic & zombie modes) ----
-  if (Game.mode === 'classic' || Game.mode === 'zombie') {
-    if (!Game._lastStoryDistance) Game._lastStoryDistance = 0;
-    const ch = STORY_CHAPTERS.find(c => c.distance > 0 && Game.distance >= c.distance && Game._lastStoryDistance < c.distance);
-    if (ch) {
-      Game._lastStoryDistance = ch.distance;
-      announceEvent(ch.title, '#a8c890');
-      const maxLen = 40;
-      const text = ch.text;
-      const snippet = text.length > maxLen
-        ? text.slice(0, text.lastIndexOf(' ', maxLen) || maxLen) + '…'
-        : text;
-      addPopup(snippet, W * 0.5, H * 0.38, '#a8c890', 10);
-    }
-  }
-
   // ---- skid marks: emitted when steering hard ----
   const ph = Game.player;
   const steerHard = ph && Math.abs(ph.vx) > 220;
@@ -3441,18 +3378,6 @@ function update(dt) {
     } else if (e.kind === 'mortar') {
       // stationary roadside; scrolls with road
       e.y += Game.speed * dt;
-    } else if (e.kind === 'zombie') {
-      // Zombies shuffle toward the player and wobble side-to-side
-      e.wobble = (e.wobble || 0) + (e.wobbleSpeed || 3) * dt;
-      if (Game.player) {
-        const dx = Game.player.x - e.x;
-        // gently steer toward player with a side-to-side shuffle
-        e.vx = clamp(e.vx + dx * 0.4 * dt + Math.sin(e.wobble) * 12 * dt, -60, 60);
-      }
-      e.x += e.vx * dt;
-      e.y += (e.vy + Game.speed * 0.10) * dt;
-      // zombies can wander slightly off-road
-      e.x = clamp(e.x, e.w, W - e.w);
     } else if (e.kind === 'drone') {
       // fast diagonal flier — bounces off road edges
       e.y += (e.vy + Game.speed * 0.12) * dt;
@@ -3464,74 +3389,71 @@ function update(dt) {
       e.y += (e.vy + Game.speed * 0.15) * dt;
       e.x += e.vx * dt;
     }
-    // road clamp (skipped for mortar off-road; drone/zombie use own movement logic)
-    if (e.kind !== 'mortar' && e.kind !== 'drone' && e.kind !== 'zombie') {
+    // road clamp (skipped for mortar which sits off-road; drone uses own bounds above)
+    if (e.kind !== 'mortar' && e.kind !== 'drone') {
       const { x0:rx0, x1:rx1 } = roadBounds();
       if (e.x < rx0 + 24) { e.x = rx0 + 24; if (e.vx) e.vx = Math.abs(e.vx); }
       if (e.x > rx1 - 24) { e.x = rx1 - 24; if (e.vx) e.vx = -Math.abs(e.vx); }
     }
-    // Zombies never shoot — skip bullet logic for them
-    if (e.kind !== 'zombie') {
-      e.fireT -= dt;
-      if (e.fireT <= 0 && e.y > 0 && e.y < H * 0.85) {
-        if (e.kind === 'mortar') {
-          // arcing shell — spawn with gravity, telegraphed
-          const dx = Game.player.x - e.x;
-          const sp = 320;
+    e.fireT -= dt;
+    if (e.fireT <= 0 && e.y > 0 && e.y < H * 0.85) {
+      if (e.kind === 'mortar') {
+        // arcing shell — spawn with gravity, telegraphed
+        const dx = Game.player.x - e.x;
+        const sp = 320;
+        Game.enemyBullets.push({
+          x: e.x, y: e.y + 6, w: 8, h: 8,
+          vx: clamp(dx * 0.7, -260, 260) / 1.4,
+          vy: -160,
+          dmg: 14, gravity: 480, mortar: true,
+          telegraph: { x: Game.player.x, t: 1.0 },
+        });
+        SFX.mortar();
+        e.fireT = rand(2.4, 3.6);
+      } else if (e.kind === 'bike') {
+        // light side-shots
+        Game.enemyBullets.push({ x:e.x, y:e.y+12, w:4, h:8, vx: rand(-30,30), vy: 360, dmg: 6 });
+        e.fireT = rand(1.4, 2.4);
+      } else if (e.kind === 'drone') {
+        // rapid burst: 3 quick shots toward player
+        const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sp = 400;
+        for (let k = 0; k < 3; k++) {
+          const spread = (k - 1) * 0.12;
           Game.enemyBullets.push({
-            x: e.x, y: e.y + 6, w: 8, h: 8,
-            vx: clamp(dx * 0.7, -260, 260) / 1.4,
-            vy: -160,
-            dmg: 14, gravity: 480, mortar: true,
-            telegraph: { x: Game.player.x, t: 1.0 },
+            x: e.x, y: e.y + e.h/2,
+            w: 4, h: 7,
+            vx: (dx/dist + spread) * sp,
+            vy: (dy/dist) * sp,
+            dmg: 5,
           });
-          SFX.mortar();
-          e.fireT = rand(2.4, 3.6);
-        } else if (e.kind === 'bike') {
-          // light side-shots
-          Game.enemyBullets.push({ x:e.x, y:e.y+12, w:4, h:8, vx: rand(-30,30), vy: 360, dmg: 6 });
-          e.fireT = rand(1.4, 2.4);
-        } else if (e.kind === 'drone') {
-          // rapid burst: 3 quick shots toward player
-          const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
-          const dist = Math.hypot(dx, dy) || 1;
-          const sp = 400;
-          for (let k = 0; k < 3; k++) {
-            const spread = (k - 1) * 0.12;
-            Game.enemyBullets.push({
-              x: e.x, y: e.y + e.h/2,
-              w: 4, h: 7,
-              vx: (dx/dist + spread) * sp,
-              vy: (dy/dist) * sp,
-              dmg: 5,
-            });
-          }
-          e.fireT = rand(0.7, 1.3);
-        } else if (e.kind === 'tank') {
-          // spread shot: 3 bullets fanned out toward player
-          const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
-          const dist = Math.hypot(dx, dy) || 1;
-          const sp = 300;
-          const angles = [-0.22, 0, 0.22];
-          for (const ang of angles) {
-            const cos = Math.cos(ang), sin_ = Math.sin(ang);
-            const nx = dx/dist * cos - dy/dist * sin_;
-            const ny = dx/dist * sin_ + dy/dist * cos;
-            Game.enemyBullets.push({
-              x: e.x, y: e.y + e.h/2,
-              w: 7, h: 12,
-              vx: nx * sp, vy: ny * sp,
-              dmg: 12,
-            });
-          }
-          e.fireT = rand(2.0, 3.2);
-        } else {
-          const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
-          const dist = Math.hypot(dx, dy) || 1;
-          const sp = 360;
-          Game.enemyBullets.push({ x:e.x, y:e.y+20, w:5, h:10, vx:dx/dist*sp, vy:dy/dist*sp, dmg:8 });
-          e.fireT = rand(1.2, 2.2);
         }
+        e.fireT = rand(0.7, 1.3);
+      } else if (e.kind === 'tank') {
+        // spread shot: 3 bullets fanned out toward player
+        const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sp = 300;
+        const angles = [-0.22, 0, 0.22];
+        for (const ang of angles) {
+          const cos = Math.cos(ang), sin_ = Math.sin(ang);
+          const nx = dx/dist * cos - dy/dist * sin_;
+          const ny = dx/dist * sin_ + dy/dist * cos;
+          Game.enemyBullets.push({
+            x: e.x, y: e.y + e.h/2,
+            w: 7, h: 12,
+            vx: nx * sp, vy: ny * sp,
+            dmg: 12,
+          });
+        }
+        e.fireT = rand(2.0, 3.2);
+      } else {
+        const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sp = 360;
+        Game.enemyBullets.push({ x:e.x, y:e.y+20, w:5, h:10, vx:dx/dist*sp, vy:dy/dist*sp, dmg:8 });
+        e.fireT = rand(1.2, 2.2);
       }
     }
 
@@ -3548,25 +3470,15 @@ function update(dt) {
           SFX.explode();
           const isBike = e.kind === 'bike';
           const isMortar = e.kind === 'mortar';
-          const isZombie = e.kind === 'zombie';
           const isDrone = e.kind === 'drone';
           const isTank = e.kind === 'tank';
-          const baseScore = isZombie
-            ? (e.zombieScore || ENEMY_SCORE.zombie) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1)
-            : (ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
-          if (isZombie) {
-            emit(e.x, e.y, 12, { color:'#5a7a3a', speed:220, life:0.6, size:3 });
-            emit(e.x, e.y, 6,  { color:'#1a2a10', speed:140, life:0.4, size:2 });
-            shockwave(e.x, e.y, 'rgba(80,120,50,0.35)', 50);
-            Game.shake = Math.max(Game.shake, 0.35);
-          } else {
-            const bigExplosion = isMortar || isTank;
-            emit(e.x, e.y, bigExplosion ? 40 : isDrone ? 18 : 28, { color: isDrone ? '#c87af0' : '#ff6a2b', speed:360, life:0.8, size: isDrone ? 3 : 4 });
-            emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
-            shockwave(e.x, e.y, isDrone ? 'rgba(200,122,240,0.4)' : 'rgba(255,140,60,0.4)', bigExplosion ? 120 : isDrone ? 50 : 70);
-            if (bigExplosion) Game.shake = Math.max(Game.shake, 0.7);
-            else Game.shake = Math.max(Game.shake, 0.5);
-          }
+          const baseScore = (ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
+          const bigExplosion = isMortar || isTank;
+          emit(e.x, e.y, bigExplosion ? 40 : isDrone ? 18 : 28, { color: isDrone ? '#c87af0' : '#ff6a2b', speed:360, life:0.8, size: isDrone ? 3 : 4 });
+          emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
+          shockwave(e.x, e.y, isDrone ? 'rgba(200,122,240,0.4)' : 'rgba(255,140,60,0.4)', bigExplosion ? 120 : isDrone ? 50 : 70);
+          if (bigExplosion) Game.shake = Math.max(Game.shake, 0.7);
+          else Game.shake = Math.max(Game.shake, 0.5);
           applyKill(e.x, e.y, baseScore);
           // drops
           const dropR = Math.random();
@@ -3584,9 +3496,7 @@ function update(dt) {
     if (!Game.enemies[i]) continue;
 
     if (aabb(e, Game.player)) {
-      const isZombie = e.kind === 'zombie';
-      // Zombies: running them down damages them, they claw the player
-      const ramDmg = isZombie ? 3 : BASE_RAM_DAMAGE * Game.contactDamageMul;
+      const ramDmg = BASE_RAM_DAMAGE * Game.contactDamageMul;
       if (ramDmg > 0) e.hp -= ramDmg;
       // shield blocks contact damage but breaks the enemy
       if (isPowerupActive('shield')) {
@@ -3597,26 +3507,14 @@ function update(dt) {
         Game.shake = Math.max(Game.shake, 0.5);
       } else if (e.hp <= 0) {
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
-        if (isZombie) {
-          emit(e.x, e.y, 10, { color:'#5a7a3a', speed:200, life:0.5, size:3 });
-        } else {
-          emit(e.x, e.y, 16, { color:'#ffb36a', speed:280, life:0.5, size:3 });
-        }
+        emit(e.x, e.y, 16, { color:'#ffb36a', speed:280, life:0.5, size:3 });
         Game.enemies.splice(i,1);
       } else {
-        damagePlayer(isZombie ? ((e.contact || 12) * Game.damageTakenMul) : e.kind === 'bike' || e.kind === 'drone' ? 28 : e.kind === 'tank' ? 55 : 40);
+        damagePlayer(e.kind === 'bike' || e.kind === 'drone' ? 28 : e.kind === 'tank' ? 55 : 40);
         SFX.explode();
-        if (isZombie) {
-          emit(e.x, e.y, 14, { color:'#5a7a3a', speed:200, life:0.5, size:3 });
-          Game.shake = Math.max(Game.shake, 0.4);
-          // zombie survives the hit but bounces back
-          e.vy *= 0.7;
-          e.vx = (e.x < Game.player.x ? -1 : 1) * 40;
-        } else {
-          emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
-          Game.enemies.splice(i,1);
-          Game.shake = Math.max(Game.shake, 0.7);
-        }
+        emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
+        Game.enemies.splice(i,1);
+        Game.shake = Math.max(Game.shake, 0.7);
       }
     } else if (e.y > H + 60) Game.enemies.splice(i,1);
   }
@@ -3733,20 +3631,14 @@ function update(dt) {
     Game.spawnTimer -= dt;
     if (Game.spawnTimer <= 0) {
       const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? AMBUSH_SPAWN_MULTIPLIER : 1;
-      const isZombieMode = Game.mode === 'zombie';
-      // Zombie mode: shorter spawn intervals that tighten over time (escalating horde)
-      const zombieInterval = Math.max(0.3, 1.0 - Game.distance / 20000);
-      const baseInterval = isZombieMode ? zombieInterval :
-        (Game.mode === 'timeattack' ? 0.35 :
-        clamp(1.4 - (Game.levelData ? Game.levelData.diff : 1) * 0.18, 0.45, 1.4));
+      const baseInterval = Game.mode === 'timeattack' ? 0.35 :
+        clamp(1.4 - (Game.levelData ? Game.levelData.diff : 1) * 0.18, 0.45, 1.4);
       // also factor score-based difficulty in classic
       const intervalMul = Game.mode === 'classic' ? Math.max(0.4, 1 - Game.distance / 30000) : 1;
       Game.spawnTimer = rand(baseInterval * 0.7 * intervalMul * ambushMul, baseInterval * 1.2 * intervalMul * ambushMul);
       spawnEnemy();
-      // burst spawn in time attack or zombie mode (increasing burst over time)
+      // burst spawn in time attack
       if (Game.mode === 'timeattack' && Math.random() < 0.4) spawnEnemy();
-      if (isZombieMode && Game.distance > ZOMBIE_BURST_DIST_1 && Math.random() < 0.45) spawnEnemy();
-      if (isZombieMode && Game.distance > ZOMBIE_BURST_DIST_2 && Math.random() < 0.35) spawnEnemy();
     }
     Game.pickupTimer -= dt;
     if (Game.pickupTimer <= 0) {
@@ -4260,7 +4152,6 @@ function drawObstacle(o) {
 function drawEnemy(e) {
   if (e.kind === 'bike')   { drawBike(e);   return; }
   if (e.kind === 'mortar') { drawMortar(e); return; }
-  if (e.kind === 'zombie') { drawZombie(e); return; }
   if (e.kind === 'drone')  { drawDrone(e);  return; }
   if (e.kind === 'tank')   { drawTank(e);   return; }
   ctx.save();
@@ -4370,47 +4261,6 @@ function drawMortar(e) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
     ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
-  }
-  ctx.restore();
-}
-
-function drawZombie(e) {
-  ctx.save();
-  ctx.translate(e.x, e.y);
-  const isBruiser = e.zombieType === 'bruiser';
-  const isRunner  = e.zombieType === 'runner';
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath(); ctx.ellipse(1, e.h/2 + 2, e.w/2 + 2, 4, 0, 0, Math.PI*2); ctx.fill();
-  // legs (two rects, offset for shamble animation)
-  const legOffset = Math.sin((e.wobble || 0) * 1.8) * (isRunner ? 5 : 3);
-  ctx.fillStyle = e.goreColor || '#2a3a18';
-  ctx.fillRect(-e.w/2 + 2, e.h/4, e.w/2 - 3, e.h/4 + 2 + legOffset);
-  ctx.fillRect(3, e.h/4, e.w/2 - 3, e.h/4 + 2 - legOffset);
-  // torso
-  ctx.fillStyle = e.color || '#3a4a28';
-  ctx.fillRect(-e.w/2, -e.h/4, e.w, e.h/2 + 4);
-  // arms (reaching forward / swinging)
-  const armSwing = Math.sin((e.wobble || 0)) * (isBruiser ? 4 : 6);
-  ctx.fillStyle = e.goreColor || '#2a3a18';
-  ctx.fillRect(-e.w/2 - 4, -e.h/4 + armSwing, 5, isBruiser ? 14 : 10);
-  ctx.fillRect( e.w/2 - 1, -e.h/4 - armSwing, 5, isBruiser ? 14 : 10);
-  // head
-  const headWobble = Math.sin((e.wobble || 0) * 0.7) * 1.5;
-  ctx.fillStyle = e.color || '#3a4a28';
-  const hw = isBruiser ? 12 : 8, hh = isBruiser ? 12 : 9;
-  ctx.fillRect(-hw/2 + headWobble, -e.h/2, hw, hh);
-  // glowing eyes
-  ctx.fillStyle = isRunner ? '#c8ff80' : isBruiser ? '#ff8040' : '#90c860';
-  ctx.fillRect(-hw/2 + 2 + headWobble, -e.h/2 + 3, hw/2 - 3, 2);
-  ctx.fillRect(2 + headWobble, -e.h/2 + 3, hw/2 - 3, 2);
-  // bite mark / gore detail
-  ctx.fillStyle = 'rgba(120,40,20,0.55)';
-  ctx.fillRect(-3, -e.h/4 + 2, 5, 3);
-  if (e.elite) {
-    ctx.strokeStyle = '#c8ff80';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
   }
   ctx.restore();
 }
@@ -4878,18 +4728,33 @@ function drawHUD() {
   ctx.fillStyle = '#f5d76e';
   ctx.font = `bold ${fs}px "Courier New", monospace`;
   let mainR = '';
+  let objPct = -1; // -1 means no bar; 0..1 draws a thin progress bar
   if (Game.mode === 'classic') {
     const lvl = 1 + Math.floor(Game.distance / 1500);
     mainR = 'SECTOR ' + lvl;
   } else if (Game.mode === 'timeattack') {
     const remain = Math.max(0, 60 - Game.t);
+    // flash red when under 10 s
+    if (remain < 10) {
+      ctx.fillStyle = Math.floor(remain * 5) % 2 === 0 ? '#ff5050' : '#f5d76e';
+    }
     mainR = remain.toFixed(1) + 'S';
+    objPct = remain / 60;
   } else if (Game.mode === 'gauntlet' && Game.levelData) {
     const L = Game.levelData;
-    if (L.obj === 'survive') mainR = Math.max(0, L.target - Game.t).toFixed(1) + 'S';
-    else if (L.obj === 'kills') mainR = `${Game.kills}/${L.target}`;
-    else if (L.obj === 'distance') mainR = `${Math.floor(Game.distance)}/${L.target}M`;
-    else if (L.obj === 'boss') mainR = 'BOSS';
+    if (L.obj === 'survive') {
+      const elapsed = clamp(Game.t, 0, L.target);
+      mainR = Math.max(0, L.target - Game.t).toFixed(1) + 'S';
+      objPct = elapsed / L.target;
+    } else if (L.obj === 'kills') {
+      mainR = `${Game.kills}/${L.target}`;
+      objPct = clamp(Game.kills / L.target, 0, 1);
+    } else if (L.obj === 'distance') {
+      mainR = `${Math.floor(Game.distance)}/${L.target}M`;
+      objPct = clamp(Game.distance / L.target, 0, 1);
+    } else if (L.obj === 'boss') {
+      mainR = 'BOSS';
+    }
   } else if (Game.mode === 'bossrush') {
     mainR = `BOSS ${Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length)}/${BOSS_RUSH_STAGES.length}`;
   }
@@ -4897,6 +4762,16 @@ function drawHUD() {
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
   ctx.font = `bold ${fs - 2}px "Courier New", monospace`;
   ctx.fillText('+' + Math.floor(Game.score / 10) + ' SCRAP', W - 50, hudH * 0.72);
+
+  // objective progress bar — thin strip on right side below the right text
+  if (objPct >= 0) {
+    const obW = Math.min(100, W * 0.22), obH = 3;
+    const obX = W - 50 - obW, obY = hudH * 0.32 + fs * 0.6 + 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(obX, obY, obW, obH);
+    ctx.fillStyle = Game.mode === 'timeattack' && objPct < 0.17 ? '#ff5050' : '#f5d76e';
+    ctx.fillRect(obX, obY, obW * objPct, obH);
+  }
 
   // hull bar
   const hbW = Math.min(180, W * 0.42), hbH = 10, hbX = (W - hbW) / 2, hbY = hudH * 0.4 - hbH/2;
@@ -5040,32 +4915,14 @@ const LOADING_TIPS = [
   'TIME ATTACK FAVORS COMBOS — DON\'T STOP TO CHASE PICKUPS',
   'DAILY CHALLENGE IS THE SAME WORLD FOR EVERYONE EACH DAY',
   'STORM SECTORS HAVE LIGHTNING — IT TARGETS METAL',
-  // Zombie mode tips
-  'ZOMBIE HORDE: MOW THROUGH RUNNERS BEFORE BRUISERS CLOSE IN',
-  'ZOMBIE HORDE: REPAIRS ARE SCARCE — EVERY SCRATCH COUNTS',
-  'ZOMBIE HORDE: BRUISERS TAKE 5 HITS — TARGET RUNNERS FIRST',
-  'ZOMBIE HORDE: THE HORDE DOUBLES IN DENSITY PAST 10 KILOMETERS',
-  'ZOMBIE HORDE: NITRO + CONTACT IS YOUR BEST CROWD CLEAR',
-  'ZOMBIE HORDE: RUNNERS CHASE. BRUISERS WAIT. NEVER STOP MOVING.',
 ];
 let _loadingTipIdx = -1;
 function pickLoadingTip() {
-  // For gauntlet levels, show the sector story intro
-  if (Game.mode === 'gauntlet' && Game.levelData && Game.levelData.story) {
-    return Game.levelData.story;
-  }
-  // For zombie mode, prefer zombie-specific tips
-  if (Game.mode === 'zombie') {
-    const zombieTips = LOADING_TIPS.filter(t => t.startsWith('ZOMBIE'));
-    const idx = Math.floor(Math.random() * zombieTips.length);
-    return zombieTips[idx] || LOADING_TIPS[0];
-  }
   // Uses whichever Math.random is currently active. In Daily mode the
   // seeded RNG is in effect, so the same tip is picked for every player
   // that day — a tiny but deliberate part of the "shared run" feel.
-  const nonZombie = LOADING_TIPS.filter(t => !t.startsWith('ZOMBIE'));
-  _loadingTipIdx = (_loadingTipIdx + 1 + Math.floor(Math.random() * 2)) % nonZombie.length;
-  return nonZombie[_loadingTipIdx];
+  _loadingTipIdx = (_loadingTipIdx + 1 + Math.floor(Math.random() * 2)) % LOADING_TIPS.length;
+  return LOADING_TIPS[_loadingTipIdx];
 }
 
 function drawLoadingOverlay() {
@@ -5097,9 +4954,6 @@ function drawLoadingOverlay() {
   } else if (Game.mode === 'classic') {
     title = 'OPEN ROAD';
     sub = 'ENDLESS · ' + (Game.vehicle ? Game.vehicle.name : '');
-  } else if (Game.mode === 'zombie') {
-    title = 'ZOMBIE HORDE';
-    sub = 'THE DEAD ARE COMING · ' + (Game.vehicle ? Game.vehicle.name : '');
   } else if (Game.mode === 'bossrush') {
     title = 'BOSS RUSH';
     sub = `CHAIN ${Game.bossRushStage}/${BOSS_RUSH_STAGES.length} · ` + (Game.vehicle ? Game.vehicle.name : '');
@@ -5345,33 +5199,6 @@ function renderVehiclePreview(canvas, vehicleId) {
 }
 
 // ============================================================
-// GLOBAL SCOREBOARD — submit and fetch top scores via the relay server.
-// Gracefully no-ops when running on static hosting without an API server.
-// ============================================================
-function submitGlobalScore() {
-  const score = Math.floor(Game.score);
-  if (score <= 0) return;
-  const profile = Profile.active();
-  const name = profile ? profile.name : 'DRIVER';
-  const vehicle = Game.vehicle ? Game.vehicle.id : 'rustbucket';
-  const payload = {
-    name,
-    score,
-    mode: Game.mode || 'classic',
-    kills: Math.floor(Game.kills),
-    distance: Math.floor(Game.distance),
-    vehicle,
-  };
-  try {
-    fetch('/api/scores', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {}); // silently ignore network failures on static hosts
-  } catch (_) {}
-}
-
-// ============================================================
 // UI / SCREENS
 // ============================================================
 const UI = {
@@ -5539,11 +5366,19 @@ const UI = {
       const fireN  = norm(1 / stats.fireRate, 11);
       const dmgN   = norm(stats.dmg * stats.guns, 4);
 
+      const tierCount = totalUpgradeTiers(p.vehicleUpgrades[v.id]);
+      const branchDef = p.vehicleBranches && p.vehicleBranches[v.id]
+        ? getVehicleBranchDef(v.id, p.vehicleBranches[v.id]) : null;
+      const tierBadgeHtml = owned
+        ? '<div class="vt-tier-badge">' + tierCount + '/20 TIERS' + (branchDef ? ' · ' + branchDef.name : '') + '</div>'
+        : '';
+
       tile.innerHTML = `
         <div class="vt-head">
           <div>
             <div class="vt-name">${v.name}${selected ? ' ◀' : ''}</div>
             <div class="vt-cost">${owned ? (selected ? 'EQUIPPED' : 'OWNED') : 'COST <b>' + v.cost + '</b> SCRAP'}</div>
+            ${tierBadgeHtml}
           </div>
         </div>
         <div class="vt-preview"><canvas></canvas></div>
@@ -5640,13 +5475,36 @@ const UI = {
     document.getElementById('mode-vehicle').textContent = v.name;
     const list = document.getElementById('mode-list');
     list.innerHTML = '';
+    const today = todaySeedString();
     MODES.forEach(m => {
+      // compute personal best label per mode
+      let bestLabel = '';
+      if (m.id === 'classic' && p.bestClassic > 0)
+        bestLabel = 'BEST <b>' + p.bestClassic + '</b>';
+      else if (m.id === 'timeattack' && p.bestTime > 0)
+        bestLabel = 'BEST <b>' + p.bestTime + '</b>';
+      else if (m.id === 'bossrush' && (p.bestBossRush || 0) > 0)
+        bestLabel = 'BEST <b>' + p.bestBossRush + '</b>';
+      else if (m.id === 'gauntlet')
+        bestLabel = '<b>' + p.gauntletCleared.length + '</b>/' + LEVELS.length + ' SECTORS';
+      else if (m.id === 'daily') {
+        const todayBest = (p.dailyBest && p.dailyBest[today]) || 0;
+        // hours until UTC midnight reset
+        const now = new Date();
+        const msLeft = new Date(now.toISOString().slice(0,10) + 'T23:59:59.999Z').getTime() - now.getTime();
+        const hLeft = Math.ceil(msLeft / 3600000);
+        if (todayBest > 0)
+          bestLabel = 'TODAY <b>' + todayBest + '</b> · RESETS IN ' + hLeft + 'H';
+        else
+          bestLabel = 'RESETS IN <b>' + hLeft + 'H</b>';
+      }
       const tile = document.createElement('button');
       tile.className = 'mode-tile';
       tile.dataset.mid = m.id;
       tile.innerHTML = `
         <div class="mt-name">${m.name}</div>
         <div class="mt-desc">${m.desc}</div>
+        ${bestLabel ? '<div class="mt-best">' + bestLabel + '</div>' : ''}
       `;
       list.appendChild(tile);
     });
@@ -5659,24 +5517,38 @@ const UI = {
     document.getElementById('gauntlet-progress').textContent = `${p.gauntletCleared.length} / ${LEVELS.length}`;
     const grid = document.getElementById('gauntlet-grid');
     grid.innerHTML = '';
+    // biome color dots for quick map-scanning
+    const BIOME_COLORS = {
+      wastes: '#a86a2e', saltflats: '#8c7f68', ash: '#5a5040',
+      redcanyon: '#aa5830', midnight: '#304a60',
+    };
     LEVELS.forEach(L => {
       const cleared = p.gauntletCleared.includes(L.num);
       const unlocked = Profile.isLevelUnlocked(L.num);
       const isBoss = L.obj === 'boss';
       const tile = document.createElement('button');
       tile.className = 'level-tile' + (cleared ? ' cleared' : '') + (!unlocked ? ' locked' : '') + (isBoss ? ' boss' : '');
+      // apply biome border tint on unlocked, uncleared tiles
+      if (unlocked && !cleared && !isBoss) {
+        const bc = BIOME_COLORS[L.map || 'wastes'];
+        if (bc) tile.style.borderColor = bc;
+      }
       let objLabel = '';
       if (L.obj === 'survive') objLabel = L.target + 'S';
       else if (L.obj === 'kills') objLabel = L.target + ' KILLS';
       else if (L.obj === 'distance') objLabel = (L.target/1000).toFixed(1) + 'KM';
       else if (L.obj === 'boss') objLabel = 'BOSS';
-      const mapLabel = (L.map || 'wastes').toUpperCase();
+      // night/storm modifier icons
+      const mods = (L.night ? '🌙' : '') + (L.storm ? '⚡' : '');
+      const dotColor = BIOME_COLORS[L.map || 'wastes'] || '#a86a2e';
       tile.innerHTML = `
         <div class="ln">${L.num}</div>
         <div class="lname">${L.name}</div>
-        <div class="lobj">${objLabel} - ${mapLabel}</div>
+        <div class="lobj">${objLabel}</div>
+        ${mods ? '<div class="lmod">' + mods + '</div>' : ''}
         ${cleared ? '<div class="lcheck">✓</div>' : ''}
         ${isBoss && !cleared ? '<div class="star">★</div>' : ''}
+        <div class="biome-dot" style="background:${dotColor}"></div>
       `;
       tile.dataset.level = L.num;
       grid.appendChild(tile);
@@ -5693,6 +5565,12 @@ const UI = {
     const ownedCount = Object.keys(p.ownedVehicles).length;
     const ttlUpgrades = Object.values(p.vehicleUpgrades).reduce(
       (s, ups) => s + (ups.engine||0) + (ups.plating||0) + (ups.weapons||0) + (ups.reactor||0), 0);
+    const today = todaySeedString();
+    const todayBest = (p.dailyBest && p.dailyBest[today]) || 0;
+    const METERS_PER_KM = 1000;
+    const bestDistance = p.bestDistance >= METERS_PER_KM
+      ? (p.bestDistance / METERS_PER_KM).toFixed(1) + ' KM'
+      : p.bestDistance + ' M';
     const rows = [
       ['CREATED', created],
       ['SCRAP CURRENT', p.scrap],
@@ -5701,8 +5579,8 @@ const UI = {
       ['BEST CLASSIC', p.bestClassic],
       ['BEST TIME ATK', p.bestTime],
       ['BEST BOSS RUSH', p.bestBossRush || 0],
-      ['BEST HORDE', p.bestZombie || 0],
-      ['LONGEST RUN', p.bestDistance + ' M'],
+      ['DAILY BEST TODAY', todayBest || '—'],
+      ['LONGEST RUN', bestDistance],
       ['VEHICLES OWNED', ownedCount + ' / ' + VEHICLES.length],
       ['UPGRADES BUILT', ttlUpgrades],
       ['GAUNTLET', p.gauntletCleared.length + ' / ' + LEVELS.length],
@@ -5766,10 +5644,6 @@ const UI = {
     if (Game.mode === 'classic') {
       rows.push(['DISTANCE', Math.floor(Game.distance) + ' M', false]);
       rows.push(['BEST', p.bestClassic, false]);
-    } else if (Game.mode === 'zombie') {
-      rows.push(['DISTANCE', Math.floor(Game.distance) + ' M', false]);
-      rows.push(['KILLS', Game.kills, false]);
-      rows.push(['BEST HORDE', p.bestZombie || 0, false]);
     } else if (Game.mode === 'timeattack') {
       rows.push(['BEST', p.bestTime, false]);
     } else if (Game.mode === 'bossrush') {
@@ -5789,11 +5663,22 @@ const UI = {
       }
     }
     rows.push(['KILLS', Game.kills, false]);
+    const _bestComboMult = (() => {
+      const c = Game.comboBest | 0; let m = 1;
+      for (let i = 0; i < COMBO_THRESHOLDS.length; i++) if (c >= COMBO_THRESHOLDS[i]) m = COMBO_MULTS[i];
+      return m;
+    })();
+    rows.push(['BEST COMBO', Game.comboBest > 1 ? '×' + _bestComboMult + '  ' + Game.comboBest + ' KILLS' : '—', false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
 
-    document.getElementById('res-rows').innerHTML = rows.map(([l,v,big]) =>
+    const rowsHtml = rows.map(([l,v,big]) =>
       `<div class="res-row${big ? ' big' : ''}"><div class="lbl">${l}</div><div class="val">${v}</div></div>`
     ).join('');
+    // new record badge injected at top of result rows
+    const recordHtml = Game.isNewRecord
+      ? '<div class="new-record">★ NEW RECORD ★</div>'
+      : '';
+    document.getElementById('res-rows').innerHTML = recordHtml + rowsHtml;
 
     // next sector button (gauntlet / campaign victory)
     const nextBtn = document.getElementById('res-next');
@@ -5839,9 +5724,6 @@ const UI = {
       }
     }
 
-    // Submit score to global scoreboard after run ends
-    submitGlobalScore();
-
     // show any badges earned this run
     const badgesEl = document.getElementById('res-badges');
     if (badgesEl) {
@@ -5864,42 +5746,6 @@ const UI = {
   // ---- PAUSE ----
   showPause() {
     this.show('pause');
-  },
-
-  // ---- SCOREBOARD ----
-  showScoreboard(mode) {
-    const el = document.getElementById('scoreboard-list');
-    const titleEl = document.getElementById('scoreboard-mode');
-    const modeId = mode || Game.mode || 'classic';
-    titleEl.textContent = (MODES.find(m => m.id === modeId) || { name: 'GLOBAL' }).name;
-    el.innerHTML = '<div class="small center" style="padding:14px">LOADING...</div>';
-    this.show('scoreboard');
-    const url = '/api/scores?mode=' + encodeURIComponent(modeId);
-    fetch(url)
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-      .then(data => {
-        if (!data || !data.scores || data.scores.length === 0) {
-          el.innerHTML = '<div class="small center" style="padding:14px">NO SCORES YET. BE THE FIRST!</div>';
-          return;
-        }
-        el.innerHTML = data.scores.map((s, i) =>
-          `<div class="res-row${i === 0 ? ' big' : ''}">
-            <div class="lbl">#${i+1} ${escapeHtml(s.name || '???')}</div>
-            <div class="val">${(s.score | 0).toLocaleString()}</div>
-          </div>`
-        ).join('') +
-        `<div class="small center" style="margin-top:8px;opacity:.5">${data.scores.length} ENTRIES · TOP ${Math.min(data.scores.length,50)}</div>`;
-      })
-      .catch(() => {
-        el.innerHTML = '<div class="small center" style="padding:14px;color:var(--danger)">SCOREBOARD UNAVAILABLE<br><span style="font-size:10px">ONLINE SCORES REQUIRE SERVER HOSTING</span></div>';
-      });
-    // populate mode selector buttons
-    const btnRow = document.getElementById('scoreboard-modes');
-    if (btnRow) {
-      btnRow.innerHTML = MODES.map(m =>
-        `<button class="btn${m.id === modeId ? ' primary' : ''}" data-act="scoreboard-mode" data-mode="${m.id}" style="font-size:10px;min-height:36px;padding:6px 8px">${m.name}</button>`
-      ).join('');
-    }
   },
 
   // ---- SETTINGS ----
@@ -6041,18 +5887,6 @@ const UI = {
         break;
       case 'menu-stats':
         UI.showStats();
-        break;
-      case 'menu-scoreboard':
-        UI.showScoreboard(Game.mode || 'classic');
-        break;
-      case 'scoreboard-mode':
-        UI.showScoreboard(data);
-        break;
-      case 'back-scoreboard':
-        UI.showMenu();
-        break;
-      case 'res-scoreboard':
-        UI.showScoreboard(Game.mode || 'classic');
         break;
       case 'menu-achievements':
         UI.showAchievements();
