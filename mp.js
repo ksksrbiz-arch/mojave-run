@@ -61,7 +61,8 @@
     if (!value) return '';
     let candidate = value;
     if (/^https?:\/\//i.test(candidate)) {
-      candidate = candidate.replace(/^http/i, 'ws');
+      candidate = candidate.replace(/^https?/i, m => (m.toLowerCase() === 'https' ? 'wss' : 'ws'));
+    // If the user enters only host[:port][/optional-path], infer ws/wss from page protocol.
     } else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
       const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
       if (candidate.startsWith('/')) {
@@ -73,6 +74,7 @@
     try {
       const u = new URL(candidate, location.href);
       if (u.protocol !== 'ws:' && u.protocol !== 'wss:') return '';
+      // Mojave Run's relay endpoint is fixed at /ws. Treat empty/root paths as shorthand.
       const pathname = (!u.pathname || u.pathname === '/') ? '/ws' : u.pathname;
       return `${u.protocol}//${u.host}${pathname}${u.search}${u.hash}`;
     } catch (_err) {
