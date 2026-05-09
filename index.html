@@ -328,6 +328,8 @@ const COMBO_MAX_BONUS = 2.0; // cap multiplier at 1 + 2 = 3.0x
 const COMBO_PER_KILL = 0.1;
 const SHIELD_DURATION = 6.0;
 const BOSS_SECTORS = [4, 8, 12];
+const TOUCH_STEER_BASE = 14;
+const TOUCH_STEER_ENGINE_BONUS = 2;
 function comboMultiplier(combo){
   return 1 + Math.min(combo*COMBO_PER_KILL, COMBO_MAX_BONUS);
 }
@@ -410,7 +412,7 @@ class Player{
     // Steering: touch input should closely track the held pointer position
     if(Input.down && Input.x!=null){
       const target = clamp(Input.x, 100, W-100);
-      this.x += (target - this.x) * Math.min(1, dt * (14 + this.spd * 2));
+      this.x += (target - this.x) * Math.min(1, dt * (TOUCH_STEER_BASE + this.spd * TOUCH_STEER_ENGINE_BONUS));
     }
     if(Input.keys['ArrowLeft']||Input.keys['a']) this.vx -= 1200*dt;
     if(Input.keys['ArrowRight']||Input.keys['d']) this.vx += 1200*dt;
