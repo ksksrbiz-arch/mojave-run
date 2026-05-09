@@ -608,6 +608,7 @@ const BIOME_THEMES = {
     wreckDay:'#4a3020', wreckNight:'#2a2018',
     skullDay:'#cabaa8', skullNight:'#9a8a78',
     stormLine:'rgba(180,140,90,0.25)', stormHaze:'rgba(180,140,90,0.08)',
+    cloudDay:'rgba(255,232,185,1)', fogDay:'rgba(220,155,85,0.24)', fogNight:'rgba(28,18,38,0.32)',
   },
   saltflats: {
     skyDayTop:'#564f3f', skyDayMid:'#8a7c64', skyDayBottom:'#c0b39b',
@@ -626,6 +627,7 @@ const BIOME_THEMES = {
     wreckDay:'#6d6252', wreckNight:'#423e3b',
     skullDay:'#efe4d2', skullNight:'#b8b0a2',
     stormLine:'rgba(230,220,200,0.18)', stormHaze:'rgba(230,220,200,0.06)',
+    cloudDay:'rgba(255,252,242,1)', fogDay:'rgba(195,186,162,0.20)', fogNight:'rgba(32,40,52,0.28)',
   },
   ash: {
     skyDayTop:'#35241f', skyDayMid:'#4a332c', skyDayBottom:'#5f4a3d',
@@ -644,6 +646,7 @@ const BIOME_THEMES = {
     wreckDay:'#3f332d', wreckNight:'#241f21',
     skullDay:'#b6a99c', skullNight:'#8f8378',
     stormLine:'rgba(140,120,115,0.24)', stormHaze:'rgba(140,120,115,0.08)',
+    cloudDay:'rgba(200,180,170,1)', fogDay:'rgba(110,90,95,0.28)', fogNight:'rgba(22,15,32,0.38)',
   },
   redcanyon: {
     skyDayTop:'#4a1f16', skyDayMid:'#79331f', skyDayBottom:'#aa5830',
@@ -662,6 +665,7 @@ const BIOME_THEMES = {
     wreckDay:'#5b3323', wreckNight:'#322025',
     skullDay:'#d8b8a0', skullNight:'#aa8975',
     stormLine:'rgba(200,110,72,0.25)', stormHaze:'rgba(200,110,72,0.08)',
+    cloudDay:'rgba(255,198,152,1)', fogDay:'rgba(170,82,45,0.30)', fogNight:'rgba(28,10,18,0.38)',
   },
   midnight: {
     skyDayTop:'#25253a', skyDayMid:'#303658', skyDayBottom:'#3b4472',
@@ -680,6 +684,7 @@ const BIOME_THEMES = {
     wreckDay:'#2d3652', wreckNight:'#1b2439',
     skullDay:'#c0d7ee', skullNight:'#8fa6c2',
     stormLine:'rgba(110,140,255,0.22)', stormHaze:'rgba(110,140,255,0.06)',
+    cloudDay:'rgba(175,192,255,1)', fogDay:'rgba(48,68,140,0.28)', fogNight:'rgba(6,10,30,0.48)',
   },
 };
 
@@ -1709,41 +1714,26 @@ function noise(dur, vol=0.12, filterFreq=800) {
   src.connect(f).connect(g).connect(audioCtx.destination);
   src.start(t);
 }
-function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
+function gunShot(baseFreq=140, dur=0.07, vol=0.1, crackVol=0.5) {
   if (!audioCtx) return;
   const outVol = vol * Settings.master * Settings.sfx;
   if (outVol <= 0.0001) return;
   const t = audioCtx.currentTime;
-  const pitchJitter = (Math.random() - 0.5) * GUNSHOT_PITCH_JITTER_WIDTH;
 
-  const out = audioCtx.createGain();
-  out.gain.setValueAtTime(outVol, t);
-  out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  out.connect(audioCtx.destination);
+  // Low-frequency thump — sub-200 Hz punch felt as impact, not heard as a beep
+  const kick = audioCtx.createOscillator();
+  const kickEnv = audioCtx.createGain();
+  kick.type = 'sine';
+  const kickFreq = baseFreq * (1 + (Math.random() - 0.5) * 0.14);
+  kick.frequency.setValueAtTime(kickFreq, t);
+  kick.frequency.exponentialRampToValueAtTime(Math.max(24, kickFreq * 0.2), t + 0.038);
+  kickEnv.gain.setValueAtTime(outVol, t);
+  kickEnv.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+  kick.connect(kickEnv).connect(audioCtx.destination);
+  kick.start(t); kick.stop(t + 0.045);
 
-  const body = audioCtx.createOscillator();
-  const bodyGain = audioCtx.createGain();
-  body.type = 'triangle';
-  body.frequency.setValueAtTime(baseFreq + pitchJitter, t);
-  body.frequency.exponentialRampToValueAtTime(Math.max(70, baseFreq * 0.58), t + dur);
-  bodyGain.gain.setValueAtTime(0.95, t);
-  bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  body.connect(bodyGain).connect(out);
-  body.start(t);
-  body.stop(t + dur);
-
-  const snap = audioCtx.createOscillator();
-  const snapGain = audioCtx.createGain();
-  snap.type = 'square';
-  snap.frequency.setValueAtTime((baseFreq * 2.1) + pitchJitter * 0.6, t);
-  snap.frequency.exponentialRampToValueAtTime(Math.max(120, baseFreq * 1.15), t + dur * 0.35);
-  snapGain.gain.setValueAtTime(0.2, t);
-  snapGain.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.28);
-  snap.connect(snapGain).connect(out);
-  snap.start(t);
-  snap.stop(t + dur * 0.35);
-
-  const crackDur = Math.max(0.014, dur * 0.35);
+  // High-frequency noise crack — crisp, non-tonal shot character
+  const crackDur = Math.max(0.022, dur * 0.5);
   const crackSamples = Math.max(GUNSHOT_CRACK_MIN_SAMPLES, Math.floor(audioCtx.sampleRate * crackDur));
   const crackBuf = getGunshotCrackBuffer(crackSamples);
   if (crackBuf) {
@@ -1754,15 +1744,15 @@ function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
     crackFilter.frequency.setValueAtTime(GUNSHOT_CRACK_FILTER_BASE_FREQ + Math.random() * GUNSHOT_CRACK_FILTER_FREQ_VARIANCE, t);
     crackFilter.Q.value = GUNSHOT_CRACK_FILTER_Q;
     const crackGain = audioCtx.createGain();
-    crackGain.gain.setValueAtTime(crackVol, t);
+    crackGain.gain.setValueAtTime(outVol * crackVol, t);
     crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
-    crack.connect(crackFilter).connect(crackGain).connect(out);
+    crack.connect(crackFilter).connect(crackGain).connect(audioCtx.destination);
     crack.start(t);
   }
 }
 const SFX = {
-  shoot: () => gunShot(720, 0.09, 0.085, 0.032),
-  bigShot: () => { gunShot(260, 0.17, 0.13, 0.05); noise(0.12, 0.07, 1200); },
+  shoot: () => gunShot(140, 0.07, 0.1, 0.5),
+  bigShot: () => { gunShot(100, 0.12, 0.15, 0.65); noise(0.18, 0.09, 900); },
   hit:   () => { noise(0.18, 0.18, 1200); blip(120, 0.18, 'sawtooth', 0.06, -60); },
   pickup:() => { blip(660, 0.06, 'triangle', 0.08); setTimeout(()=>blip(990,0.08,'triangle',0.08),50); },
   scrap: () => { blip(880, 0.04, 'triangle', 0.06); setTimeout(()=>blip(1320,0.06,'triangle',0.06),40); },
@@ -2300,11 +2290,48 @@ function makeDecor(yOverride) {
   const x = side === 'L' ? rand(0, Math.max(8, x0 - 8)) : rand(x1 + 8, W);
   const y = yOverride !== undefined ? yOverride : -20;
   const r = Math.random();
+  const biome = (Game && Game.biome) || 'wastes';
   let type;
-  if (r < 0.55) type = 'rock';
-  else if (r < 0.8) type = 'cactus';
-  else if (r < 0.92) type = 'wreck';
-  else type = 'skull';
+  if (biome === 'wastes') {
+    if      (r < 0.44) type = 'rock';
+    else if (r < 0.64) type = 'cactus';
+    else if (r < 0.74) type = 'wreck';
+    else if (r < 0.83) type = 'tumbleweed';
+    else if (r < 0.90) type = 'post';
+    else               type = 'skull';
+  } else if (biome === 'saltflats') {
+    if      (r < 0.36) type = 'rock';
+    else if (r < 0.52) type = 'crystal';
+    else if (r < 0.66) type = 'bones';
+    else if (r < 0.79) type = 'wreck';
+    else if (r < 0.90) type = 'cactus';
+    else               type = 'skull';
+  } else if (biome === 'ash') {
+    if      (r < 0.38) type = 'rock';
+    else if (r < 0.54) type = 'ashpile';
+    else if (r < 0.67) type = 'stump';
+    else if (r < 0.79) type = 'wreck';
+    else if (r < 0.89) type = 'skull';
+    else               type = 'cactus';
+  } else if (biome === 'redcanyon') {
+    if      (r < 0.40) type = 'rock';
+    else if (r < 0.56) type = 'pillar';
+    else if (r < 0.70) type = 'cactus';
+    else if (r < 0.82) type = 'wreck';
+    else               type = 'skull';
+  } else if (biome === 'midnight') {
+    if      (r < 0.36) type = 'rock';
+    else if (r < 0.51) type = 'sign';
+    else if (r < 0.64) type = 'wreck';
+    else if (r < 0.76) type = 'bones';
+    else if (r < 0.87) type = 'cactus';
+    else               type = 'skull';
+  } else {
+    if      (r < 0.55) type = 'rock';
+    else if (r < 0.80) type = 'cactus';
+    else if (r < 0.92) type = 'wreck';
+    else               type = 'skull';
+  }
   return { x, y, type, size: type === 'rock' ? rand(8, 22) : rand(14, 26), tone: rand(0.6, 1.0), rot: rand(-0.5, 0.5) };
 }
 
@@ -4064,13 +4091,13 @@ function drawBackground() {
   // stars at night (parallax-light) — varied sizes, twinkling, shooting star
   if (Game.isNight) {
     const seedY = Math.floor(Game.bgScroll * 0.05);
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 80; i++) {
       const sx = (i * 137 + seedY * 23) % W;
       const sy = ((i * 71) % (H * 0.38));
       const tw = Math.sin(Game.t * (1.1 + (i % 5) * 0.28) + i) * 0.5 + 0.5;
-      const sz = i % 7 === 0 ? 1.4 : i % 3 === 0 ? 0.9 : 0.5;
+      const sz = i % 7 === 0 ? 1.6 : i % 3 === 0 ? 1.0 : 0.55;
       ctx.globalAlpha = (0.2 + tw * 0.65) * (i % 5 === 0 ? 1 : 0.75);
-      ctx.fillStyle = i % 9 === 0 ? 'rgba(180,210,255,1)' : i % 6 === 0 ? 'rgba(255,240,195,1)' : 'rgba(255,255,255,1)';
+      ctx.fillStyle = i % 9 === 0 ? 'rgba(180,210,255,1)' : i % 6 === 0 ? 'rgba(255,240,195,1)' : i % 11 === 0 ? 'rgba(255,210,210,1)' : 'rgba(255,255,255,1)';
       ctx.beginPath();
       ctx.arc(sx, sy, sz, 0, Math.PI * 2);
       ctx.fill();
@@ -4098,6 +4125,52 @@ function drawBackground() {
       ctx.lineTo(ex - 50 * p, ey - 20 * p);
       ctx.stroke();
       ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    // Milky Way — faint diagonal band of extra glow
+    const mwAlpha = 0.038 + 0.012 * Math.sin(Game.t * 0.18);
+    const mwG = ctx.createLinearGradient(0, H * 0.04, W, H * 0.30);
+    mwG.addColorStop(0,    'rgba(190,205,255,0)');
+    mwG.addColorStop(0.35, `rgba(190,205,255,${mwAlpha})`);
+    mwG.addColorStop(0.65, `rgba(215,228,255,${mwAlpha * 1.35})`);
+    mwG.addColorStop(1,    'rgba(190,205,255,0)');
+    ctx.fillStyle = mwG;
+    ctx.fillRect(0, 0, W, H * 0.34);
+
+    // Aurora — midnight biome only
+    if (Game.biome === 'midnight') {
+      const auroraColors = ['50,255,180', '80,150,255', '170,90,255'];
+      for (let ai = 0; ai < 3; ai++) {
+        const sway = Math.sin(Game.t * 0.38 + ai * 1.9) * W * 0.05;
+        const bx = W * (0.18 + ai * 0.28) + sway;
+        const bh = H * (0.13 + ai * 0.025);
+        const aAlpha = 0.058 + 0.028 * Math.sin(Game.t * 0.65 + ai * 1.2);
+        const ag = ctx.createLinearGradient(bx, H * 0.03, bx, H * 0.03 + bh);
+        ag.addColorStop(0,   `rgba(${auroraColors[ai]},0)`);
+        ag.addColorStop(0.5, `rgba(${auroraColors[ai]},${aAlpha})`);
+        ag.addColorStop(1,   `rgba(${auroraColors[ai]},0)`);
+        ctx.fillStyle = ag;
+        ctx.beginPath();
+        ctx.ellipse(bx, H * 0.03 + bh * 0.5, 26 + ai * 8, bh * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Sparse clouds — daytime only, no storm
+  if (!Game.isNight && !Game.isStorm) {
+    const cloudColor = t.cloudDay || 'rgba(255,242,210,1)';
+    const cloudScroll = (Game.bgScroll * 0.0004) % (W + 100);
+    for (let ci = 0; ci < 6; ci++) {
+      const cx = ((ci * 197 + cloudScroll) % (W + 120)) - 60;
+      const cy = H * 0.06 + (ci * 53) % (H * 0.12);
+      const cw = 55 + (ci * 37) % 70;
+      const ch = 10 + (ci * 19) % 12;
+      ctx.globalAlpha = 0.10 + (ci % 3) * 0.03;
+      ctx.fillStyle = cloudColor;
+      ctx.beginPath(); ctx.ellipse(cx, cy, cw, ch, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(cx + cw * 0.35, cy - ch * 0.4, cw * 0.6, ch * 0.85, 0, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
@@ -4148,6 +4221,18 @@ function drawBackground() {
   ctx.lineTo(W, H * 0.42); ctx.lineTo(W, H * 0.46); ctx.lineTo(0, H * 0.46);
   ctx.closePath();
   ctx.fill();
+
+  // Horizon atmospheric haze — softens the terrain-sky seam
+  {
+    const hazY = H * 0.44;
+    const fogColor = Game.isNight ? (t.fogNight || 'rgba(20,15,30,0.35)') : (t.fogDay || 'rgba(200,160,100,0.25)');
+    const hazG = ctx.createLinearGradient(0, hazY - H * 0.04, 0, hazY + H * 0.04);
+    hazG.addColorStop(0, 'rgba(0,0,0,0)');
+    hazG.addColorStop(0.5, fogColor);
+    hazG.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hazG;
+    ctx.fillRect(0, hazY - H * 0.04, W, H * 0.08);
+  }
 
   // horizon heat shimmer — warm band at ground-sky boundary (daytime only)
   if (!Game.isNight && !Game.isStorm) {
@@ -4240,6 +4325,17 @@ function drawRoad() {
   for (let y = -gap + Game.laneOffset; y < H + gap; y += dashH + gap) {
     ctx.fillRect(cx - 3, y, 6, dashH);
   }
+
+  // secondary lane guides — thinner dashes at ⅓ and ⅔ road width
+  const lineAlpha = Game.isNight ? 0.30 : 0.18;
+  ctx.fillStyle = `rgba(245,215,110,${lineAlpha})`;
+  const lane1x = x0 + w / 3;
+  const lane2x = x0 + (2 * w) / 3;
+  const dashH2 = 14, gap2 = 46;
+  for (let y = -gap2 + Game.laneOffset * 0.7; y < H + gap2; y += dashH2 + gap2) {
+    ctx.fillRect(lane1x - 1, y, 2, dashH2);
+    ctx.fillRect(lane2x - 1, y, 2, dashH2);
+  }
 }
 
 function drawDecor() {
@@ -4247,28 +4343,50 @@ function drawDecor() {
   for (const d of Game.decor) {
     if (d.type === 'rock') {
       const c = Math.floor(60*d.tone), c2 = Math.floor(40*d.tone), c3 = Math.floor(24*d.tone);
-      ctx.fillStyle = Game.isNight ? `rgba(${c-20},${c2-15},${c3-5},1)` : `rgba(${c},${c2},${c3},1)`;
+      const isNt = Game.isNight;
+      // base body
+      ctx.fillStyle = isNt ? `rgba(${c-20},${c2-15},${c3-5},1)` : `rgba(${c},${c2},${c3},1)`;
       ctx.beginPath();
       ctx.ellipse(d.x, d.y, d.size, d.size * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      // highlight on upper-left
+      ctx.fillStyle = isNt ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.16)';
       ctx.beginPath();
-      ctx.ellipse(d.x + d.size * 0.4, d.y + d.size * 0.3, d.size * 0.6, d.size * 0.35, 0, 0, Math.PI * 2);
+      ctx.ellipse(d.x - d.size * 0.22, d.y - d.size * 0.22, d.size * 0.44, d.size * 0.26, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+      // shadow on lower-right
+      ctx.fillStyle = 'rgba(0,0,0,0.42)';
+      ctx.beginPath();
+      ctx.ellipse(d.x + d.size * 0.38, d.y + d.size * 0.28, d.size * 0.58, d.size * 0.33, 0, 0, Math.PI * 2);
       ctx.fill();
     } else if (d.type === 'cactus') {
       ctx.fillStyle = Game.isNight ? t.cactusNight : t.cactusDay;
+      // trunk
       ctx.fillRect(d.x - 3, d.y - d.size, 6, d.size);
-      ctx.fillRect(d.x - 3 - 7, d.y - d.size * 0.7, 6, d.size * 0.4);
-      ctx.fillRect(d.x + 3, d.y - d.size * 0.55, 6, d.size * 0.35);
+      // left horizontal arm + upward tip
+      ctx.fillRect(d.x - 10, d.y - d.size * 0.7, 7, d.size * 0.4);
+      ctx.fillRect(d.x - 10, d.y - d.size * 0.7 - d.size * 0.28, 6, d.size * 0.3);
+      // right horizontal arm + upward tip
+      ctx.fillRect(d.x + 3, d.y - d.size * 0.55, 7, d.size * 0.35);
+      ctx.fillRect(d.x + 3, d.y - d.size * 0.55 - d.size * 0.2, 6, d.size * 0.22);
+      // subtle trunk highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.09)';
+      ctx.fillRect(d.x - 1, d.y - d.size + 2, 2, d.size - 4);
     } else if (d.type === 'wreck') {
       ctx.save();
       ctx.translate(d.x, d.y);
       ctx.rotate(d.rot);
+      // drop shadow (offset right/down)
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(-10, -6, 24, 16);
       ctx.fillStyle = Game.isNight ? t.wreckNight : t.wreckDay;
       ctx.fillRect(-12, -8, 24, 16);
       ctx.fillStyle = '#0d0805';
       ctx.fillRect(-10, -6, 4, 4);
       ctx.fillRect(6, -6, 4, 4);
+      // rust streak
+      ctx.fillStyle = 'rgba(160,60,30,0.28)';
+      ctx.fillRect(-10, -2, 2, 8);
       ctx.restore();
     } else if (d.type === 'skull') {
       ctx.fillStyle = Game.isNight ? t.skullNight : t.skullDay;
@@ -4278,6 +4396,122 @@ function drawDecor() {
       ctx.fillStyle = '#1a0f08';
       ctx.fillRect(d.x - 4, d.y - 1, 2, 3);
       ctx.fillRect(d.x + 2, d.y - 1, 2, 3);
+      // jaw detail
+      ctx.fillStyle = Game.isNight ? t.skullNight : t.skullDay;
+      ctx.fillRect(d.x - 3, d.y + 3, 8, 2);
+    } else if (d.type === 'tumbleweed') {
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      const roll = (Game.t * 1.4 + d.x * 0.08) % (Math.PI * 2);
+      ctx.rotate(roll);
+      ctx.strokeStyle = Game.isNight ? 'rgba(100,80,50,0.72)' : 'rgba(158,118,56,0.88)';
+      ctx.lineWidth = 1.4;
+      const tr = d.size * 0.5;
+      ctx.beginPath(); ctx.arc(0, 0, tr, 0, Math.PI * 2); ctx.stroke();
+      for (let ri = 0; ri < 4; ri++) {
+        const ang = ri * Math.PI / 4;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang) * tr, Math.sin(ang) * tr);
+        ctx.lineTo(Math.cos(ang + Math.PI) * tr, Math.sin(ang + Math.PI) * tr);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if (d.type === 'post') {
+      // telephone pole silhouette
+      const pc = Game.isNight ? 'rgba(55,40,25,0.9)' : 'rgba(95,72,48,1)';
+      ctx.fillStyle = pc;
+      const ph = d.size * 2.4;
+      ctx.fillRect(d.x - 2, d.y - ph, 4, ph);
+      ctx.fillRect(d.x - d.size * 0.7, d.y - ph * 0.82, d.size * 1.4, 3);
+      ctx.fillStyle = Game.isNight ? 'rgba(110,90,50,0.85)' : 'rgba(190,155,90,1)';
+      ctx.fillRect(d.x - d.size * 0.7, d.y - ph * 0.82 + 1, 5, 5);
+      ctx.fillRect(d.x + d.size * 0.7 - 5, d.y - ph * 0.82 + 1, 5, 5);
+    } else if (d.type === 'crystal') {
+      // salt crystal spikes (saltflats)
+      for (let ci = 0; ci < 3; ci++) {
+        const ox = d.x + (ci - 1) * d.size * 0.38;
+        const ch = d.size * (0.65 + ci * 0.18);
+        ctx.fillStyle = Game.isNight ? 'rgba(155,178,215,0.82)' : 'rgba(215,232,255,0.92)';
+        ctx.beginPath();
+        ctx.moveTo(ox, d.y - ch);
+        ctx.lineTo(ox - d.size * 0.11, d.y);
+        ctx.lineTo(ox + d.size * 0.11, d.y);
+        ctx.closePath();
+        ctx.fill();
+        // shine sliver
+        ctx.fillStyle = 'rgba(255,255,255,0.32)';
+        ctx.beginPath();
+        ctx.moveTo(ox - 1, d.y - ch);
+        ctx.lineTo(ox - d.size * 0.06, d.y - ch * 0.5);
+        ctx.lineTo(ox + 1, d.y - ch * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (d.type === 'bones') {
+      const bc = Game.isNight ? 'rgba(178,168,155,0.82)' : 'rgba(228,218,196,1)';
+      ctx.fillStyle = bc;
+      ctx.beginPath(); ctx.arc(d.x - d.size * 0.35, d.y, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(d.x + d.size * 0.35, d.y, 3.0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(d.x - d.size * 0.3, d.y - 1.5, d.size * 0.6, 3);
+      ctx.save();
+      ctx.translate(d.x, d.y + 6);
+      ctx.rotate(0.8);
+      ctx.fillRect(-d.size * 0.25, -1.5, d.size * 0.5, 3);
+      ctx.restore();
+    } else if (d.type === 'ashpile') {
+      // low mound of ash
+      ctx.fillStyle = Game.isNight ? 'rgba(32,28,36,0.88)' : 'rgba(62,55,62,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.size * 0.9, d.size * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(148,140,148,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(d.x - 2, d.y - 2, d.size * 0.5, d.size * 0.14, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.type === 'stump') {
+      const sc = Game.isNight ? 'rgba(28,18,20,0.92)' : 'rgba(58,36,30,1)';
+      ctx.fillStyle = sc;
+      const sw = d.size * 0.5, sh = d.size * 0.65;
+      ctx.fillRect(d.x - sw / 2, d.y - sh, sw, sh);
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(d.x - sw / 2, d.y - sh, sw * 0.48, sh * 0.11);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,200,160,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(d.x, d.y - sh + 3, sw * 0.28, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    } else if (d.type === 'pillar') {
+      // narrow sandstone column (redcanyon)
+      const pc = Game.isNight ? 'rgba(85,28,18,0.92)' : 'rgba(162,68,36,1)';
+      const pw = d.size * 0.32, ph = d.size * 2.2;
+      ctx.fillStyle = pc;
+      ctx.fillRect(d.x - pw, d.y - ph, pw * 2, ph);
+      // wider cap
+      ctx.fillRect(d.x - pw * 1.35, d.y - ph, pw * 2.7, ph * 0.1);
+      // strata lines
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      for (let li = 1; li < 4; li++) {
+        ctx.fillRect(d.x - pw, d.y - ph * (li / 4), pw * 2, 1.5);
+      }
+      // sunlit edge
+      ctx.fillStyle = 'rgba(255,200,140,0.14)';
+      ctx.fillRect(d.x - pw, d.y - ph, pw * 0.32, ph);
+    } else if (d.type === 'sign') {
+      // abandoned road sign (midnight biome)
+      ctx.fillStyle = Game.isNight ? 'rgba(38,42,62,0.92)' : 'rgba(52,58,78,1)';
+      const ph = d.size * 1.6;
+      ctx.fillRect(d.x - 2, d.y - ph, 4, ph);
+      const sw = d.size * 1.2, sh = d.size * 0.7;
+      ctx.fillStyle = 'rgba(28,32,48,0.94)';
+      ctx.fillRect(d.x - sw / 2, d.y - ph, sw, sh);
+      ctx.save();
+      ctx.strokeStyle = Game.isNight ? 'rgba(80,120,220,0.48)' : 'rgba(100,140,240,0.36)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(d.x - sw / 2 + 2, d.y - ph + 2, sw - 4, sh - 4);
+      ctx.restore();
+      ctx.fillStyle = Game.isNight ? 'rgba(80,120,200,0.52)' : 'rgba(100,140,220,0.42)';
+      ctx.fillRect(d.x - sw / 2 + 5, d.y - ph + sh * 0.3, sw * 0.6, 2);
+      ctx.fillRect(d.x - sw / 2 + 5, d.y - ph + sh * 0.6, sw * 0.4, 2);
     }
   }
 }
