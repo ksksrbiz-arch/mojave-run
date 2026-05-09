@@ -8,7 +8,12 @@
 // FEATURE DETECT
 // ============================================================
 const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-const IS_MOBILE = IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 900;
+const HAS_COARSE_POINTER = (() => {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches;
+  } catch (_) { return false; }
+})();
+const IS_MOBILE = HAS_COARSE_POINTER || (IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 1100);
 
 // ============================================================
 // DATA — VEHICLES, UPGRADES, MODES, LEVELS
@@ -1073,6 +1078,19 @@ function announceEvent(text, color = '#ffe07a') {
 const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
+const DPR_CAP = IS_MOBILE ? 1.5 : 2;
+const MIN_RENDER_SCALE = IS_MOBILE ? 0.7 : 0.85;
+const MIN_DPR = IS_MOBILE ? 0.75 : 1;
+let renderScale = (() => {
+  let scale = IS_MOBILE ? 0.95 : 1;
+  const mem = Number(navigator.deviceMemory || 0);
+  const cores = Number(navigator.hardwareConcurrency || 0);
+  if (mem && mem <= 2) scale -= 0.15;
+  if (cores && cores <= 4) scale -= 0.1;
+  return Math.min(1, Math.max(MIN_RENDER_SCALE, scale));
+})();
+let _resizeRaf = 0;
+let _resizeTimer = 0;
 
 // Cached gradients — rebuilt only when their inputs change (size or sky state)
 // so we don't allocate per frame. The sky/road gradients are also keyed by
@@ -1136,9 +1154,15 @@ function getRoadGradient(x0, x1) {
 }
 
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
-  W = window.innerWidth;
-  H = window.innerHeight;
+  const vv = window.visualViewport;
+  const nextW = Math.max(1, Math.round(vv ? vv.width : window.innerWidth));
+  const nextH = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
+  const wantedDpr = (window.devicePixelRatio || 1) * renderScale;
+  const nextDpr = Math.round(Math.min(DPR_CAP, Math.max(MIN_DPR, wantedDpr)) * 100) / 100;
+  if (nextW === W && nextH === H && Math.abs(nextDpr - DPR) < 0.01) return;
+  DPR = nextDpr;
+  W = nextW;
+  H = nextH;
   cvs.width  = Math.floor(W * DPR);
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -1150,8 +1174,24 @@ function resize() {
     Game.player.y = H - 110;
   }
 }
-window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+function queueResize(delay = 0) {
+  if (delay > 0) {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => queueResize(0), delay);
+    return;
+  }
+  if (_resizeRaf) return;
+  _resizeRaf = requestAnimationFrame(() => {
+    _resizeRaf = 0;
+    resize();
+  });
+}
+window.addEventListener('resize', () => queueResize());
+window.addEventListener('orientationchange', () => queueResize(160));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => queueResize());
+  window.visualViewport.addEventListener('scroll', () => queueResize());
+}
 
 // ============================================================
 // AUDIO
@@ -5077,6 +5117,7 @@ const PerfMon = {
   ewmaMs: 16.7,
   quality: 1,
   lastAdjustAt: 0,
+  lastScaleAdjustAt: 0,
   hidden: false,
   // Frame counter + EWMA-derived FPS for the debug HUD.
   frames: 0,
@@ -5202,6 +5243,21 @@ function frame(now) {
       applyQualityCaps();
     }
   }
+  // Adaptive render scale: changes canvas pixel density (not gameplay logic)
+  // so low-end phones/tablets can stay smooth while high-end devices regain
+  // sharpness when there's headroom.
+  if (now - PerfMon.lastScaleAdjustAt > 1200) {
+    PerfMon.lastScaleAdjustAt = now;
+    const prev = renderScale;
+    if (PerfMon.ewmaMs > 28 && renderScale > MIN_RENDER_SCALE) {
+      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.12);
+    } else if (PerfMon.ewmaMs > 22 && renderScale > MIN_RENDER_SCALE) {
+      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.06);
+    } else if (PerfMon.ewmaMs < 13 && renderScale < 1) {
+      renderScale = Math.min(1, renderScale + 0.04);
+    }
+    if (Math.abs(renderScale - prev) > 0.001) resize();
+  }
   requestAnimationFrame(frame);
 }
 
@@ -5212,7 +5268,7 @@ function frame(now) {
 function drawDebugHud() {
   const lines = [
     `FPS ${PerfMon.fps.toFixed(0)}  ${PerfMon.ewmaMs.toFixed(1)}ms`,
-    `Q ${PerfMon.mode}${PerfMon.mode === 'auto' ? ` (${PerfMon.quality.toFixed(2)})` : ''}  DPR ${DPR}`,
+    `Q ${PerfMon.mode}${PerfMon.mode === 'auto' ? ` (${PerfMon.quality.toFixed(2)})` : ''}  DPR ${DPR}  RS ${renderScale.toFixed(2)}`,
     `enem ${Game.enemies.length}  obst ${Game.obstacles.length}  pick ${Game.pickups.length}`,
     `bull ${Game.bullets.length}  ebul ${Game.enemyBullets.length}  part ${Game.particles.length}`,
     `pop ${Game.popups.length}  sw ${Game.shockwaves.length}` +
