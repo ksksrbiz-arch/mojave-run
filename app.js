@@ -542,6 +542,18 @@ CAMPAIGN_LOCATIONS.forEach((loc, locIdx) => {
     CAMPAIGN_LEVEL_MAP[loc.id + '-' + lvl.num] = { loc, lvl, locIdx, levelIdx };
   });
 });
+const CAMPAIGN_LEVEL_TOTAL = CAMPAIGN_LOCATIONS.reduce((sum, loc) => sum + loc.levels.length, 0);
+const ZOMBIE_UNLOCK_CAMPAIGN_LEVELS = Math.ceil(CAMPAIGN_LEVEL_TOTAL / 2);
+
+function getCampaignLevelsCleared(profile) {
+  return Object.values((profile && profile.campaignCleared) || {}).reduce(
+    (sum, entry) => sum + ((entry.levelsCleared || []).length), 0
+  );
+}
+
+function getZombieUnlockLevelsRemaining(profile) {
+  return Math.max(0, ZOMBIE_UNLOCK_CAMPAIGN_LEVELS - getCampaignLevelsCleared(profile));
+}
 
 // ============================================================
 // SIDEKICKS — passive companions unlocked through campaign
@@ -1271,6 +1283,12 @@ const Profile = {
     const p = this.active(); if (!p) return false;
     const cleared = ((p.campaignCleared || {})[locId] || {}).levelsCleared || [];
     return cleared.length >= loc.levels.length;
+  },
+  campaignLevelsCleared() {
+    return getCampaignLevelsCleared(this.active());
+  },
+  isZombieModeUnlocked() {
+    return this.campaignLevelsCleared() >= ZOMBIE_UNLOCK_CAMPAIGN_LEVELS;
   },
   recordCampaignLevel(locId, levelNum) {
     const p = this.active(); if (!p) return null;
@@ -2269,6 +2287,12 @@ function startRun(mode, level) {
   ensureAudio();
   const profile = Profile.active();
   if (!profile) return;
+  if (mode === 'zombie' && !Profile.isZombieModeUnlocked()) {
+    const remaining = getZombieUnlockLevelsRemaining(profile);
+    UI.toast('ZOMBIE HORDE LOCKED — CLEAR ' + remaining + ' MORE CAMPAIGN LEVEL' + (remaining === 1 ? '' : 'S'));
+    UI.showMode();
+    return;
+  }
   // Daily Challenge: seed Math.random for the run so every player who runs
   // it on the same UTC date sees identical world generation. Always restore
   // before any new run so seeding doesn't leak across modes.
@@ -2455,12 +2479,17 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   if (Game.mode === 'campaign' && reason === 'victory') {
     // record cleared level and capture any sidekick unlock for the story overlay
     let _unlockedSk = null;
+    let _unlockedZombie = false;
     if (Game.campaignLevelId) {
+      const _wasZombieUnlocked = Profile.isZombieModeUnlocked();
       const _ce = CAMPAIGN_LEVEL_MAP[Game.campaignLevelId];
-      if (_ce) _unlockedSk = Profile.recordCampaignLevel(_ce.loc.id, _ce.lvl.num);
+      if (_ce) {
+        _unlockedSk = Profile.recordCampaignLevel(_ce.loc.id, _ce.lvl.num);
+        _unlockedZombie = !_wasZombieUnlocked && Profile.isZombieModeUnlocked();
+      }
     }
     const _capturedId = Game.campaignLevelId;
-    setTimeout(() => UI.showCampaignStory(_capturedId, _unlockedSk, () => UI.showResults(reason)), 1100);
+    setTimeout(() => UI.showCampaignStory(_capturedId, _unlockedSk, _unlockedZombie, () => UI.showResults(reason)), 1100);
   } else {
     setTimeout(() => UI.showResults(reason), reason === 'death' ? 700 : 1100);
   }
@@ -5637,16 +5666,24 @@ const UI = {
   showMode() {
     const p = Profile.active(); if (!p) return;
     const v = VEHICLE_BY_ID[p.activeVehicle];
+    const zombieUnlocked = Profile.isZombieModeUnlocked();
+    const campaignCleared = Profile.campaignLevelsCleared();
     document.getElementById('mode-vehicle').textContent = v.name;
     const list = document.getElementById('mode-list');
     list.innerHTML = '';
     MODES.forEach(m => {
       const tile = document.createElement('button');
-      tile.className = 'mode-tile';
+      const zombieLocked = m.id === 'zombie' && !zombieUnlocked;
+      const desc = zombieLocked ? `${m.desc} Unlocks at campaign midpoint.` : m.desc;
+      const lockLine = zombieLocked
+        ? `<div class="mt-lock">🔒 ${campaignCleared} / ${ZOMBIE_UNLOCK_CAMPAIGN_LEVELS} CAMPAIGN LEVELS CLEARED</div>`
+        : '';
+      tile.className = 'mode-tile' + (zombieLocked ? ' locked' : '');
       tile.dataset.mid = m.id;
       tile.innerHTML = `
         <div class="mt-name">${m.name}</div>
-        <div class="mt-desc">${m.desc}</div>
+        <div class="mt-desc">${desc}</div>
+        ${lockLine}
       `;
       list.appendChild(tile);
     });
@@ -6104,7 +6141,11 @@ const UI = {
         break;
       case 'mode-select': {
         const m = data;
-        if (m === 'gauntlet') UI.showGauntlet();
+        if (m === 'zombie' && !Profile.isZombieModeUnlocked()) {
+          const remaining = getZombieUnlockLevelsRemaining(Profile.active());
+          UI.toast('LOCKED — CLEAR ' + remaining + ' MORE CAMPAIGN LEVEL' + (remaining === 1 ? '' : 'S'));
+        }
+        else if (m === 'gauntlet') UI.showGauntlet();
         else if (m === 'campaign') UI.showCampaign();
         else startRun(m);
         break;
@@ -6181,9 +6222,7 @@ const UI = {
   // ---- CAMPAIGN ----
   showCampaign() {
     const p = Profile.active(); if (!p) return;
-    const cleared = Object.values(p.campaignCleared || {}).reduce((s, v) => s + ((v.levelsCleared || []).length), 0);
-    const total = CAMPAIGN_LOCATIONS.reduce((s, l) => s + l.levels.length, 0);
-    document.getElementById('campaign-progress').textContent = cleared + ' / ' + total;
+    document.getElementById('campaign-progress').textContent = Profile.campaignLevelsCleared() + ' / ' + CAMPAIGN_LEVEL_TOTAL;
     document.getElementById('campaign-map').innerHTML = buildUSMapSVG();
     // auto-select the first unlocked-but-incomplete location
     const firstLoc = CAMPAIGN_LOCATIONS.find((loc, i) => {
@@ -6226,7 +6265,7 @@ const UI = {
   },
 
   // ---- CAMPAIGN STORY OVERLAY ----
-  showCampaignStory(levelId, sidekickId, cb) {
+  showCampaignStory(levelId, sidekickId, zombieUnlocked, cb) {
     const entry = levelId ? CAMPAIGN_LEVEL_MAP[levelId] : null;
     if (!entry) { cb(); return; }
     const loc = entry.loc;
@@ -6239,9 +6278,14 @@ const UI = {
     titleEl.textContent = isLocCleared ? loc.name.toUpperCase() + ' CLEARED' : lvl.name.toUpperCase() + ' CLEARED';
     textEl.textContent  = isLocCleared ? loc.outro : (lvl.obj === 'boss' ? 'BOSS ELIMINATED. THE ROAD OPENS.' : 'OBJECTIVE COMPLETE. KEEP MOVING.');
     if (skLine) {
+      const notices = [];
       if (sidekickId) {
         const sk = SIDEKICK_BY_ID[sidekickId];
-        skLine.textContent = sk ? '★ ' + sk.name.toUpperCase() + ' JOINS YOUR CREW!' : '';
+        if (sk) notices.push('★ ' + sk.name.toUpperCase() + ' JOINS YOUR CREW!');
+      }
+      if (zombieUnlocked) notices.push('☣ ZOMBIE HORDE UNLOCKED');
+      if (notices.length) {
+        skLine.textContent = notices.join(' · ');
         skLine.style.display = '';
       } else {
         skLine.style.display = 'none';
