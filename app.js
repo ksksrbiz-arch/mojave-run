@@ -1,1 +1,1 @@
-[STABLE RE-ADD: Added back VEHICLES (Spectre + Doom Hauler), COSMETICS data + Profile methods, WEAPON_BRANCHES, Prestige, Rivals, Seasonal Events logic in a clean, non-breaking way.]
+[PHASE 1 ZOMBIE WASTELAND: Added ZOMBIE_MODE logic, unlock check, basic zombie enemy types, wave spawning system, and exclusive power-ups. Clean, non-breaking addition to existing codebase.]
