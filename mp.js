@@ -56,6 +56,30 @@
     emit('status', { code, detail: detail || '' });
   }
 
+  function normalizeWsUrl(raw) {
+    const value = String(raw == null ? '' : raw).trim();
+    if (!value) return '';
+    let candidate = value;
+    if (/^https?:\/\//i.test(candidate)) {
+      candidate = candidate.replace(/^http/i, 'ws');
+    } else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
+      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+      if (candidate.startsWith('/')) {
+        candidate = `${proto}${location.host}${candidate}`;
+      } else {
+        candidate = `${proto}${candidate}`;
+      }
+    }
+    try {
+      const u = new URL(candidate, location.href);
+      if (u.protocol !== 'ws:' && u.protocol !== 'wss:') return '';
+      if (!u.pathname || u.pathname === '/') u.pathname = '/ws';
+      return u.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
   function defaultUrl() {
     // Priority order:
     //   1. window.MP_DEFAULT_URL (lets a build/host inject it at runtime)
@@ -65,7 +89,8 @@
     const metaEl = document.querySelector('meta[name="mp-server-url"]');
     const fromMeta = (metaEl && metaEl.content && metaEl.content.trim()) || '';
     const configured = fromWindow || fromMeta;
-    if (configured) return configured;
+    const normalized = normalizeWsUrl(configured);
+    if (normalized) return normalized;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}/ws`;
   }
@@ -269,7 +294,7 @@
     MP.name = (name || 'DRIVER').slice(0, 14);
     MP.vehicleId = vehicleId || 'rust';
     if (color) MP.color = color;
-    MP.url = url || defaultUrl();
+    MP.url = normalizeWsUrl(url || '') || defaultUrl();
     MP._wantConnected = true;
     MP._reconnectAttempts = 0;
     setStatus('connecting', `RAISING THE ANTENNA…`);
