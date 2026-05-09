@@ -14,7 +14,7 @@
      page (works when server.js serves the static site). On a static-only host
      like Netlify, set this to your deployed wss://… URL so the client connects
      to the right relay automatically. -->
-<meta name="mp-server-url" content="" />
+<meta name="mp-server-url" content="wss://mojave-run-lw3g.onrender.com/ws" />
 <meta property="og:title" content="MOJAVE RUN" />
 <meta property="og:description" content="A wasteland arcade driver. Survive the Mojave. Garage, upgrades, gauntlet mode, bosses." />
 <meta property="og:type" content="website" />
@@ -752,6 +752,10 @@
       <div class="small center">UP TO 6 DRIVERS PER DEVICE</div>
       <div id="profile-list" style="display:flex;flex-direction:column;gap:10px"></div>
       <button class="btn primary" data-act="profile-new">+ NEW DRIVER</button>
+      <div class="btn-row" style="margin-top:4px">
+        <button class="btn" data-act="cloud-save" style="font-size:11px">☁ CLOUD SAVE</button>
+        <button class="btn" data-act="cloud-restore" style="font-size:11px">☁ CLOUD RESTORE</button>
+      </div>
       <button class="btn" data-act="back-title">◄ BACK</button>
     </div>
   </div>
@@ -920,7 +924,7 @@
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <label class="small" style="letter-spacing:1.5px">SERVER</label>
-        <input id="mp-url" class="mp-input" placeholder="ws://host:8787/ws (blank = same site)" autocomplete="off" spellcheck="false" />
+        <input id="mp-url" class="mp-input" placeholder="wss://mojave-run-lw3g.onrender.com/ws" autocomplete="off" spellcheck="false" />
         <label class="small" style="letter-spacing:1.5px">ROOM CODE</label>
         <input id="mp-room" class="mp-input" placeholder="LOBBY" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" />
       </div>
@@ -1040,6 +1044,21 @@
     </div>
   </div>
 
+  <!-- CLOUD MODAL -->
+  <div id="cloud-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.85);align-items:center;justify-content:center">
+    <div class="box" style="max-width:320px;width:90%;background:#1a1408;border:1px solid var(--gold-faint);border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:12px">
+      <h3 id="cloud-modal-title" style="font-size:14px;letter-spacing:2px;text-align:center;margin:0">CLOUD SAVE</h3>
+      <div id="cloud-modal-body" style="font-size:11px;letter-spacing:1.5px;text-align:center;line-height:1.8;color:var(--gold-dim)"></div>
+      <input id="cloud-modal-input" type="text" maxlength="20" placeholder="XXXXXX-XXXXXX"
+        style="display:none;width:100%;background:rgba(0,0,0,.5);border:1px solid var(--gold-faint);color:var(--gold);padding:10px 12px;font-family:'Courier New',monospace;font-size:15px;letter-spacing:3px;border-radius:4px;outline:none;text-align:center;text-transform:uppercase" autocomplete="off" spellcheck="false" />
+      <div class="err" id="cloud-modal-err" style="color:var(--danger);font-size:10px;letter-spacing:1px;text-align:center;min-height:14px"></div>
+      <div class="btn-row">
+        <button class="btn" id="cloud-modal-cancel">CANCEL</button>
+        <button class="btn primary" id="cloud-modal-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ROTATE PROMPT -->
   <div id="rotate">
     <div>
@@ -1049,6 +1068,7 @@
     </div>
   </div>
 </div>
+<script>window.RENDER_API = 'https://mojave-run-lw3g.onrender.com';</script>
 <script src="/mp.js"></script>
 <script src="/app.js"></script>
 <script>

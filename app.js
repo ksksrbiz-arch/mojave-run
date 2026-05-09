@@ -6325,7 +6325,7 @@ function submitGlobalScore() {
     vehicle,
   };
   try {
-    fetch('/api/scores', {
+    fetch((window.RENDER_API || '') + '/api/scores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -6915,7 +6915,7 @@ const UI = {
     titleEl.textContent = (MODES.find(m => m.id === modeId) || { name: 'GLOBAL' }).name;
     el.innerHTML = '<div class="small center" style="padding:14px">LOADING...</div>';
     this.show('scoreboard');
-    const url = '/api/scores?mode=' + encodeURIComponent(modeId);
+    const url = (window.RENDER_API || '') + '/api/scores?mode=' + encodeURIComponent(modeId);
     fetch(url)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(data => {
@@ -8003,8 +8003,143 @@ UI.act = function(action, data) {
 };
 
 // ============================================================
-// BOOT
+// CLOUD SAVE / RESTORE (Render back-end accounts)
 // ============================================================
+const CLOUD_ID_KEY    = 'mojaveRun_cloud_id';
+const CLOUD_TOKEN_KEY = 'mojaveRun_cloud_token';
+
+function cloudApiBase() {
+  return (typeof window.RENDER_API === 'string' && window.RENDER_API.trim())
+    ? window.RENDER_API.trim()
+    : '';
+}
+
+function cloudModal(title, bodyHtml, { showInput = false, inputPlaceholder = '', okLabel = 'OK', onOk } = {}) {
+  const m    = document.getElementById('cloud-modal');
+  const tEl  = document.getElementById('cloud-modal-title');
+  const bEl  = document.getElementById('cloud-modal-body');
+  const iEl  = document.getElementById('cloud-modal-input');
+  const eEl  = document.getElementById('cloud-modal-err');
+  const okEl = document.getElementById('cloud-modal-ok');
+  const cxEl = document.getElementById('cloud-modal-cancel');
+  tEl.textContent = title;
+  bEl.innerHTML   = bodyHtml;
+  eEl.textContent = '';
+  iEl.value       = '';
+  iEl.placeholder = inputPlaceholder || 'XXXXXX-XXXXXX';
+  iEl.style.display = showInput ? '' : 'none';
+  okEl.textContent  = okLabel;
+  m.style.display   = 'flex';
+  if (showInput) setTimeout(() => iEl.focus(), 80);
+  const cleanup = () => {
+    m.style.display = 'none';
+    okEl.onclick  = null;
+    cxEl.onclick  = null;
+    iEl.onkeydown = null;
+  };
+  const handleOk = () => {
+    cleanup();
+    if (onOk) onOk(iEl.value.trim().toUpperCase());
+  };
+  okEl.onclick  = handleOk;
+  cxEl.onclick  = cleanup;
+  iEl.onkeydown = (e) => { if (e.key === 'Enter') handleOk(); if (e.key === 'Escape') cleanup(); };
+}
+
+function cloudSave() {
+  const base = cloudApiBase();
+  if (!base) { UI.toast('CLOUD NOT CONFIGURED'); return; }
+  const p = Profile.active();
+  if (!p) { UI.toast('NO ACTIVE DRIVER'); return; }
+  const allProfiles = Profile.list();
+  const data = { profiles: allProfiles };
+
+  const doSave = (id, token) => {
+    fetch(base + '/api/accounts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, token, data }),
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(() => {
+        const code = id + '-' + token;
+        cloudModal('CLOUD SAVED ☁', `YOUR CLOUD CODE:<br/><br/><b style="font-size:18px;letter-spacing:4px;color:var(--gold)">${escapeHtml(code)}</b><br/><br/>WRITE THIS DOWN TO RESTORE YOUR ACCOUNT ON ANY DEVICE.`, {
+          okLabel: 'COPY CODE',
+          onOk: () => {
+            try { navigator.clipboard.writeText(code).catch(() => {}); } catch (_) {}
+            UI.toast('CODE COPIED!');
+          },
+        });
+      })
+      .catch(err => UI.toast('CLOUD SAVE FAILED: ' + err.message));
+  };
+
+  const existingId    = localStorage.getItem(CLOUD_ID_KEY);
+  const existingToken = localStorage.getItem(CLOUD_TOKEN_KEY);
+  if (existingId && existingToken) {
+    doSave(existingId, existingToken);
+    return;
+  }
+  // Register a new account first
+  fetch(base + '/api/accounts/register', { method: 'POST' })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+    .then(resp => {
+      localStorage.setItem(CLOUD_ID_KEY, resp.id);
+      localStorage.setItem(CLOUD_TOKEN_KEY, resp.token);
+      doSave(resp.id, resp.token);
+    })
+    .catch(err => UI.toast('COULD NOT REACH CLOUD: ' + err.message));
+}
+
+function cloudRestore() {
+  const base = cloudApiBase();
+  if (!base) { UI.toast('CLOUD NOT CONFIGURED'); return; }
+  const existing = localStorage.getItem(CLOUD_ID_KEY);
+  const existingToken = localStorage.getItem(CLOUD_TOKEN_KEY);
+  const hintHtml = existing
+    ? `YOUR CURRENT CODE: <b style="color:var(--gold)">${escapeHtml(existing + '-' + existingToken)}</b><br/><br/>ENTER A CODE TO RESTORE A DIFFERENT ACCOUNT.`
+    : 'ENTER THE CLOUD CODE YOU WERE GIVEN WHEN YOU SAVED.';
+  cloudModal('☁ CLOUD RESTORE', hintHtml, {
+    showInput: true,
+    inputPlaceholder: 'XXXXXX-XXXXXX',
+    okLabel: 'RESTORE',
+    onOk: (code) => {
+      if (!code) { UI.toast('INVALID CLOUD CODE'); return; }
+      const parts = code.split('-');
+      if (parts.length !== 2 || parts[0].length !== 6 || parts[1].length !== 6) {
+        UI.toast('INVALID CLOUD CODE — FORMAT MUST BE XXXXXX-XXXXXX');
+        return;
+      }
+      const id    = parts[0];
+      const token = parts[1];
+      fetch(base + '/api/accounts/load?id=' + encodeURIComponent(id) + '&token=' + encodeURIComponent(token))
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(resp => {
+          if (!resp.data || !Array.isArray(resp.data.profiles)) throw new Error('bad data');
+          // Merge server profiles into local store
+          const merged = Profile._data;
+          const existing2 = new Map(merged.profiles.map(pp => [pp.id, pp]));
+          resp.data.profiles.forEach(pp => existing2.set(pp.id, pp));
+          merged.profiles = Array.from(existing2.values());
+          Profile.save();
+          localStorage.setItem(CLOUD_ID_KEY, id);
+          localStorage.setItem(CLOUD_TOKEN_KEY, token);
+          UI.showProfiles();
+          UI.toast('CLOUD RESTORE COMPLETE!');
+        })
+        .catch(err => UI.toast('RESTORE FAILED: ' + err.message));
+    },
+  });
+}
+
+// Wire cloud actions into UI.act
+const _origActCloud = UI.act.bind(UI);
+UI.act = function(action, data) {
+  if (action === 'cloud-save') { SFX.click(); cloudSave(); return; }
+  if (action === 'cloud-restore') { SFX.click(); cloudRestore(); return; }
+  return _origActCloud(action, data);
+};
+
 function boot() {
   resize();
   loadQualityPref();

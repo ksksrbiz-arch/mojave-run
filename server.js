@@ -1,7 +1,7 @@
 // MOJAVE RUN — multiplayer relay + static file server
 // Run: `node server.js` (optional `PORT=8787 node server.js`)
-// Friends connect to http://<your-ip>:8787 on LAN, or expose to internet via
-// `cloudflared tunnel --url http://localhost:8787` and share the public URL.
+// Deployed on Render at https://mojave-run-lw3g.onrender.com as the
+// multiplayer back-end for the Netlify-hosted frontend.
 //
 // Single dependency: `ws`. Install with `npm install` once.
 //
@@ -11,10 +11,19 @@
 //   * room peer cap (prevents one room flooding the relay)
 //   * graceful SIGINT/SIGTERM shutdown
 //   * permissive CORS so the static site can be served separately from the WS
+//
+// Endpoints:
+//   GET  /healthz                  — health check
+//   GET  /api/scores?mode=…        — top-10 scoreboard for a mode
+//   POST /api/scores               — submit a run score
+//   POST /api/accounts/register    — create a cloud account, returns { id, token }
+//   POST /api/accounts/save        — save profile data { id, token, data }
+//   GET  /api/accounts/load?id=&token= — restore profile data
 
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT, 10) || 8787;
@@ -27,6 +36,9 @@ const ROOM_PEER_CAP = parseInt(process.env.MP_ROOM_CAP, 10) || 16;
 const HEARTBEAT_MS = parseInt(process.env.MP_HEARTBEAT_MS, 10) || 15000;
 const SCORES_FILE = path.join(ROOT, 'scores.json');
 const MAX_SCORES_PER_MODE = 50;
+const ACCOUNTS_FILE = path.join(ROOT, 'accounts.json');
+const MAX_ACCOUNTS = 50000;
+const MAX_PROFILE_BYTES = 65536; // 64 KB per cloud save
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -95,6 +107,78 @@ function addScore(entry) {
 
 loadScores();
 
+// ============================================================
+// ACCOUNTS — cloud save/restore for driver profiles
+// ============================================================
+let accounts = {}; // id -> { token, savedAt, data }
+let accountsSavePending = false;
+
+// Cryptographically random cloud code component (rejection sampling avoids modulo bias).
+function genCode(len) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars — power of 2, no bias
+  const bytes = crypto.randomBytes(len);
+  let s = '';
+  for (let i = 0; i < len; i++) s += chars[bytes[i] & 31]; // 32 = 2^5, mask is exact
+  return s;
+}
+
+// Constant-time string equality to guard against timing attacks.
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bA = Buffer.from(a);
+  const bB = Buffer.from(b);
+  if (bA.length !== bB.length) return false;
+  return crypto.timingSafeEqual(bA, bB);
+}
+
+// Parse and normalise an account credential from a raw string value.
+function parseCredential(raw, len) {
+  return String(raw == null ? '' : raw).slice(0, len).toUpperCase();
+}
+
+function loadAccounts() {
+  try {
+    if (fs.existsSync(ACCOUNTS_FILE)) {
+      accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8')) || {};
+    }
+  } catch (e) {
+    console.warn('[accounts] failed to load accounts.json:', e.message);
+    accounts = {};
+  }
+}
+
+function saveAccountsDebounced() {
+  if (accountsSavePending) return;
+  accountsSavePending = true;
+  setTimeout(() => {
+    accountsSavePending = false;
+    try {
+      fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts));
+    } catch (e) {
+      console.warn('[accounts] failed to write accounts.json:', e.message);
+    }
+  }, 2000);
+}
+
+// Simple in-memory rate limiter for the register endpoint.
+const registerRateMap = new Map(); // ip -> { count, windowStart }
+const REGISTER_WINDOW_MS = 60000;
+const REGISTER_MAX_PER_WINDOW = 10;
+
+function isRegisterRateLimited(ip) {
+  const now = Date.now();
+  const entry = registerRateMap.get(ip) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > REGISTER_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count++;
+  registerRateMap.set(ip, entry);
+  return entry.count > REGISTER_MAX_PER_WINDOW;
+}
+
+loadAccounts();
+
 const server = http.createServer((req, res) => {
   // Permissive CORS — read-only static assets.
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -145,7 +229,84 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  // ---- Accounts API ----
+  if (urlPathApi === '/api/accounts/register' && req.method === 'POST') {
+    const clientIp = req.socket.remoteAddress || '';
+    if (isRegisterRateLimited(clientIp)) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'too many registrations' }));
+      return;
+    }
+    if (Object.keys(accounts).length >= MAX_ACCOUNTS) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'server full' }));
+      return;
+    }
+    const id    = genCode(6);
+    const token = genCode(6);
+    accounts[id] = { token, savedAt: Date.now(), data: null };
+    saveAccountsDebounced();
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, id, token }));
+    return;
+  }
+
+  if (urlPathApi === '/api/accounts/save' && req.method === 'POST') {
+    let body = '';
+    let tooBig = false;
+    req.on('data', chunk => {
+      if (tooBig) return;
+      if (body.length + chunk.length > MAX_PROFILE_BYTES) {
+        tooBig = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'payload too large' }));
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
+    req.on('end', () => {
+      if (tooBig) return;
+      try {
+        const { id, token, data } = JSON.parse(body);
+        if (!id || !token || !data) throw new Error('missing fields');
+        const normId    = parseCredential(id, 6);
+        const normToken = parseCredential(token, 6);
+        const acc = accounts[normId];
+        if (!acc || !safeEqual(acc.token, normToken)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
+          return;
+        }
+        acc.data = data;
+        acc.savedAt = Date.now();
+        saveAccountsDebounced();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'bad request' }));
+      }
+    });
+    req.on('error', () => {});
+    return;
+  }
+
+  if (urlPathApi === '/api/accounts/load' && req.method === 'GET') {
+    const qs       = new URLSearchParams(urlParsed[1] || '');
+    const normId   = parseCredential(qs.get('id'), 6);
+    const normTok  = parseCredential(qs.get('token'), 6);
+    const acc      = accounts[normId];
+    if (!acc || !safeEqual(acc.token, normTok)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, data: acc.data }));
+    return;
+  }
+
   if (urlPath === '/') urlPath = '/index.html';
   // prevent path traversal
   const filePath = path.normalize(path.join(ROOT, urlPath));
