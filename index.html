@@ -223,7 +223,7 @@ function normalizeSave(s){
   if(!s || !Array.isArray(s.drivers) || !s.drivers.length) return base;
   const drivers = s.drivers.map((d,i)=>{
     const savedDriver = d && typeof d === 'object' ? d : {};
-    const name = String(savedDriver.name || (i ? 'DRIVER '+(i+1) : 'DRIFTER')).toUpperCase().slice(0,10);
+    const name = String(savedDriver.name || (i ? 'DRIVER '+i : 'DRIFTER')).toUpperCase().slice(0,10);
     return {...defaultDriver(), ...savedDriver, name};
   });
   const active = Number.isInteger(s.active) && s.active >= 0 && s.active < drivers.length ? s.active : 0;
