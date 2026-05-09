@@ -130,7 +130,7 @@
   <div class="toast" id="toast"></div>
 
   <div class="overlay" id="menuTitle">
-    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WEBGL CLASSIC</span></div>
+    <div class="title">MOJAVE RUN<br><span style="font-size:.5em;color:var(--rot-2)">V2 · WebGL CLASSIC</span></div>
     <div class="subtitle">Race raiders, dust storms, bosses, and neon road effects across the Mojave.<br><b>Zombie Wasteland is an unlockable side mode after 6 campaign sectors.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
@@ -470,8 +470,8 @@ function burst(x,y,n,col,spd=200,life=0.5,size=4,grav=0){
 
 // ---------- Decals (blood / oil on road) -------------------------------
 const Decals = [];
-const MARK_COLORS = {undead:'#5a0808', oil:'#111', blood:'#a01818', spark:'#ffaa44', fire:'#ffcc66'};
-function decal(x,y,r,col=MARK_COLORS.undead){ Decals.push({x,y,r,t:6,col}); if(Decals.length>40) Decals.shift(); }
+const MARK_COLORS = {zombie:'#5a0808', oil:'#111', spark:'#ffaa44', fire:'#ffcc66'};
+function decal(x,y,r,col=MARK_COLORS.zombie){ Decals.push({x,y,r,t:6,col}); if(Decals.length>40) Decals.shift(); }
 
 // ---------- Game state -----------------------------------------------
 const Game = {
@@ -770,12 +770,12 @@ const ZTYPES = {
   crawler:{hp:22,spd:130,dmg:14,score:22,col:'#3a5a2a',w:46,h:30},
   tank:{hp:120,spd:60,dmg:25,score:60,col:'#444a2a',w:64,h:78},
   screamer:{hp:30,spd:100,dmg:8,score:40,col:'#8a3a3a',w:40,h:52},
-  exploder:{hp:24,spd:120,dmg:30,score:50,col:'#aa5500',w:42,h:50},
+  exploder:{hp:24,spd:120,dmg:30,score:50,col:'#aa5500',w:42,h:50,explosive:true},
   brute:{hp:600,spd:40,dmg:40,score:800,col:'#5a1a1a',w:120,h:140,boss:true,name:'BRUTE'},
   raider:{hp:20,spd:120,dmg:10,score:16,col:'#a45a24',w:44,h:72,classic:true},
   buggy:{hp:16,spd:190,dmg:12,score:24,col:'#c07824',w:42,h:66,classic:true},
   outrider:{hp:18,spd:230,dmg:14,score:30,col:'#c09a44',w:34,h:58,classic:true},
-  tanker:{hp:65,spd:85,dmg:26,score:70,col:'#6b6048',w:58,h:86,classic:true},
+  tanker:{hp:65,spd:85,dmg:26,score:70,col:'#6b6048',w:58,h:86,classic:true,explosive:true},
   drone:{hp:26,spd:105,dmg:8,score:45,col:'#4aa6c0',w:54,h:42,classic:true},
   warlord:{hp:700,spd:44,dmg:42,score:900,col:'#603018',w:128,h:150,boss:true,name:'WAR RIG',classic:true},
 };
@@ -785,7 +785,7 @@ class Zombie{
     this.x=x; this.y=y; this.hp=t.hp; this.maxHp=t.hp;
     this.w=t.w; this.h=t.h;
     this.zig = Math.random()*Math.PI*2;
-    this.undead = t.classic !== true;
+    this.isZombie = t.classic !== true;
     this.alive=true;
   }
   update(dt,player){
@@ -837,8 +837,8 @@ class Zombie{
   }
   hit(d){
     this.hp -= d;
-    burst(this.x,this.y,4,this.undead?MARK_COLORS.blood:MARK_COLORS.spark,180,0.4,3);
-    decal(this.x,this.y,8,this.undead?MARK_COLORS.undead:MARK_COLORS.oil);
+    burst(this.x,this.y,4,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.spark,180,0.4,3);
+    decal(this.x,this.y,8,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.oil);
     if(this.hp<=0){ this.kill(true); }
   }
   kill(byShot){
@@ -854,16 +854,16 @@ class Zombie{
     if(this.t.boss){
       Game.scrap += 200;
       Game.shake = Math.max(Game.shake, 30);
-      burst(this.x,this.y,80,this.undead?'#ff5050':'#ffaa44',520,1.0,6,300);
+      burst(this.x,this.y,80,this.isZombie?'#ff5050':'#ffaa44',520,1.0,6,300);
       burst(this.x,this.y,40,'#ffaa44',420,0.8,5);
       Audio.explode();
       toast('BOSS DOWN +200 SCRAP');
       if(Game.boss===this) Game.boss=null;
     }
     if(Math.random()<(this.t.boss?1.0:0.3)) Game.pickups.push(makePickup(this.x,this.y));
-    burst(this.x,this.y,16,this.undead?MARK_COLORS.blood:MARK_COLORS.fire,300,0.6,4,400);
-    decal(this.x,this.y,16,this.undead?MARK_COLORS.undead:MARK_COLORS.oil);
-    if(this.type==='exploder' || this.type==='tanker'){
+    burst(this.x,this.y,16,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.fire,300,0.6,4,400);
+    decal(this.x,this.y,16,this.isZombie?MARK_COLORS.zombie:MARK_COLORS.oil);
+    if(this.t.explosive){
       Audio.explode(); Game.shake=Math.max(Game.shake,20);
       burst(this.x,this.y,40,'#ffaa44',500,0.8,5);
       // chain damage
@@ -891,7 +891,7 @@ class Zombie{
     const x=this.x, y=this.y, w=this.w, h=this.h;
     c.fillStyle='rgba(0,0,0,.4)';
     c.fillRect(x-w/2+3,y+h/2-3,w,6);
-    if(!this.undead){
+    if(!this.isZombie){
       c.fillStyle=this.t.col;
       if(this.type==='drone'){
         c.fillRect(x-w/2,y-h/2+h*0.25,w,h*0.5);
