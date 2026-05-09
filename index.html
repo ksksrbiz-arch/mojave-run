@@ -578,7 +578,7 @@ function updateZombieMenuBtn(){
     btn.classList.remove('primary');
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — unlocked');
   } else {
-    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks at '+ZOMBIE_UNLOCK_SECTORS+'/'+SECTORS.length+' Campaign Sectors ('+cleared+'/'+SECTORS.length+')</span>';
+    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks at sector '+ZOMBIE_UNLOCK_SECTORS+' of '+SECTORS.length+' ('+cleared+' cleared)</span>';
     btn.style.opacity = '0.75'; btn.style.borderColor = '';
     btn.classList.remove('primary');
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — locked. Complete '+ZOMBIE_UNLOCK_SECTORS+' campaign sectors to unlock. Progress: '+cleared+' of '+ZOMBIE_UNLOCK_SECTORS);
@@ -1394,12 +1394,11 @@ function gameOver(win){
     if(Game.wave  > (SAVE.zombieBestWave||0)) SAVE.zombieBestWave = Game.wave;
   }
   persist();
-  const isZombie = Game.modeName==='zombiewasteland';
   document.getElementById('gameoverBody').innerHTML =
-    'SCORE <b>'+Game.score+'</b><br>'+(isZombie?'WAVE <b>'+Game.wave+'</b>':'SECTOR <b>'+Game.sector+'</b>')+
+    'SCORE <b>'+Game.score+'</b><br>'+(Game.modeName==='zombiewasteland'?'WAVE <b>'+Game.wave+'</b>':'SECTOR <b>'+Game.sector+'</b>')+
     '<br>KILLS <b>'+Game.kills+'</b><br>SCRAP <b>+'+Game.scrap+'</b>'+
     (win?'<br><b style="color:var(--good)">CAMPAIGN CLEAR</b>':'')+
-    (isZombie && Game.wave>=(SAVE.zombieBestWave||0)?'<br><b style="color:var(--blood)">NEW BEST WAVE!</b>':'');
+    (Game.modeName==='zombiewasteland' && Game.wave>=(SAVE.zombieBestWave||0)?'<br><b style="color:var(--blood)">NEW BEST WAVE!</b>':'');
   showOverlay('over');
 }
 
