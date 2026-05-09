@@ -235,7 +235,7 @@ const UPGRADE_TRACKS = [
 ];
 
 function totalUpgradeTiers(ups) {
-  return Object.values(ups || {}).reduce((sum, val) => sum + (val | 0), 0);
+  return Object.values(ups || {}).reduce((sum, val) => sum + (Number(val) || 0), 0);
 }
 
 function getVehicleBranches(vehicleId) {
@@ -1267,6 +1267,11 @@ const POWERUPS = {
   pulse:     { name:'PULSE',     color:'#8ec5ff', dur:8.0, glyph:'~' },
 };
 const POWERUP_KEYS = Object.keys(POWERUPS);
+const SALVAGE_MAGNET_BONUS = 40;
+const BOSS_RUSH_REWARD_BASE = 1200;
+const BOSS_RUSH_REWARD_PER_STAGE = 250;
+const BASE_RAM_DAMAGE = 10;
+const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250 };
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -1362,7 +1367,7 @@ function applyMagnet(dt) {
   if (!isPowerupActive('magnet') && !(Game.branchState && Game.branchState.pickupRadius > 0)) return;
   const p = Game.player;
   const bonus = (Game.branchState && Game.branchState.pickupRadius) || 0;
-  const range = 240 + bonus + (isPowerupActive('salvage') ? 40 : 0);
+  const range = 240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0);
   for (const pk of Game.pickups) {
     const dx = p.x - pk.x, dy = p.y - pk.y;
     const d = Math.hypot(dx, dy);
@@ -1388,8 +1393,9 @@ function firePulseBurst() {
   for (let i = Game.enemies.length - 1; i >= 0; i--) {
     const e = Game.enemies[i];
     if (Math.hypot(e.x - px, e.y - py) < 140) {
-      e.hp -= e.elite ? 2 : 1.5;
-      if (Settings.damageNumbers) addPopup('-2', e.x, e.y - 10, '#8ec5ff', 12);
+      const pulseDmg = e.elite ? 2 : 1.5;
+      e.hp -= pulseDmg;
+      if (Settings.damageNumbers) addPopup('-' + pulseDmg, e.x, e.y - 10, '#8ec5ff', 12);
       if (e.hp <= 0) {
         applyKill(e.x, e.y, e.kind === 'mortar' ? 250 : e.kind === 'bike' ? 200 : 150);
         emit(e.x, e.y, 18, { color:'#8ec5ff', speed:300, life:0.55, size:3 });
@@ -1819,7 +1825,9 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   const baseScrap = Math.floor((Game.score / 10) * Game.scrapMul);
   let bonus = 0;
   if (reason === 'victory' && Game.levelData) bonus = Game.levelData.reward;
-  if (reason === 'victory' && Game.mode === 'bossrush') bonus += 1200 + Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) * 250;
+  if (reason === 'victory' && Game.mode === 'bossrush') {
+    bonus += BOSS_RUSH_REWARD_BASE + Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) * BOSS_RUSH_REWARD_PER_STAGE;
+  }
   Game.scrapEarned = baseScrap + bonus;
   Profile.earn(Game.scrapEarned);
   // record stats
@@ -1907,7 +1915,7 @@ function startDynamicEvent(id) {
 }
 
 function maybeTriggerDynamicEvent() {
-  if (Game.mode === 'bossrush' || Game.levelData && Game.levelData.obj === 'boss') return;
+  if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
   const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
   const pick = pool[Math.floor(Math.random() * pool.length)];
   startDynamicEvent(pick);
@@ -2704,7 +2712,7 @@ function update(dt) {
           SFX.explode();
           const isBike = e.kind === 'bike';
           const isMortar = e.kind === 'mortar';
-          const baseScore = (isBike ? 200 : isMortar ? 250 : 150) * (e.elite ? 1.8 : 1);
+          const baseScore = (isBike ? ENEMY_SCORE.bike : isMortar ? ENEMY_SCORE.mortar : ENEMY_SCORE.buggy) * (e.elite ? 1.8 : 1);
           emit(e.x, e.y, isMortar ? 36 : 28, { color:'#ff6a2b', speed:360, life:0.8, size:4 });
           emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
           shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', isMortar ? 110 : 70);
@@ -2727,7 +2735,7 @@ function update(dt) {
     if (!Game.enemies[i]) continue;
 
     if (aabb(e, Game.player)) {
-      const ramDmg = Game.contactDamageMul > 1 ? Game.contactDamageMul - 1 : 0;
+      const ramDmg = Game.contactDamageMul > 1 ? BASE_RAM_DAMAGE * (Game.contactDamageMul - 1) : 0;
       if (ramDmg > 0) e.hp -= ramDmg;
       // shield blocks contact damage but breaks the enemy
       if (isPowerupActive('shield')) {
