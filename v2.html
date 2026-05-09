@@ -797,7 +797,7 @@ function startGame(mode){
   Game.score=0; Game.scrap=0; Game.kills=0; Game.dist=0; Game.shake=0;
   Game.combo=0; Game.comboT=0; Game.boss=null; Game.bossLockSector=0;
   applySector();
-  showOverlay(); hudShow(true); Audio.resume();
+  hideOverlays(); hudShow(true); Audio.resume();
   toast('SECTOR '+Game.sector+': '+SECTORS[(Game.sector-1)%SECTORS.length].name);
   maybeSpawnBoss();
 }
@@ -1126,6 +1126,7 @@ function showOverlay(id){
   for(const k in overlays) overlays[k].classList.toggle('hidden', k!==id);
   if(!id) for(const k in overlays) overlays[k].classList.add('hidden');
 }
+function hideOverlays(){ showOverlay(); }
 function backToMenu(){
   Game.mode='menu'; hudShow(false); Audio.stopEngine();
   showOverlay('title');
@@ -1153,7 +1154,7 @@ document.addEventListener('click', e=>{
   else if(act==='mp'){ showOverlay('mp'); renderMP(); }
   else if(act==='settings'){ showOverlay('settings'); renderSettings(); }
   else if(act==='back') showOverlay('title');
-  else if(act==='resume'){ Game.mode='play'; showOverlay(); hudShow(true); }
+  else if(act==='resume'){ Game.mode='play'; hideOverlays(); hudShow(true); }
   else if(act==='quit') backToMenu();
   else if(act==='again') startGame(Game.modeName);
 });
