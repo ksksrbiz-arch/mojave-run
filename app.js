@@ -2585,12 +2585,12 @@ function startDynamicEvent(id) {
     Game.pickups.push({ kind:'powerup', power:'magnet', x: W * 0.5, y:-60, w:26, h:26, t:0 });
     announceEvent('SALT GLARE', '#e8f2ff');
   } else if (id === 'ash_squall') {
-    Game.activeEvent = { id, name:'ASH SQUALL', t: 9, max: 9 };
+    Game.activeEvent = { id, name:'ASH SQUALL', t: 9, max: 9, nextDrop: 1 / BIOME_EVENT_TUNING.ashSquallSpawnRate };
     spawnHazardField();
     spawnEnemyWave('mortar');
     announceEvent('ASH SQUALL', '#c8a8a0');
   } else if (id === 'canyon_rockfall') {
-    Game.activeEvent = { id, name:'CANYON ROCKFALL', t: 8, max: 8 };
+    Game.activeEvent = { id, name:'CANYON ROCKFALL', t: 8, max: 8, nextDrop: 1 / BIOME_EVENT_TUNING.rockfallSpawnRate };
     spawnRockfallField();
     announceEvent('CANYON ROCKFALL', '#ff8a5a');
   } else if (id === 'neon_surge') {
@@ -2635,15 +2635,16 @@ function spawnRockfallField() {
   const { x0, x1 } = roadBounds();
   for (let i = 0; i < 5; i++) {
     const barrel = i % 3 === 0;
-    Game.obstacles.push({
+    const debris = {
       kind: barrel ? 'barrel' : 'wreck',
       x: rand(x0 + 30, x1 - 30),
       y: -45 - i * rand(38, 58),
       w: barrel ? 22 : rand(28, 42),
       h: barrel ? 24 : rand(38, 58),
-      hp: barrel ? 1 : undefined,
       rot: rand(-0.6, 0.6),
-    });
+    };
+    if (barrel) debris.hp = 1;
+    Game.obstacles.push(debris);
   }
 }
 
@@ -3219,11 +3220,17 @@ function update(dt) {
 
   if (Game.activeEvent) {
     Game.activeEvent.t -= dt;
-    if (Game.activeEvent.id === 'canyon_rockfall' && Math.random() < dt * BIOME_EVENT_TUNING.rockfallSpawnRate && Game.obstacles.length < BIOME_EVENT_TUNING.maxEventObstacles) {
-      spawnRockfallField();
-    }
-    if (Game.activeEvent.id === 'ash_squall' && Math.random() < dt * BIOME_EVENT_TUNING.ashSquallSpawnRate && Game.obstacles.length < BIOME_EVENT_TUNING.maxEventObstacles) {
-      spawnHazardField();
+    if ((Game.activeEvent.id === 'canyon_rockfall' || Game.activeEvent.id === 'ash_squall') && Game.obstacles.length < BIOME_EVENT_TUNING.maxEventObstacles) {
+      Game.activeEvent.nextDrop -= dt;
+      if (Game.activeEvent.nextDrop <= 0) {
+        if (Game.activeEvent.id === 'canyon_rockfall') {
+          spawnRockfallField();
+          Game.activeEvent.nextDrop += 1 / BIOME_EVENT_TUNING.rockfallSpawnRate;
+        } else {
+          spawnHazardField();
+          Game.activeEvent.nextDrop += 1 / BIOME_EVENT_TUNING.ashSquallSpawnRate;
+        }
+      }
     }
     if (Game.activeEvent.id === 'stormfront' && Game.activeEvent.t <= 0 && !Game.runMutators.some(m => m.id === 'volatile')) {
       Game.isStorm = !!(Game.levelData && Game.levelData.storm);
@@ -3336,9 +3343,11 @@ function update(dt) {
   if (Game.activeEvent && Game.activeEvent.id === 'salt_glare') handlingMul *= BIOME_EVENT_TUNING.saltGlareHandlingMul;
   if (Game.activeEvent && Game.activeEvent.id === 'ash_squall') handlingMul *= BIOME_EVENT_TUNING.ashSquallHandlingMul;
   const accel = stats.accel * handlingMul;
-  let maxVMul = 1;
-  if (handlingMul < 1) maxVMul = BIOME_EVENT_TUNING.maxVLowHandlingMul;
-  else if (handlingMul > 1) maxVMul = BIOME_EVENT_TUNING.maxVHighHandlingMul;
+  const maxVMul = handlingMul < 1
+    ? BIOME_EVENT_TUNING.maxVLowHandlingMul
+    : handlingMul > 1
+      ? BIOME_EVENT_TUNING.maxVHighHandlingMul
+      : 1;
   const maxV = stats.maxV * maxVMul;
   const drag = 6.5;
   if (input.left)  p.vx -= accel * dt;
@@ -4083,7 +4092,7 @@ function drawWeather() {
     const shimmer = Math.floor(Game.t * 24);
     ctx.beginPath();
     for (let i = 0; i < 18; i++) {
-      const y = H * 0.34 + ((i * 31 + shimmer) % Math.max(1, H * 0.45));
+      const y = H * 0.34 + ((i * 31 + shimmer) % (H * 0.45));
       const wobble = Math.sin(Game.t * 3 + i) * 8;
       ctx.moveTo(0, y);
       ctx.lineTo(W, y + wobble);
