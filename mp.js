@@ -73,8 +73,8 @@
     try {
       const u = new URL(candidate, location.href);
       if (u.protocol !== 'ws:' && u.protocol !== 'wss:') return '';
-      if (!u.pathname || u.pathname === '/') u.pathname = '/ws';
-      return u.toString();
+      const pathname = (!u.pathname || u.pathname === '/') ? '/ws' : u.pathname;
+      return `${u.protocol}//${u.host}${pathname}${u.search}${u.hash}`;
     } catch (_) {
       return '';
     }
