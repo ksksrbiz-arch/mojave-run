@@ -73,7 +73,7 @@ const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
 const COSMETICS = {
   paint: [
-    { id:'paint-stock', name:'FACTORY RUST', desc:'Original wasteland steel.', cost:0, color:null },
+    { id:'paint-factory', name:'FACTORY RUST', desc:'Original wasteland steel.', cost:0, color:null },
     { id:'paint-sunfire', name:'SUNFIRE ORANGE', desc:'Hot canyon enamel with brighter headlamps.', cost:250, color:{ body:'#d9822f', hood:'#b4561e', cab:'#3f1b08', windshield:'#b9ecff', glow:'#ffe66d' } },
     { id:'paint-blacktop', name:'BLACKTOP MATTE', desc:'Charcoal bodywork for night road hunters.', cost:600, color:{ body:'#2d3032', hood:'#181b1f', cab:'#0a0c10', windshield:'#86d6ff', glow:'#90f0ff' } },
     { id:'paint-rift', name:'MIDNIGHT RIFT', desc:'Neon violet panels unlocked by Inferno badge.', unlock:{ kind:'achievement', id:'inferno' }, color:{ body:'#37205f', hood:'#251047', cab:'#120820', windshield:'#c99cff', glow:'#f070ff' } },
@@ -96,27 +96,58 @@ const COSMETIC_CATEGORIES = ['paint', 'trail', 'horn'];
 const COSMETIC_LABELS = { paint:'PAINTJOB', trail:'EXHAUST TRAIL', horn:'SPAWN HORN' };
 const DEFAULT_PAINT_COLOR = { body:'#a86a2e', hood:'#8a4f1f', cab:'#3a2410', windshield:'#a8d8e8', glow:'#ffe07a' };
 const COSMETIC_BY_ID = Object.fromEntries(COSMETIC_CATEGORIES.flatMap(cat => COSMETICS[cat].map(c => [c.id, Object.assign({ category: cat }, c)])));
+const COSMETIC_ALIASES = { 'paint-stock': 'paint-factory' };
+
+function canonicalCosmeticId(id) {
+  return COSMETIC_ALIASES[id] || id;
+}
 
 function defaultCosmetics() {
   return {
-    owned: ['paint-stock', 'trail-dust', 'horn-classic'],
-    equippedPaint: 'paint-stock',
+    owned: ['paint-factory', 'trail-dust', 'horn-classic'],
+    equippedPaint: 'paint-factory',
     equippedTrail: 'trail-dust',
     equippedHorn: 'horn-classic',
   };
 }
 
-function normalizeCosmetics(p) {
+function normalizeCosmetics(p, returnChanged = false) {
   const d = defaultCosmetics();
-  if (!p.cosmetics || typeof p.cosmetics !== 'object') p.cosmetics = d;
-  if (!Array.isArray(p.cosmetics.owned)) p.cosmetics.owned = [];
+  let changed = false;
+  if (!p.cosmetics || typeof p.cosmetics !== 'object') { p.cosmetics = d; changed = true; }
+  if (!Array.isArray(p.cosmetics.owned)) { p.cosmetics.owned = []; changed = true; }
+  const previousOwnedLength = p.cosmetics.owned.length;
+  const ownedSet = new Set();
+  p.cosmetics.owned.forEach(rawId => {
+    const id = canonicalCosmeticId(rawId);
+    if (COSMETIC_BY_ID[id]) ownedSet.add(id);
+    if (id !== rawId) changed = true;
+  });
+  if (ownedSet.size !== previousOwnedLength) changed = true;
   for (const id of d.owned) {
-    if (!p.cosmetics.owned.includes(id)) p.cosmetics.owned.push(id);
+    if (!ownedSet.has(id)) { ownedSet.add(id); changed = true; }
   }
-  if (!COSMETIC_BY_ID[p.cosmetics.equippedPaint] || !p.cosmetics.owned.includes(p.cosmetics.equippedPaint)) p.cosmetics.equippedPaint = d.equippedPaint;
-  if (!COSMETIC_BY_ID[p.cosmetics.equippedTrail] || !p.cosmetics.owned.includes(p.cosmetics.equippedTrail)) p.cosmetics.equippedTrail = d.equippedTrail;
-  if (!COSMETIC_BY_ID[p.cosmetics.equippedHorn] || !p.cosmetics.owned.includes(p.cosmetics.equippedHorn)) p.cosmetics.equippedHorn = d.equippedHorn;
-  return p.cosmetics;
+  p.cosmetics.owned = Array.from(ownedSet);
+  const normalizeEquipped = (key, fallback) => {
+    const id = canonicalCosmeticId(p.cosmetics[key]);
+    if (id !== p.cosmetics[key]) changed = true;
+    if (!COSMETIC_BY_ID[id] || !ownedSet.has(id)) {
+      p.cosmetics[key] = fallback;
+      changed = true;
+    } else {
+      p.cosmetics[key] = id;
+    }
+  };
+  normalizeEquipped('equippedPaint', d.equippedPaint);
+  normalizeEquipped('equippedTrail', d.equippedTrail);
+  normalizeEquipped('equippedHorn', d.equippedHorn);
+  return returnChanged ? changed : p.cosmetics;
+}
+
+function cosmeticBuyLabel(c, unlockedByCondition) {
+  if (!unlockedByCondition) return 'LOCKED';
+  const cost = c.cost || 0;
+  return cost > 0 ? `UNLOCK · ${cost} SCRAP` : 'CLAIM FREE';
 }
 
 function cosmeticUnlockText(c) {
@@ -135,7 +166,7 @@ function isCosmeticConditionMet(c, p) {
 }
 
 function getVehiclePaint(vehicle, paintId) {
-  const paint = COSMETIC_BY_ID[paintId || 'paint-stock'];
+  const paint = COSMETIC_BY_ID[canonicalCosmeticId(paintId || 'paint-factory')];
   if (!paint || paint.category !== 'paint' || !paint.color) return vehicle.color;
   return Object.assign({}, vehicle.color, paint.color);
 }
@@ -1197,9 +1228,7 @@ const Profile = {
         if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
         if (p.activeSidekick === undefined) { p.activeSidekick = null; dirty = true; }
         if (!Array.isArray(p.achievements)) { p.achievements = []; dirty = true; }
-        const cosmeticsBefore = JSON.stringify(p.cosmetics || null);
-        normalizeCosmetics(p);
-        if (JSON.stringify(p.cosmetics) !== cosmeticsBefore) dirty = true;
+        if (normalizeCosmetics(p, true)) dirty = true;
       });
       if (dirty) this.save();
     }
@@ -1995,6 +2024,11 @@ const ZOMBIE_BURST_DIST_2 = 10000; // second burst tier: triple-spawn waves
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
 const COMBO_MULTS      = [1, 2, 3, 4, 5, 7, 10];
+const RUN_MOMENT_LEGENDARY_COMBO = 30;
+const RUN_MOMENT_STRONG_COMBO = 15;
+const RUN_MOMENT_BIG_SCRAP = 1000;
+const RUN_MOMENT_SWEEP_KILLS = 50;
+const RUN_MOMENT_LONG_HAUL_DISTANCE = 2000;
 
 function comboMult() {
   const c = Game.combo | 0;
@@ -4717,7 +4751,13 @@ function drawWeather() {
 }
 
 function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
-  const paintId = opts.noCosmetic ? null : (opts.paintId || (vehicle === Game.vehicle && Game.cosmetics ? Game.cosmetics.equippedPaint : null));
+  let paintId = null;
+  if (!opts.noCosmetic) {
+    paintId = opts.paintId || null;
+    if (!paintId && vehicle === Game.vehicle && Game.cosmetics) {
+      paintId = Game.cosmetics.equippedPaint;
+    }
+  }
   const c = getVehiclePaint(vehicle, paintId);
   ctx.save();
   ctx.translate(x, y);
@@ -6365,7 +6405,7 @@ const UI = {
       const card = document.createElement('div');
       card.className = 'cosmetic-card' + (equipped ? ' equipped' : '') + (!owned && !unlockedByCondition ? ' locked' : '');
       const state = equipped ? 'EQUIPPED' : owned ? 'OWNED' : cosmeticUnlockText(c);
-      const buttonLabel = unlockedByCondition ? `UNLOCK · ${c.cost || 0} SCRAP` : 'LOCKED';
+      const buttonLabel = cosmeticBuyLabel(c, unlockedByCondition);
       const action = owned
         ? `<button class="btn${equipped ? ' primary' : ''}" data-cact="equip" data-cid="${c.id}" ${equipped ? 'disabled' : ''}>${equipped ? 'EQUIPPED' : 'EQUIP'}</button>`
         : `<button class="btn primary" data-cact="buy" data-cid="${c.id}" ${canBuy ? '' : 'disabled'}>${buttonLabel}</button>`;
@@ -6618,11 +6658,11 @@ const UI = {
     const bestMoment = (() => {
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
-      if ((Game.comboBest || 0) >= 30) return 'LEGENDARY ×10 MULTIPLIER';
-      if ((Game.comboBest || 0) >= 15) return 'HIGH-OCTANE COMBO';
-      if (Game.scrapEarned >= 1000) return 'BIG SCRAP HAUL';
-      if (Game.kills >= 50) return 'WASTELAND SWEEP';
-      return Game.distance >= 2000 ? 'LONG HAUL SURVIVAL' : 'ANOTHER RUN IN THE BOOKS';
+      if ((Game.comboBest || 0) >= RUN_MOMENT_LEGENDARY_COMBO) return 'LEGENDARY ×10 MULTIPLIER';
+      if ((Game.comboBest || 0) >= RUN_MOMENT_STRONG_COMBO) return 'HIGH-OCTANE COMBO';
+      if (Game.scrapEarned >= RUN_MOMENT_BIG_SCRAP) return 'BIG SCRAP HAUL';
+      if (Game.kills >= RUN_MOMENT_SWEEP_KILLS) return 'WASTELAND SWEEP';
+      return Game.distance >= RUN_MOMENT_LONG_HAUL_DISTANCE ? 'LONG HAUL SURVIVAL' : 'ANOTHER RUN IN THE BOOKS';
     })();
     rows.push(['BEST MOMENT', bestMoment, false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
@@ -7250,7 +7290,11 @@ document.addEventListener('click', e => {
       if (Profile.buyCosmetic(cid)) {
         UI.toast('UNLOCKED ' + c.name);
         Profile.equipCosmetic(cid);
-      } else UI.toast('LOCKED OR NOT ENOUGH SCRAP');
+      } else {
+        const p = Profile.active();
+        const unmetRequirement = p && !isCosmeticConditionMet(c, p);
+        UI.toast(unmetRequirement ? 'REQUIREMENTS NOT MET' : 'INSUFFICIENT SCRAP');
+      }
     } else if (ca.dataset.cact === 'equip') {
       if (Profile.equipCosmetic(cid)) UI.toast('EQUIPPED ' + c.name);
     }
