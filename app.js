@@ -4328,9 +4328,7 @@ function drawRoad() {
 
   // secondary lane guides — thinner dashes at ⅓ and ⅔ road width
   const lineAlpha = Game.isNight ? 0.30 : 0.18;
-  ctx.fillStyle = Game.isNight
-    ? `rgba(245,215,110,${lineAlpha})`
-    : `rgba(245,215,110,${lineAlpha})`;
+  ctx.fillStyle = `rgba(245,215,110,${lineAlpha})`;
   const lane1x = x0 + w / 3;
   const lane2x = x0 + (2 * w) / 3;
   const dashH2 = 14, gap2 = 46;
@@ -4378,8 +4376,9 @@ function drawDecor() {
       ctx.save();
       ctx.translate(d.x, d.y);
       ctx.rotate(d.rot);
+      // drop shadow (offset right/down)
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(-12, -8, 24, 16);
+      ctx.fillRect(-10, -6, 24, 16);
       ctx.fillStyle = Game.isNight ? t.wreckNight : t.wreckDay;
       ctx.fillRect(-12, -8, 24, 16);
       ctx.fillStyle = '#0d0805';
