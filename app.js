@@ -8,7 +8,12 @@
 // FEATURE DETECT
 // ============================================================
 const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-const IS_MOBILE = IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 900;
+const HAS_COARSE_POINTER = (() => {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches;
+  } catch (_) { return false; }
+})();
+const IS_MOBILE = HAS_COARSE_POINTER || (IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 1100);
 
 // ============================================================
 // DATA — VEHICLES, UPGRADES, MODES, LEVELS
@@ -259,6 +264,7 @@ function applyVehicleBranchStats(st, branchDef) {
 
 const MODES = [
   { id: 'classic',    name: 'CLASSIC',     desc: 'Endless run. Survive as long as you can. Difficulty climbs forever.' },
+  { id: 'campaign',   name: 'CAMPAIGN',    desc: 'Drive coast to coast. 18 US locations, 72 levels, story, bosses & sidekicks.' },
   { id: 'gauntlet',   name: 'GAUNTLET',    desc: '18 tiered sectors. Clear objectives. Multi-biome bosses every 4-6 levels.' },
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
@@ -286,6 +292,265 @@ const LEVELS = [
   { num:17, name:'VOID MILE',       obj:'survive',  target:85,   reward:1150, diff:5.2,  map:'midnight', night:true, storm:true },
   { num:18, name:'THE CHIMERA',     obj:'boss',     target:1,    reward:3000, diff:6.0,  boss:5, map:'midnight', night:true, storm:true },
 ];
+
+// ============================================================
+// CAMPAIGN — US road-trip story mode (LA → New York, 18 locations)
+// Each location has 4 levels: 3 objective tiers + 1 boss.
+// mapPos: [x, y] in the 300×185 SVG coordinate space.
+// ============================================================
+const CAMPAIGN_LOCATIONS = [
+  {
+    id:'la', name:'LA OUTSKIRTS', state:'CALIFORNIA', biome:'wastes', reward:400,
+    sidekickUnlock:null, mapPos:[30,128],
+    intro:'The city burns in the rearview. The highway stretches east — broken and beautiful.',
+    outro:'LA fades to dust. The Mojave waits ahead, vast and indifferent.',
+    levels:[
+      {num:1,name:'FREEWAY ZERO',  obj:'survive', target:30,  diff:1.0,reward:75},
+      {num:2,name:'JUNCTION BLAZE',obj:'kills',   target:8,   diff:1.1,reward:100},
+      {num:3,name:'SMOG CORRIDOR', obj:'distance',target:1200,diff:1.2,reward:125},
+      {num:4,name:'THE WARDEN',    obj:'boss',    target:1,   diff:1.4,reward:300,boss:1},
+    ],
+  },
+  {
+    id:'mojave', name:'MOJAVE DESERT', state:'CALIFORNIA', biome:'wastes', reward:480,
+    sidekickUnlock:null, mapPos:[52,118],
+    intro:'Flat. Burning. The road shimmers. Raiders haunt the Joshua trees.',
+    outro:'The Mojave is behind you. You survived the most honest desert in America.',
+    levels:[
+      {num:1,name:'DEAD CHANNEL',  obj:'survive', target:35,  diff:1.2,reward:100},
+      {num:2,name:'BUZZARD ALLEY', obj:'kills',   target:10,  diff:1.3,reward:130},
+      {num:3,name:'HEAT GRAVE',    obj:'distance',target:1500,diff:1.4,reward:160},
+      {num:4,name:'DUST KING',     obj:'boss',    target:1,   diff:1.6,reward:350,boss:1},
+    ],
+  },
+  {
+    id:'vegas', name:'LAS VEGAS STRIP', state:'NEVADA', biome:'midnight', reward:560,
+    sidekickUnlock:null, mapPos:[65,103],
+    intro:'Dead neon, shattered casinos. The Strip runs on generator fumes and old debts.',
+    outro:'Vegas paid out in scrap and blood. The desert highway continues east.',
+    levels:[
+      {num:1,name:'STRIP RAID',    obj:'survive', target:35,  diff:1.4,reward:120,night:true},
+      {num:2,name:'NEON GRAVEYARD',obj:'kills',   target:12,  diff:1.5,reward:160,night:true},
+      {num:3,name:'CASINO ROW',    obj:'distance',target:1800,diff:1.6,reward:190,night:true},
+      {num:4,name:'THE HOUSE',     obj:'boss',    target:1,   diff:1.8,reward:400,boss:2,night:true},
+    ],
+  },
+  {
+    id:'hoover', name:'HOOVER DAM', state:'NEVADA/ARIZONA', biome:'redcanyon', reward:640,
+    sidekickUnlock:'diesel', mapPos:[78,114],
+    intro:'The dam still holds. So do the gangs that claimed it. Cross if you can.',
+    outro:'The dam falls behind. DIESEL joins your crew — a grease-stained guardian angel.',
+    levels:[
+      {num:1,name:'DAM APPROACH',  obj:'survive', target:40,  diff:1.7,reward:150},
+      {num:2,name:'SPILLWAY',      obj:'kills',   target:14,  diff:1.8,reward:190},
+      {num:3,name:'POWERLINE RUN', obj:'distance',target:2000,diff:2.0,reward:230},
+      {num:4,name:'GATE KEEPER',   obj:'boss',    target:1,   diff:2.2,reward:480,boss:2},
+    ],
+  },
+  {
+    id:'arizona', name:'ARIZONA BADLANDS', state:'ARIZONA', biome:'redcanyon', reward:700,
+    sidekickUnlock:null, mapPos:[95,130],
+    intro:'Red rock and red blood. The canyon roads were built for ambush.',
+    outro:'Arizona bleeds into New Mexico. The elevation climbs. So does the danger.',
+    levels:[
+      {num:1,name:'SAGUARO MILE',  obj:'survive', target:40,  diff:2.0,reward:175},
+      {num:2,name:'CANYON CRAWL',  obj:'kills',   target:16,  diff:2.1,reward:220},
+      {num:3,name:'RED RIDGE',     obj:'distance',target:2400,diff:2.3,reward:265},
+      {num:4,name:'CRIMSON TITAN', obj:'boss',    target:1,   diff:2.5,reward:560,boss:3},
+    ],
+  },
+  {
+    id:'santafe', name:'SANTA FE', state:'NEW MEXICO', biome:'ash', reward:760,
+    sidekickUnlock:null, mapPos:[115,122],
+    intro:'Ancient walls, new war. The high desert hides its killers in the cold.',
+    outro:'Santa Fe endures. You leave richer in scrap and shorter on patience.',
+    levels:[
+      {num:1,name:'PLAZA SIEGE',   obj:'survive', target:45,  diff:2.2,reward:200},
+      {num:2,name:'ARROYO DRIVE',  obj:'kills',   target:18,  diff:2.4,reward:250},
+      {num:3,name:'HIGH ROAD',     obj:'distance',target:2800,diff:2.6,reward:290},
+      {num:4,name:'THE ELDER',     obj:'boss',    target:1,   diff:2.8,reward:640,boss:3},
+    ],
+  },
+  {
+    id:'amarillo', name:'AMARILLO FLATLANDS', state:'TEXAS', biome:'saltflats', reward:820,
+    sidekickUnlock:null, mapPos:[140,118],
+    intro:'Flat as a grave, twice as quiet. Speed is your only armor on the Texas plain.',
+    outro:'The panhandle fades. Oklahoma lies ahead — just as flat, twice as hostile.',
+    levels:[
+      {num:1,name:'CATTLE RUN',    obj:'survive', target:45,  diff:2.5,reward:220},
+      {num:2,name:'TUMBLEWEED WAR',obj:'kills',   target:20,  diff:2.7,reward:270},
+      {num:3,name:'PANHANDLE PUSH',obj:'distance',target:3200,diff:2.9,reward:320},
+      {num:4,name:'LONGHORN',      obj:'boss',    target:1,   diff:3.1,reward:700,boss:3},
+    ],
+  },
+  {
+    id:'okc', name:'OKLAHOMA CITY', state:'OKLAHOMA', biome:'saltflats', reward:880,
+    sidekickUnlock:'ratchet', mapPos:[162,110],
+    intro:'The oil fields burned. What\'s left runs on fury and cheap metal.',
+    outro:'Oklahoma breaks. RATCHET hops in — extra firepower for the road ahead.',
+    levels:[
+      {num:1,name:'OIL BELT',      obj:'survive', target:50,  diff:2.8,reward:250,storm:true},
+      {num:2,name:'TURNPIKE TRAP', obj:'kills',   target:22,  diff:3.0,reward:300,storm:true},
+      {num:3,name:'FLINT HILLS',   obj:'distance',target:3600,diff:3.2,reward:360},
+      {num:4,name:'IRON GOVERNOR', obj:'boss',    target:1,   diff:3.5,reward:800,boss:4,storm:true},
+    ],
+  },
+  {
+    id:'stlouis', name:'ST. LOUIS BRIDGE', state:'MISSOURI', biome:'wastes', reward:940,
+    sidekickUnlock:null, mapPos:[193,100],
+    intro:'The arch fell years ago. The river crossing is a kill zone now.',
+    outro:'The bridge holds — barely. You cross the Mississippi into the eastern theater.',
+    levels:[
+      {num:1,name:'RIVER APPROACH',obj:'survive', target:50,  diff:3.0,reward:280},
+      {num:2,name:'BRIDGE GUARD',  obj:'kills',   target:24,  diff:3.2,reward:330},
+      {num:3,name:'LEVEE BREAK',   obj:'distance',target:4000,diff:3.4,reward:390},
+      {num:4,name:'ARCH BREAKER',  obj:'boss',    target:1,   diff:3.7,reward:880,boss:4},
+    ],
+  },
+  {
+    id:'memphis', name:'MEMPHIS BLUES', state:'TENNESSEE', biome:'ash', reward:1000,
+    sidekickUnlock:null, mapPos:[205,118],
+    intro:'The Delta runs south. The highway runs through it, knee-deep in ash and old music.',
+    outro:'Memphis goes quiet behind you. You carry its scrap and its scars.',
+    levels:[
+      {num:1,name:'DELTA HEAT',    obj:'survive', target:55,  diff:3.2,reward:310,night:true},
+      {num:2,name:'BLUFF CITY RUN',obj:'kills',   target:26,  diff:3.4,reward:360,night:true},
+      {num:3,name:'BEALE STREET',  obj:'distance',target:4400,diff:3.6,reward:420},
+      {num:4,name:'BIG MUDDY',     obj:'boss',    target:1,   diff:3.9,reward:960,boss:4,night:true},
+    ],
+  },
+  {
+    id:'nashville', name:'NASHVILLE CROSSROADS', state:'TENNESSEE', biome:'ash', reward:1060,
+    sidekickUnlock:null, mapPos:[217,108],
+    intro:'Music Row is a weapons market now. The bands play for bullets.',
+    outro:'Nashville\'s song changes every season. Yours is still "drive or die."',
+    levels:[
+      {num:1,name:'BROADWAY BLITZ', obj:'survive', target:55,  diff:3.5,reward:340},
+      {num:2,name:'COUNTRY ROAD',   obj:'kills',   target:28,  diff:3.7,reward:390},
+      {num:3,name:'CUMBERLAND RUN', obj:'distance',target:4800,diff:4.0,reward:460},
+      {num:4,name:'GRAND OLE WRATH',obj:'boss',    target:1,   diff:4.2,reward:1020,boss:5},
+    ],
+  },
+  {
+    id:'atlanta', name:'ATLANTA RUINS', state:'GEORGIA', biome:'redcanyon', reward:1120,
+    sidekickUnlock:'mirage', mapPos:[225,130],
+    intro:'The city of the phoenix — burned again, risen as something worse.',
+    outro:'Atlanta falls behind in embers. MIRAGE slips into the passenger seat — silent, useful.',
+    levels:[
+      {num:1,name:'PEACH GRIDLOCK',obj:'survive', target:60,  diff:3.8,reward:380,storm:true},
+      {num:2,name:'PONCE AMBUSH',  obj:'kills',   target:30,  diff:4.0,reward:440,storm:true},
+      {num:3,name:'95 NORTH',      obj:'distance',target:5200,diff:4.3,reward:510},
+      {num:4,name:'RED DOG',       obj:'boss',    target:1,   diff:4.6,reward:1080,boss:5,storm:true},
+    ],
+  },
+  {
+    id:'charlotte', name:'CHARLOTTE PINES', state:'NORTH CAROLINA', biome:'wastes', reward:1180,
+    sidekickUnlock:null, mapPos:[240,118],
+    intro:'The pines close in. The racing gangs of Charlotte call this home.',
+    outro:'Charlotte behind you. The eastern seaboard is close. So is the end.',
+    levels:[
+      {num:1,name:'SPEEDWAY SIEGE', obj:'survive', target:60,  diff:4.0,reward:420},
+      {num:2,name:'PIEDMONT PUSH',  obj:'kills',   target:32,  diff:4.2,reward:480},
+      {num:3,name:'CROSSING RIDGE', obj:'distance',target:5600,diff:4.5,reward:550},
+      {num:4,name:'NASCAR REAPER',  obj:'boss',    target:1,   diff:4.8,reward:1140,boss:5},
+    ],
+  },
+  {
+    id:'richmond', name:'RICHMOND WALL', state:'VIRGINIA', biome:'midnight', reward:1240,
+    sidekickUnlock:null, mapPos:[255,100],
+    intro:'Richmond built its wall before the war ended. They never finished it.',
+    outro:'The wall is behind you. DC is close — and DC is the worst of all.',
+    levels:[
+      {num:1,name:'WALL PATROL',   obj:'survive', target:65,  diff:4.3,reward:460,night:true},
+      {num:2,name:'TOBACCO ROW',   obj:'kills',   target:34,  diff:4.5,reward:520,night:true},
+      {num:3,name:'CAPITAL TRAIL', obj:'distance',target:6000,diff:4.8,reward:600,night:true},
+      {num:4,name:'IRON CURTAIN',  obj:'boss',    target:1,   diff:5.1,reward:1200,boss:5,night:true},
+    ],
+  },
+  {
+    id:'dc', name:'DC NO-MAN\'S LAND', state:'DISTRICT OF COLUMBIA', biome:'ash', reward:1320,
+    sidekickUnlock:null, mapPos:[262,90],
+    intro:'The Mall is a crater. The monuments are sniper perches. Welcome to the capital.',
+    outro:'DC is behind you. You drove through history — and history tried to kill you.',
+    levels:[
+      {num:1,name:'MONUMENT RUN',  obj:'survive', target:65,  diff:4.7,reward:500,night:true,storm:true},
+      {num:2,name:'BELTWAY SIEGE', obj:'kills',   target:36,  diff:5.0,reward:570,storm:true},
+      {num:3,name:'POTOMAC DASH',  obj:'distance',target:6500,diff:5.3,reward:650,night:true},
+      {num:4,name:'THE SENATOR',   obj:'boss',    target:1,   diff:5.6,reward:1280,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'philly', name:'PHILADELPHIA DOCKS', state:'PENNSYLVANIA', biome:'saltflats', reward:1400,
+    sidekickUnlock:'vulture', mapPos:[270,80],
+    intro:'The docks run on smuggled scrap and old grudges. The city of brotherly love — and brutal war.',
+    outro:'Philly pays. VULTURE arrives — strips the dead clean so you don\'t have to.',
+    levels:[
+      {num:1,name:'DOCK WAR',       obj:'survive', target:70,  diff:5.0,reward:540},
+      {num:2,name:'MARKET BLITZ',   obj:'kills',   target:38,  diff:5.3,reward:610},
+      {num:3,name:'SCHUYLKILL BURN',obj:'distance',target:7000,diff:5.6,reward:690},
+      {num:4,name:'LIBERTY WRECKER',obj:'boss',    target:1,   diff:5.9,reward:1360,boss:5},
+    ],
+  },
+  {
+    id:'newark', name:'NEWARK RAIL', state:'NEW JERSEY', biome:'midnight', reward:1480,
+    sidekickUnlock:null, mapPos:[277,68],
+    intro:'The rail yards are a labyrinth of killing ground. One more push.',
+    outro:'Newark falls. The skyline of New York — dark, massive, waiting — fills the windshield.',
+    levels:[
+      {num:1,name:'YARD BREACH',   obj:'survive', target:70,  diff:5.4,reward:580,night:true},
+      {num:2,name:'FREIGHT AMBUSH',obj:'kills',   target:40,  diff:5.7,reward:650,night:true},
+      {num:3,name:'TRANSIT WAR',   obj:'distance',target:7500,diff:6.0,reward:740,night:true},
+      {num:4,name:'THE CONDUCTOR', obj:'boss',    target:1,   diff:6.2,reward:1440,boss:5,night:true},
+    ],
+  },
+  {
+    id:'nyc', name:'NEW YORK CITY', state:'NEW YORK', biome:'midnight', reward:2000,
+    sidekickUnlock:null, mapPos:[284,60],
+    intro:'The last city. The last run. Whatever made you start this drive — it ends here.',
+    outro:'You drove the country end to end, through fire and ruin. No one owns this road. Now they know your name.',
+    levels:[
+      {num:1,name:'BRIDGE BREACH',  obj:'survive', target:75,  diff:5.8,reward:650,night:true,storm:true},
+      {num:2,name:'MIDTOWN SIEGE',  obj:'kills',   target:42,  diff:6.0,reward:720,night:true,storm:true},
+      {num:3,name:'AVENUE OF WAR',  obj:'distance',target:8000,diff:6.3,reward:820,night:true,storm:true},
+      {num:4,name:'THE CHIMERA II', obj:'boss',    target:1,   diff:6.8,reward:2400,boss:5,night:true,storm:true},
+    ],
+  },
+];
+
+// Flat lookup: 'la-1' -> { loc, lvl, locIdx, levelIdx }
+const CAMPAIGN_LEVEL_MAP = {};
+CAMPAIGN_LOCATIONS.forEach((loc, locIdx) => {
+  loc.levels.forEach((lvl, levelIdx) => {
+    CAMPAIGN_LEVEL_MAP[loc.id + '-' + lvl.num] = { loc, lvl, locIdx, levelIdx };
+  });
+});
+
+// ============================================================
+// SIDEKICKS — passive companions unlocked through campaign
+// ============================================================
+const SIDEKICKS = [
+  {
+    id:'diesel',  name:'DIESEL',  title:'WRENCH MONKEY',
+    bio:'Never met a wreck he couldn\'t patch. Keeps the engine running when everything else is on fire.',
+    perk:'+5 HP AUTO-REPAIR EVERY 20S', unlockLoc:'hoover', color:'#ff9d66',
+  },
+  {
+    id:'ratchet', name:'RATCHET', title:'GUN HAND',
+    bio:'Knows every weapon in the wasteland by sound. Rides shotgun and keeps the barrels hot.',
+    perk:'+15% BULLET DAMAGE', unlockLoc:'okc', color:'#ffd86b',
+  },
+  {
+    id:'mirage',  name:'MIRAGE',  title:'DESERT GHOST',
+    bio:'Sees things in the heat shimmer. Knows where the supply drops fall before they land.',
+    perk:'PICKUP MAGNET RANGE +30%', unlockLoc:'atlanta', color:'#7af0ff',
+  },
+  {
+    id:'vulture', name:'VULTURE', title:'SCRAP HUNTER',
+    bio:'Circles every kill zone like he was born for it. Takes a cut of everything.',
+    perk:'+20% SCRAP FROM KILLS', unlockLoc:'philly', color:'#f070ff',
+  },
+];
+const SIDEKICK_BY_ID = Object.fromEntries(SIDEKICKS.map(s => [s.id, s]));
 
 const BIOME_THEMES = {
   wastes: {
@@ -711,6 +976,8 @@ const Profile = {
             dirty = true;
           }
         });
+        if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
+        if (p.activeSidekick === undefined) { p.activeSidekick = null; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -879,6 +1146,52 @@ const Profile = {
     if (num === 1) return true;
     const p = this.active(); if (!p) return false;
     return p.gauntletCleared.includes(num - 1);
+  },
+  // ---- CAMPAIGN ----
+  isCampaignLevelUnlocked(locId, levelNum) {
+    const locIdx = CAMPAIGN_LOCATIONS.findIndex(l => l.id === locId);
+    if (locIdx < 0) return false;
+    const p = this.active(); if (!p) return false;
+    p.campaignCleared = p.campaignCleared || {};
+    if (levelNum === 1) {
+      if (locIdx === 0) return true;
+      const prevLoc = CAMPAIGN_LOCATIONS[locIdx - 1];
+      return this.isCampaignLocationCleared(prevLoc.id);
+    }
+    const cleared = (p.campaignCleared[locId] || {}).levelsCleared || [];
+    return cleared.includes(levelNum - 1);
+  },
+  isCampaignLocationCleared(locId) {
+    const loc = CAMPAIGN_LOCATIONS.find(l => l.id === locId);
+    if (!loc) return false;
+    const p = this.active(); if (!p) return false;
+    const cleared = ((p.campaignCleared || {})[locId] || {}).levelsCleared || [];
+    return cleared.length >= loc.levels.length;
+  },
+  recordCampaignLevel(locId, levelNum) {
+    const p = this.active(); if (!p) return null;
+    p.campaignCleared = p.campaignCleared || {};
+    if (!p.campaignCleared[locId]) p.campaignCleared[locId] = { levelsCleared: [] };
+    const arr = p.campaignCleared[locId].levelsCleared;
+    if (!arr.includes(levelNum)) { arr.push(levelNum); arr.sort((a, b) => a - b); }
+    this.save();
+    const loc = CAMPAIGN_LOCATIONS.find(l => l.id === locId);
+    if (loc && loc.sidekickUnlock && arr.length >= loc.levels.length) {
+      if (!p.activeSidekick) { p.activeSidekick = loc.sidekickUnlock; this.save(); }
+      return loc.sidekickUnlock;
+    }
+    return null;
+  },
+  setSidekick(id) {
+    const p = this.active(); if (!p) return false;
+    if (id !== null && !SIDEKICK_BY_ID[id]) return false;
+    p.activeSidekick = id;
+    this.save();
+    return true;
+  },
+  isSidekickUnlocked(id) {
+    const sk = SIDEKICK_BY_ID[id]; if (!sk) return false;
+    return this.isCampaignLocationCleared(sk.unlockLoc);
   },
 };
 
@@ -1073,6 +1386,26 @@ function announceEvent(text, color = '#ffe07a') {
 const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
+const DPR_CAP = IS_MOBILE ? 1.5 : 2;
+// Keep mobile floor lower for thermal/battery headroom; keep desktop floor
+// higher so text/HUD stay sharp on larger screens.
+const MIN_RENDER_SCALE = IS_MOBILE ? 0.7 : 0.85;
+const MIN_DPR = IS_MOBILE ? 0.75 : 1;
+const DPR_CHANGE_THRESHOLD = 0.01;
+const ORIENTATION_CHANGE_DELAY_MS = 160;
+const SCALE_PENALTY_LOW_MEMORY = 0.15;
+const SCALE_PENALTY_LOW_CORES = 0.1;
+let renderScale = (() => {
+  let scale = IS_MOBILE ? 0.95 : 1;
+  const mem = Number(navigator.deviceMemory || 0);
+  const cores = Number(navigator.hardwareConcurrency || 0);
+  const memPenalty = (mem && mem <= 2) ? SCALE_PENALTY_LOW_MEMORY : 0;
+  const corePenalty = (cores && cores <= 4) ? SCALE_PENALTY_LOW_CORES : 0;
+  scale -= Math.max(memPenalty, corePenalty);
+  return Math.min(1, Math.max(MIN_RENDER_SCALE, scale));
+})();
+let _resizeRaf = 0;
+let _resizeTimer = 0;
 
 // Cached gradients — rebuilt only when their inputs change (size or sky state)
 // so we don't allocate per frame. The sky/road gradients are also keyed by
@@ -1136,9 +1469,17 @@ function getRoadGradient(x0, x1) {
 }
 
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
-  W = window.innerWidth;
-  H = window.innerHeight;
+  const vv = window.visualViewport;
+  const nextW = Math.max(1, Math.round(vv ? vv.width : window.innerWidth));
+  const nextH = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
+  const wantedDpr = (window.devicePixelRatio || 1) * renderScale;
+  const nextDpr = Math.round(Math.min(DPR_CAP, Math.max(MIN_DPR, wantedDpr)) * 100) / 100;
+  const sameSize = (nextW === W && nextH === H);
+  const tinyDprChange = Math.abs(nextDpr - DPR) < DPR_CHANGE_THRESHOLD;
+  if (sameSize && tinyDprChange) return;
+  DPR = nextDpr;
+  W = nextW;
+  H = nextH;
   cvs.width  = Math.floor(W * DPR);
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -1150,8 +1491,24 @@ function resize() {
     Game.player.y = H - 110;
   }
 }
-window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+function queueResize(delay = 0) {
+  if (delay > 0) {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => queueResize(0), delay);
+    return;
+  }
+  if (_resizeRaf) return;
+  _resizeRaf = requestAnimationFrame(() => {
+    _resizeRaf = 0;
+    resize();
+  });
+}
+window.addEventListener('resize', () => queueResize());
+window.addEventListener('orientationchange', () => queueResize(ORIENTATION_CHANGE_DELAY_MS));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => queueResize());
+  window.visualViewport.addEventListener('scroll', () => queueResize());
+}
 
 // ============================================================
 // AUDIO
@@ -1371,7 +1728,7 @@ function applyMagnet(dt) {
   if (!hasMagnetEffect) return;
   const p = Game.player;
   const bonus = (Game.branchState && Game.branchState.pickupRadius) || 0;
-  const range = 240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0);
+  const range = (240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0)) * (Game.magnetRangeMul || 1);
   for (const pk of Game.pickups) {
     const dx = p.x - pk.x, dy = p.y - pk.y;
     const d = Math.hypot(dx, dy);
@@ -1379,6 +1736,21 @@ function applyMagnet(dt) {
       const pull = 600 * (1 - d / range);
       pk.x += (dx / d) * pull * dt;
       pk.y += (dy / d) * pull * dt;
+    }
+  }
+}
+
+// Sidekick passive: Diesel auto-heals player every 20s
+function updateSidekick(dt) {
+  if (!Game.sidekick || !Game.player) return;
+  if (Game.sidekick === 'diesel') {
+    Game.sidekickHealT += dt;
+    if (Game.sidekickHealT >= 20) {
+      Game.sidekickHealT -= 20;
+      if (Game.health < Game.maxHealth) {
+        Game.health = Math.min(Game.maxHealth, Game.health + 5);
+        addPopup('+5 HP', Game.player.x, Game.player.y - 40, '#7af07a', 13);
+      }
     }
   }
 }
@@ -1663,6 +2035,12 @@ const Game = {
   muzzleT: 0,
   // new-record flag set by endRun() before recording, read by showResults()
   isNewRecord: false,
+  // campaign
+  campaignLevelId: null,
+  // sidekick
+  sidekick: null,
+  sidekickHealT: 0,
+  magnetRangeMul: 1,
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -1701,8 +2079,20 @@ function startRun(mode, level) {
   const stats = Profile.effectiveStats(profile.activeVehicle);
   const perkState = getCharacterPerkState(profile.characterId);
   Game.mode = mode;
-  Game.level = level || null;
-  Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
+  if (mode === 'campaign' && typeof level === 'string') {
+    Game.campaignLevelId = level;
+    const _ce = CAMPAIGN_LEVEL_MAP[level];
+    Game.level = level;
+    Game.levelData = _ce ? {
+      num: _ce.lvl.num, name: _ce.lvl.name, obj: _ce.lvl.obj, target: _ce.lvl.target,
+      reward: _ce.lvl.reward, diff: _ce.lvl.diff, boss: _ce.lvl.boss,
+      map: _ce.loc.biome, night: !!_ce.lvl.night, storm: !!_ce.lvl.storm,
+    } : null;
+  } else {
+    Game.campaignLevelId = null;
+    Game.level = level || null;
+    Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
+  }
   Game.biome = pickBiome(mode, Game.levelData, Game.dailySeedKey);
   Game.runMutators = getRunMutators(mode, Game.levelData, Game.dailySeedKey);
   Game.state = 'loading';
@@ -1749,6 +2139,13 @@ function startRun(mode, level) {
   if (Game.branchState.nitroDamageMul) Game.nitroDamageMul *= Game.branchState.nitroDamageMul;
   Game.vehicle = v;
   Game.vehicleStats = stats;
+  // sidekick passive effects
+  Game.sidekick = profile.activeSidekick || null;
+  Game.sidekickHealT = 0;
+  Game.magnetRangeMul = 1;
+  if (Game.sidekick === 'ratchet') Game.vehicleStats = Object.assign({}, stats, { dmg: stats.dmg * 1.15 });
+  if (Game.sidekick === 'mirage')  Game.magnetRangeMul = 1.3;
+  if (Game.sidekick === 'vulture') Game.scrapMul = (Game.scrapMul || 1) * 1.2;
   Game.player = {
     x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
   };
@@ -1861,7 +2258,18 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   // SFX already played by death/victory sequences; only play here for time-out
   if (reason === 'time') SFX.victory();
   // small delay to let final FX play
-  setTimeout(() => UI.showResults(reason), reason === 'death' ? 700 : 1100);
+  if (Game.mode === 'campaign' && reason === 'victory') {
+    // record cleared level and capture any sidekick unlock for the story overlay
+    let _unlockedSk = null;
+    if (Game.campaignLevelId) {
+      const _ce = CAMPAIGN_LEVEL_MAP[Game.campaignLevelId];
+      if (_ce) _unlockedSk = Profile.recordCampaignLevel(_ce.loc.id, _ce.lvl.num);
+    }
+    const _capturedId = Game.campaignLevelId;
+    setTimeout(() => UI.showCampaignStory(_capturedId, _unlockedSk, () => UI.showResults(reason)), 1100);
+  } else {
+    setTimeout(() => UI.showResults(reason), reason === 'death' ? 700 : 1100);
+  }
 }
 
 function triggerVictory(kind /* 'objective' | 'time' */) {
@@ -1888,7 +2296,8 @@ function checkObjective() {
     triggerVictory('time');
     return;
   }
-  if (Game.mode !== 'gauntlet' || !Game.levelData) return;
+  if (Game.mode !== 'gauntlet' && Game.mode !== 'campaign') return;
+  if (!Game.levelData) return;
   const L = Game.levelData;
   if (L.obj === 'survive' && Game.t >= L.target) triggerVictory('objective');
   else if (L.obj === 'kills' && Game.kills >= L.target) triggerVictory('objective');
@@ -2466,6 +2875,7 @@ function update(dt) {
   // ---- power-ups & combo decay ----
   updatePowerups(dt);
   applyMagnet(dt);
+  updateSidekick(dt);
 
   // nitro modifies effective scroll & score gain
   const nitroMul = isPowerupActive('nitro') ? 1.6 : 1.0;
@@ -4412,6 +4822,9 @@ const UI = {
     document.getElementById('menu-character-sub').textContent = (ch ? ch.name : '') + ' ◢';
     const v = VEHICLE_BY_ID[p.activeVehicle];
     document.getElementById('menu-garage-sub').textContent = (v ? v.name : '') + ' ◢';
+    const _sk = p.activeSidekick ? SIDEKICK_BY_ID[p.activeSidekick] : null;
+    const _skSub = document.getElementById('menu-sidekick-sub');
+    if (_skSub) _skSub.textContent = _sk ? _sk.name + ' ◢' : 'NONE ◢';
     this.show('menu');
   },
 
@@ -4696,6 +5109,11 @@ const UI = {
       ['VEHICLES OWNED', ownedCount + ' / ' + VEHICLES.length],
       ['UPGRADES BUILT', ttlUpgrades],
       ['GAUNTLET', p.gauntletCleared.length + ' / ' + LEVELS.length],
+      ['CAMPAIGN', (() => {
+        const c = Object.values(p.campaignCleared || {}).reduce((s, v) => s + ((v.levelsCleared || []).length), 0);
+        const total = CAMPAIGN_LOCATIONS.reduce((s, l) => s + l.levels.length, 0);
+        return c + ' / ' + total + ' LEVELS';
+      })()],
     ];
     list.innerHTML = rows.map(([l, v]) =>
       `<div class="res-row"><div class="lbl">${l}</div><div class="val">${v}</div></div>`
@@ -4738,6 +5156,12 @@ const UI = {
       rows.push(['BEST TODAY', best, false]);
     } else if (Game.mode === 'gauntlet' && Game.levelData) {
       rows.push(['LEVEL', Game.levelData.num + ' · ' + Game.levelData.name, false]);
+    } else if (Game.mode === 'campaign' && Game.campaignLevelId) {
+      const _ce = CAMPAIGN_LEVEL_MAP[Game.campaignLevelId];
+      if (_ce) {
+        rows.push(['LOCATION', _ce.loc.name, false]);
+        rows.push(['LEVEL', _ce.lvl.name, false]);
+      }
     }
     rows.push(['KILLS', Game.kills, false]);
     const _bestComboMult = (() => {
@@ -4757,7 +5181,7 @@ const UI = {
       : '';
     document.getElementById('res-rows').innerHTML = recordHtml + rowsHtml;
 
-    // next sector button (gauntlet victory)
+    // next sector button (gauntlet / campaign victory)
     const nextBtn = document.getElementById('res-next');
     if (Game.state === 'victory' && Game.mode === 'gauntlet' && Game.levelData) {
       const nextNum = Game.levelData.num + 1;
@@ -4766,6 +5190,26 @@ const UI = {
         nextBtn.style.display = '';
         nextBtn.textContent = 'NEXT: ' + next.name + ' ►';
         nextBtn.dataset.next = nextNum;
+        nextBtn.dataset.nextmode = 'gauntlet';
+      } else nextBtn.style.display = 'none';
+    } else if (Game.state === 'victory' && Game.mode === 'campaign' && Game.campaignLevelId) {
+      const _ce = CAMPAIGN_LEVEL_MAP[Game.campaignLevelId];
+      if (_ce) {
+        const { loc, lvl, locIdx, levelIdx } = _ce;
+        const nextLvl = loc.levels[levelIdx + 1];
+        const nextLoc = CAMPAIGN_LOCATIONS[locIdx + 1];
+        let nextId = null, nextName = null;
+        if (nextLvl && Profile.isCampaignLevelUnlocked(loc.id, nextLvl.num)) {
+          nextId = loc.id + '-' + nextLvl.num; nextName = nextLvl.name;
+        } else if (!nextLvl && nextLoc && Profile.isCampaignLevelUnlocked(nextLoc.id, 1)) {
+          nextId = nextLoc.id + '-1'; nextName = nextLoc.name;
+        }
+        if (nextId) {
+          nextBtn.style.display = '';
+          nextBtn.textContent = 'NEXT: ' + nextName + ' ►';
+          nextBtn.dataset.next = nextId;
+          nextBtn.dataset.nextmode = 'campaign';
+        } else nextBtn.style.display = 'none';
       } else nextBtn.style.display = 'none';
     } else nextBtn.style.display = 'none';
 
@@ -4920,11 +5364,17 @@ const UI = {
       case 'menu-play':
         UI.showMode();
         break;
+      case 'menu-campaign':
+        UI.showCampaign();
+        break;
       case 'menu-garage':
         UI.showGarage();
         break;
       case 'menu-stats':
         UI.showStats();
+        break;
+      case 'menu-sidekick':
+        UI.showSidekick();
         break;
       case 'menu-settings':
         UI._settingsFrom = 'menu';
@@ -4971,6 +5421,7 @@ const UI = {
       case 'mode-select': {
         const m = data;
         if (m === 'gauntlet') UI.showGauntlet();
+        else if (m === 'campaign') UI.showCampaign();
         else startRun(m);
         break;
       }
@@ -4987,9 +5438,12 @@ const UI = {
         break;
       }
       case 'res-next': {
-        const next = parseInt(document.getElementById('res-next').dataset.next, 10);
+        const _rnBtn = document.getElementById('res-next');
+        const _rnMode = _rnBtn.dataset.nextmode || 'gauntlet';
+        const _rnVal  = _rnBtn.dataset.next;
         UI.hideAllScreens();
-        startRun('gauntlet', next);
+        if (_rnMode === 'campaign') startRun('campaign', _rnVal);
+        else startRun('gauntlet', parseInt(_rnVal, 10));
         break;
       }
       case 'res-share': {
@@ -5039,10 +5493,156 @@ const UI = {
     document.getElementById('modal-input').style.display = '';
     this._isConfirm = false;
   },
+
+  // ---- CAMPAIGN ----
+  showCampaign() {
+    const p = Profile.active(); if (!p) return;
+    const cleared = Object.values(p.campaignCleared || {}).reduce((s, v) => s + ((v.levelsCleared || []).length), 0);
+    const total = CAMPAIGN_LOCATIONS.reduce((s, l) => s + l.levels.length, 0);
+    document.getElementById('campaign-progress').textContent = cleared + ' / ' + total;
+    document.getElementById('campaign-map').innerHTML = buildUSMapSVG();
+    // auto-select the first unlocked-but-incomplete location
+    const firstLoc = CAMPAIGN_LOCATIONS.find((loc, i) => {
+      if (i === 0) return !Profile.isCampaignLocationCleared(loc.id);
+      return Profile.isCampaignLocationCleared(CAMPAIGN_LOCATIONS[i - 1].id) && !Profile.isCampaignLocationCleared(loc.id);
+    }) || CAMPAIGN_LOCATIONS[0];
+    updateCampaignDetail(firstLoc.id);
+    this.show('campaign');
+  },
+
+  // ---- SIDEKICK ----
+  showSidekick() {
+    const p = Profile.active(); if (!p) return;
+    const list = document.getElementById('sidekick-list');
+    list.innerHTML = '';
+    SIDEKICKS.forEach(sk => {
+      const unlocked = Profile.isSidekickUnlocked(sk.id);
+      const active = p.activeSidekick === sk.id;
+      const lockLoc = CAMPAIGN_LOCATIONS.find(l => l.id === sk.unlockLoc);
+      const card = document.createElement('div');
+      card.className = 'sidekick-card' + (active ? ' active' : '') + (!unlocked ? ' locked' : '');
+      card.innerHTML = `
+        <div class="sk-header">
+          <div>
+            <div class="sk-name" style="color:${unlocked ? sk.color : 'var(--gold-dim)'}">${escapeHtml(sk.name)}</div>
+            <div class="sk-title">${escapeHtml(sk.title)}</div>
+          </div>
+          ${active ? '<div class="sk-badge">ACTIVE</div>' : ''}
+          ${!unlocked ? '<div class="sk-lock">🔒</div>' : ''}
+        </div>
+        <div class="sk-bio">${escapeHtml(sk.bio)}</div>
+        <div class="sk-perk" style="color:${unlocked ? sk.color : 'var(--gold-dim)'}">★ ${escapeHtml(sk.perk)}</div>
+        ${!unlocked ? `<div class="sk-unlock-hint">UNLOCK: CLEAR ${escapeHtml(lockLoc ? lockLoc.name.toUpperCase() : sk.unlockLoc.toUpperCase())}</div>` : ''}
+        ${unlocked && !active ? `<button class="btn" style="margin-top:8px" data-skact="equip" data-skid="${sk.id}">EQUIP</button>` : ''}
+        ${unlocked && active ? `<button class="btn danger" style="margin-top:8px" data-skact="unequip" data-skid="${sk.id}">UNEQUIP</button>` : ''}
+      `;
+      list.appendChild(card);
+    });
+    this.show('sidekick');
+  },
+
+  // ---- CAMPAIGN STORY OVERLAY ----
+  showCampaignStory(levelId, sidekickId, cb) {
+    const entry = levelId ? CAMPAIGN_LEVEL_MAP[levelId] : null;
+    if (!entry) { cb(); return; }
+    const loc = entry.loc;
+    const lvl = entry.lvl;
+    const isLocCleared = Profile.isCampaignLocationCleared(loc.id);
+    const titleEl = document.getElementById('story-title');
+    const textEl  = document.getElementById('story-text');
+    const portEl  = document.getElementById('story-portrait');
+    const skLine  = document.getElementById('story-sk-line');
+    titleEl.textContent = isLocCleared ? loc.name.toUpperCase() + ' CLEARED' : lvl.name.toUpperCase() + ' CLEARED';
+    textEl.textContent  = isLocCleared ? loc.outro : (lvl.obj === 'boss' ? 'BOSS ELIMINATED. THE ROAD OPENS.' : 'OBJECTIVE COMPLETE. KEEP MOVING.');
+    if (skLine) {
+      if (sidekickId) {
+        const sk = SIDEKICK_BY_ID[sidekickId];
+        skLine.textContent = sk ? '★ ' + sk.name.toUpperCase() + ' JOINS YOUR CREW!' : '';
+        skLine.style.display = '';
+      } else {
+        skLine.style.display = 'none';
+      }
+    }
+    const ch = Profile.character();
+    portEl.innerHTML = characterPortraitSVG(ch ? ch.id : DEFAULT_CHARACTER_ID) + '<div class="pframe"></div>';
+    this.show('story');
+    const dismiss = () => {
+      UI.hideAllScreens();
+      cb();
+    };
+    const timer = setTimeout(dismiss, 3600);
+    const overlay = document.getElementById('screen-story');
+    const once = () => { overlay.removeEventListener('pointerdown', once); clearTimeout(timer); dismiss(); };
+    overlay.addEventListener('pointerdown', once);
+  },
 };
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================
+// CAMPAIGN MAP + DETAIL
+// ============================================================
+function buildUSMapSVG() {
+  // Simplified continental US polygon (300×185 space)
+  const outline = '10,62 14,82 12,140 32,145 68,148 100,155 118,150 143,153 165,150 188,151 204,163 216,148 238,141 255,128 275,110 284,90 292,72 296,60 298,48 287,38 268,33 266,22 256,27 244,18 264,10 248,14 228,21 206,21 175,19 150,23 130,19 105,21 85,19 63,17 44,21 25,21 10,38';
+  const roadPts = CAMPAIGN_LOCATIONS.map(l => l.mapPos.join(',')).join(' ');
+  let dots = '';
+  CAMPAIGN_LOCATIONS.forEach((loc, i) => {
+    const [x, y] = loc.mapPos;
+    const prevLoc = i > 0 ? CAMPAIGN_LOCATIONS[i - 1] : null;
+    const unlocked = i === 0 || (prevLoc && Profile.isCampaignLocationCleared(prevLoc.id));
+    const cleared  = Profile.isCampaignLocationCleared(loc.id);
+    const col = cleared ? '#7af07a' : unlocked ? '#f5d76e' : 'rgba(245,215,110,.3)';
+    const cls = 'camp-dot' + (cleared ? ' cleared' : unlocked ? ' unlocked' : ' locked');
+    dots += `<circle class="${cls}" cx="${x}" cy="${y}" r="5" fill="${col}" stroke="#1a0f08" stroke-width="1.5" data-locid="${escapeHtml(loc.id)}"/>`;
+    dots += `<text x="${x}" y="${y - 7}" text-anchor="middle" font-size="5.5" fill="${col}" font-family="'Courier New',monospace" pointer-events="none" font-weight="bold">${i + 1}</text>`;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 185" style="width:100%;display:block">
+    <polygon points="${outline}" fill="rgba(58,35,15,.55)" stroke="rgba(245,215,110,.25)" stroke-width=".8"/>
+    <polyline points="${roadPts}" fill="none" stroke="rgba(245,215,110,.2)" stroke-width="1.2" stroke-dasharray="4,3"/>
+    ${dots}
+  </svg>`;
+}
+
+function updateCampaignDetail(locId) {
+  const p = Profile.active(); if (!p) return;
+  const loc = CAMPAIGN_LOCATIONS.find(l => l.id === locId); if (!loc) return;
+  const locIdx = CAMPAIGN_LOCATIONS.findIndex(l => l.id === locId);
+  const isLocUnlocked = locIdx === 0 || Profile.isCampaignLocationCleared(CAMPAIGN_LOCATIONS[locIdx - 1].id);
+  const isLocCleared  = Profile.isCampaignLocationCleared(locId);
+  const clearedLevels = ((p.campaignCleared || {})[locId] || {}).levelsCleared || [];
+  const levelsHTML = loc.levels.map(lvl => {
+    const levelId   = loc.id + '-' + lvl.num;
+    const isCleared  = clearedLevels.includes(lvl.num);
+    const isUnlocked = Profile.isCampaignLevelUnlocked(locId, lvl.num);
+    const isBoss     = lvl.obj === 'boss';
+    let objLabel = '';
+    if (lvl.obj === 'survive')  objLabel = lvl.target + 'S';
+    else if (lvl.obj === 'kills')    objLabel = lvl.target + ' KILLS';
+    else if (lvl.obj === 'distance') objLabel = (lvl.target / 1000).toFixed(1) + ' KM';
+    else if (lvl.obj === 'boss')     objLabel = 'BOSS';
+    const cls = 'camp-level-tile' + (isCleared ? ' cleared' : '') + (!isUnlocked ? ' locked' : '') + (isBoss ? ' boss' : '');
+    return `<div class="${cls}" data-campid="${levelId}">
+      <div class="clt-num">${lvl.num}</div>
+      <div class="clt-name">${escapeHtml(lvl.name)}</div>
+      <div class="clt-obj">${objLabel}</div>
+      ${isCleared ? '<div class="clt-check">✓</div>' : ''}
+      ${isBoss && !isCleared ? '<div class="clt-star">★</div>' : ''}
+    </div>`;
+  }).join('');
+  const detail = document.getElementById('campaign-detail');
+  detail.innerHTML = `
+    <div class="camp-loc-header">
+      <div class="camp-loc-name">${escapeHtml(loc.name)}</div>
+      <div class="camp-loc-state">${escapeHtml(loc.state)}</div>
+      ${!isLocUnlocked ? '<div class="camp-locked-msg">LOCKED — CLEAR PREVIOUS REGION</div>' : ''}
+      ${isLocCleared   ? '<div class="camp-cleared-msg">✓ REGION CLEARED</div>' : ''}
+    </div>
+    <div class="camp-loc-intro">${escapeHtml(loc.intro)}</div>
+    <div class="camp-levels-grid">${levelsHTML}</div>
+  `;
 }
 
 // ============================================================
@@ -5062,6 +5662,42 @@ document.addEventListener('click', e => {
   const lt = e.target.closest('.level-tile');
   if (lt && !lt.classList.contains('locked')) {
     UI.act('gauntlet-start', parseInt(lt.dataset.level, 10));
+    return;
+  }
+  // campaign map dot
+  const campDot = e.target.closest('.camp-dot');
+  if (campDot) {
+    SFX.click();
+    const locId = campDot.dataset.locid;
+    if (locId) updateCampaignDetail(locId);
+    const det = document.getElementById('campaign-detail');
+    if (det) det.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
+  // campaign level tile
+  const campTile = e.target.closest('.camp-level-tile');
+  if (campTile && !campTile.classList.contains('locked')) {
+    SFX.click();
+    const campId = campTile.dataset.campid;
+    if (campId) { UI.hideAllScreens(); startRun('campaign', campId); }
+    return;
+  }
+  // sidekick card actions
+  const ska = e.target.closest('[data-skact]');
+  if (ska) {
+    SFX.click();
+    const sid = ska.dataset.skid;
+    const sact = ska.dataset.skact;
+    if (sact === 'equip' && sid) {
+      Profile.setSidekick(sid);
+      const sk = SIDEKICK_BY_ID[sid];
+      UI.toast((sk ? sk.name : '') + ' EQUIPPED');
+      UI.showSidekick();
+    } else if (sact === 'unequip') {
+      Profile.setSidekick(null);
+      UI.toast('SIDEKICK UNEQUIPPED');
+      UI.showSidekick();
+    }
     return;
   }
   // garage actions
@@ -5180,6 +5816,7 @@ const PerfMon = {
   ewmaMs: 16.7,
   quality: 1,
   lastAdjustAt: 0,
+  lastScaleAdjustAt: 0,
   hidden: false,
   // Frame counter + EWMA-derived FPS for the debug HUD.
   frames: 0,
@@ -5192,6 +5829,18 @@ const PerfMon = {
 
 const QUALITY_PRESETS = { low: 0, medium: 0.5, high: 1 };
 const QUALITY_KEY = 'mojaverun.quality.v1';
+// Frame-cost thresholds: >28ms (~35fps) means severe pressure, >22ms (~45fps)
+// means moderate pressure, <13ms means enough headroom to recover sharpness.
+// Ramp-down is intentionally stronger than ramp-up to quickly stabilize jank
+// while avoiding visible oscillation on recovery.
+const SCALE_ADJUST_INTERVAL_MS = 1200;
+const SCALE_THRESHOLD_SEVERE_MS = 28;
+const SCALE_THRESHOLD_HIGH_MS = 22;
+const SCALE_THRESHOLD_RECOVER_MS = 13;
+const SCALE_STEP_DOWN_SEVERE = 0.12;
+const SCALE_STEP_DOWN = 0.06;
+const SCALE_STEP_UP = 0.04;
+const RENDER_SCALE_CHANGE_THRESHOLD = 0.001;
 const DEBUG_HUD = (() => {
   try {
     const p = new URLSearchParams(window.location.search);
@@ -5305,6 +5954,23 @@ function frame(now) {
       applyQualityCaps();
     }
   }
+  // Adaptive render scale: changes canvas pixel density (not gameplay logic)
+  // so low-end phones/tablets can stay smooth while high-end devices regain
+  // sharpness when there's headroom.
+  if (now - PerfMon.lastScaleAdjustAt > SCALE_ADJUST_INTERVAL_MS) {
+    PerfMon.lastScaleAdjustAt = now;
+    const prev = renderScale;
+    // Intentional deadband between high and recover thresholds to avoid
+    // oscillating scale around borderline frame times.
+    if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS) {
+      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN_SEVERE);
+    } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS) {
+      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN);
+    } else if (PerfMon.ewmaMs < SCALE_THRESHOLD_RECOVER_MS && renderScale < 1) {
+      renderScale = Math.min(1, renderScale + SCALE_STEP_UP);
+    }
+    if (Math.abs(renderScale - prev) > RENDER_SCALE_CHANGE_THRESHOLD) resize();
+  }
   requestAnimationFrame(frame);
 }
 
@@ -5315,7 +5981,7 @@ function frame(now) {
 function drawDebugHud() {
   const lines = [
     `FPS ${PerfMon.fps.toFixed(0)}  ${PerfMon.ewmaMs.toFixed(1)}ms`,
-    `Q ${PerfMon.mode}${PerfMon.mode === 'auto' ? ` (${PerfMon.quality.toFixed(2)})` : ''}  DPR ${DPR}`,
+    `Q ${PerfMon.mode}${PerfMon.mode === 'auto' ? ` (${PerfMon.quality.toFixed(2)})` : ''}  DPR ${DPR}  RS ${renderScale.toFixed(2)}`,
     `enem ${Game.enemies.length}  obst ${Game.obstacles.length}  pick ${Game.pickups.length}`,
     `bull ${Game.bullets.length}  ebul ${Game.enemyBullets.length}  part ${Game.particles.length}`,
     `pop ${Game.popups.length}  sw ${Game.shockwaves.length}` +
