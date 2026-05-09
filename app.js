@@ -1418,6 +1418,14 @@ function restoreRng() {
 }
 
 const BIOME_KEYS = Object.keys(BIOME_THEMES);
+const BIOME_MODIFIERS = {
+  wastes:    { id:'heatwave',   name:'HEATWAVE',     desc:'Shimmering air favors mirage caches and sand ambushes.', color:'#ffb36a', handlingMul:1.00 },
+  saltflats: { id:'slicksalt',  name:'SLICK SALT',   desc:'Glare and loose salt reduce handling, but magnets appear more often.', color:'#e8f2ff', handlingMul:0.90 },
+  ash:       { id:'ashfall',    name:'ASHFALL',      desc:'Ash haze thickens visibility and throws more volatile debris into the road.', color:'#c8a8a0', handlingMul:0.96 },
+  redcanyon: { id:'rockfall',   name:'ROCKFALL ZONE',desc:'Canyon walls shed debris and reward nitro timing.', color:'#ff8a5a', handlingMul:1.00 },
+  midnight:  { id:'neonsurge',  name:'NEON SURGE',   desc:'Signal ghosts boost pulse tech and attract drones.', color:'#8ec5ff', handlingMul:1.03 },
+};
+
 function pickBiome(mode, levelData, dailySeedKey) {
   if (levelData && levelData.map && BIOME_THEMES[levelData.map]) return levelData.map;
   if (mode === 'daily' && dailySeedKey) {
@@ -1427,6 +1435,9 @@ function pickBiome(mode, levelData, dailySeedKey) {
   }
   if (mode === 'timeattack') return 'redcanyon';
   return 'wastes';
+}
+function pickBiomeModifier(biome) {
+  return BIOME_MODIFIERS[biome] || BIOME_MODIFIERS.wastes;
 }
 function getCharacterPerkState(characterId) {
   const perks = {
@@ -2129,6 +2140,7 @@ const Game = {
   levelData: null,
   dailySeedKey: null,     // 'YYYY-MM-DD' when mode === 'daily'
   biome: 'wastes',
+  biomeModifier: null,
   t: 0,
   animT: 0,               // always-advancing clock for menu/idle animations
   // run stats
@@ -2274,6 +2286,7 @@ function startRun(mode, level) {
     Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
   }
   Game.biome = pickBiome(mode, Game.levelData, Game.dailySeedKey);
+  Game.biomeModifier = pickBiomeModifier(Game.biome);
   Game.runMutators = getRunMutators(mode, Game.levelData, Game.dailySeedKey);
   Game.state = 'loading';
   Game.paused = false;
@@ -2342,7 +2355,7 @@ function startRun(mode, level) {
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
   Game.activeEvent = null;
   Game.eventTimer = 0;
-  Game.eventCooldown = rand(12, 18);
+  Game.eventCooldown = rand(8, 13);
   Game.eventBanner = null;
   Game.bonusObjective = null;
   Game.bonusObjectiveT = 0;
@@ -2547,6 +2560,31 @@ function startDynamicEvent(id) {
       });
     }
     announceEvent('⚠ CIVILIANS ON ROAD', '#4aa8e8');
+  } else if (id === 'mirage_cache') {
+    Game.activeEvent = { id, name:'MIRAGE CACHE', t: 9, max: 9 };
+    const { x0, x1 } = roadBounds();
+    Game.pickups.push({ kind:'cache', x: rand(x0 + 40, x1 - 40), y:-50, w:28, h:28, t:0 });
+    Game.pickups.push({ kind:'scrap', x: rand(x0 + 40, x1 - 40), y:-120, w:22, h:22, t:0 });
+    spawnEnemyWave('bikes');
+    announceEvent('MIRAGE CACHE', '#ffcf7a');
+  } else if (id === 'salt_glare') {
+    Game.activeEvent = { id, name:'SALT GLARE', t: 8, max: 8 };
+    Game.pickups.push({ kind:'powerup', power:'magnet', x: W * 0.5, y:-60, w:26, h:26, t:0 });
+    announceEvent('SALT GLARE', '#e8f2ff');
+  } else if (id === 'ash_squall') {
+    Game.activeEvent = { id, name:'ASH SQUALL', t: 9, max: 9 };
+    spawnHazardField();
+    spawnEnemyWave('mortar');
+    announceEvent('ASH SQUALL', '#c8a8a0');
+  } else if (id === 'canyon_rockfall') {
+    Game.activeEvent = { id, name:'CANYON ROCKFALL', t: 8, max: 8 };
+    spawnRockfallField();
+    announceEvent('CANYON ROCKFALL', '#ff8a5a');
+  } else if (id === 'neon_surge') {
+    Game.activeEvent = { id, name:'NEON SURGE', t: 8, max: 8 };
+    for (let i = 0; i < 2; i++) spawnEnemyWave('drone');
+    Game.pickups.push({ kind:'powerup', power:'pulse', x: W * 0.5, y:-50, w:26, h:26, t:0 });
+    announceEvent('NEON SURGE', '#8ec5ff');
   }
 }
 
@@ -2554,6 +2592,11 @@ function maybeTriggerDynamicEvent() {
   if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
   const dist = Game.distance;
   const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
+  if (Game.biome === 'wastes') pool.push('mirage_cache', 'ambush');
+  if (Game.biome === 'saltflats') pool.push('salt_glare', 'convoy');
+  if (Game.biome === 'ash') pool.push('ash_squall', 'hazard');
+  if (Game.biome === 'redcanyon') pool.push('canyon_rockfall', 'hazard');
+  if (Game.biome === 'midnight') pool.push('neon_surge', 'drone_strike');
   if (dist > 1500) pool.push('drone_strike');
   if (dist > 4000) pool.push('tank_column');
   if (Game.mode === 'classic' && dist > 1000) pool.push('civilian_convoy');
@@ -2572,6 +2615,22 @@ function spawnHazardField() {
       h: i % 2 === 0 ? 24 : 64,
       hp: 1,
       rot: rand(-0.35, 0.35),
+    });
+  }
+}
+
+function spawnRockfallField() {
+  const { x0, x1 } = roadBounds();
+  for (let i = 0; i < 5; i++) {
+    const barrel = i % 3 === 0;
+    Game.obstacles.push({
+      kind: barrel ? 'barrel' : 'wreck',
+      x: rand(x0 + 30, x1 - 30),
+      y: -45 - i * rand(38, 58),
+      w: barrel ? 22 : rand(28, 42),
+      h: barrel ? 24 : rand(38, 58),
+      hp: barrel ? 1 : undefined,
+      rot: rand(-0.6, 0.6),
     });
   }
 }
@@ -3148,6 +3207,12 @@ function update(dt) {
 
   if (Game.activeEvent) {
     Game.activeEvent.t -= dt;
+    if (Game.activeEvent.id === 'canyon_rockfall' && Math.random() < dt * 0.75 && Game.obstacles.length < 28) {
+      spawnRockfallField();
+    }
+    if (Game.activeEvent.id === 'ash_squall' && Math.random() < dt * 0.55 && Game.obstacles.length < 28) {
+      spawnHazardField();
+    }
     if (Game.activeEvent.id === 'stormfront' && Game.activeEvent.t <= 0 && !Game.runMutators.some(m => m.id === 'volatile')) {
       Game.isStorm = !!(Game.levelData && Game.levelData.storm);
     }
@@ -3255,8 +3320,11 @@ function update(dt) {
   // ---- player movement ----
   const p = Game.player;
   const stats = Game.vehicleStats;
-  const accel = stats.accel;
-  const maxV = stats.maxV;
+  let handlingMul = Game.biomeModifier ? Game.biomeModifier.handlingMul : 1;
+  if (Game.activeEvent && Game.activeEvent.id === 'salt_glare') handlingMul *= 0.82;
+  if (Game.activeEvent && Game.activeEvent.id === 'ash_squall') handlingMul *= 0.94;
+  const accel = stats.accel * handlingMul;
+  const maxV = stats.maxV * (handlingMul < 1 ? 0.96 : 1.02);
   const drag = 6.5;
   if (input.left)  p.vx -= accel * dt;
   if (input.right) p.vx += accel * dt;
@@ -3974,6 +4042,7 @@ function drawDecor() {
 
 function drawWeather() {
   const t = activeBiomeTheme();
+  const eventId = Game.activeEvent ? Game.activeEvent.id : null;
   if (Game.isStorm) {
     // sandstorm — diagonal streaks
     ctx.strokeStyle = t.stormLine;
@@ -3990,6 +4059,53 @@ function drawWeather() {
     // overall haze
     ctx.fillStyle = t.stormHaze;
     ctx.fillRect(0, 0, W, H);
+  }
+  if ((Game.biome === 'wastes' && !Game.isNight) || eventId === 'mirage_cache') {
+    ctx.save();
+    ctx.globalAlpha = eventId === 'mirage_cache' ? 0.20 : 0.10;
+    ctx.strokeStyle = 'rgba(255,210,130,0.45)';
+    ctx.lineWidth = 1;
+    const shimmer = Math.floor(Game.t * 24);
+    ctx.beginPath();
+    for (let i = 0; i < 18; i++) {
+      const y = H * 0.34 + ((i * 31 + shimmer) % Math.max(1, H * 0.45));
+      const wobble = Math.sin(Game.t * 3 + i) * 8;
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y + wobble);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (Game.biome === 'saltflats' || eventId === 'salt_glare') {
+    ctx.fillStyle = eventId === 'salt_glare' ? 'rgba(245,250,255,0.16)' : 'rgba(245,250,255,0.05)';
+    ctx.fillRect(0, H * 0.28, W, H * 0.42);
+  }
+  if (Game.biome === 'ash' || eventId === 'ash_squall') {
+    ctx.save();
+    ctx.fillStyle = eventId === 'ash_squall' ? 'rgba(180,165,155,0.12)' : 'rgba(120,100,95,0.05)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(210,190,180,0.35)';
+    const seed = Math.floor(Game.t * 36);
+    const flecks = eventId === 'ash_squall' ? 56 : 28;
+    for (let i = 0; i < flecks; i++) {
+      const sx = (i * 53 + seed * 3) % W;
+      const sy = (i * 41 + seed * 7) % H;
+      ctx.fillRect(sx, sy, 2, 1);
+    }
+    ctx.restore();
+  }
+  if (eventId === 'neon_surge') {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(122,208,255,0.35)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 6; i++) {
+      const y = ((i * 89 + Game.t * 220) % (H + 80)) - 40;
+      ctx.beginPath();
+      ctx.moveTo(W * 0.15, y);
+      ctx.lineTo(W * 0.85, y + 22);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
   if (Game.isNight) {
     // headlight cones from player
@@ -4807,17 +4923,19 @@ function drawHUD() {
     ctx.fillText(Game.boss.name + (Game.boss.enrage ? ' ★ ENRAGED' : ''), W/2, bbY + bbH + 10);
   }
 
-  if (Game.runMutators.length || Game.activeEvent || Game.bonusObjective) {
+  if (Game.runMutators.length || Game.biomeModifier || Game.activeEvent || Game.bonusObjective) {
+    const passiveMods = Game.runMutators.slice();
+    if (Game.biomeModifier) passiveMods.push(Game.biomeModifier);
     const label = Game.activeEvent
       ? Game.activeEvent.name
       : Game.bonusObjective
         ? `${Game.bonusObjective.name} ${Game.kills - Game.bonusObjective.startKills}/${Game.bonusObjective.target}`
-        : Game.runMutators.map(m => m.name).join(' · ');
+        : passiveMods.map(m => m.name).join(' · ');
     const y = Game.boss && Game.boss.y >= Game.boss.targetY - 5 ? hudH + 34 : hudH + 10;
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     const tw = ctx.measureText(label).width + 18;
     ctx.fillRect((W - tw) / 2, y - 10, tw, 18);
-    ctx.fillStyle = Game.activeEvent ? '#ffb36a' : Game.bonusObjective ? '#7af07a' : '#8ec5ff';
+    ctx.fillStyle = Game.activeEvent ? '#ffb36a' : Game.bonusObjective ? '#7af07a' : (Game.biomeModifier ? Game.biomeModifier.color : '#8ec5ff');
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(label, W / 2, y);
