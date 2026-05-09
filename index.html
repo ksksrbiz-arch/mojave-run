@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Mojave Run" />
 <meta name="format-detection" content="telephone=no" />
 <meta name="description" content="A wasteland arcade driver. Survive the Mojave. Mobile-first browser game." />
-<!-- Multiplayer relay URL. Leave content empty to use the same origin as the
+<!-- Multiplayer relay URL. Leave the content attribute empty to use the same origin as the
      page (works when server.js serves the static site). On a static-only host
      like Netlify, set this to your deployed wss://… URL so the client connects
      to the right relay automatically. -->
@@ -439,7 +439,7 @@
   #pauseBtn{
     position:absolute;
     top:calc(8px + var(--safe-t));
-    left:calc(8px + var(--safe-r));
+    left:calc(8px + var(--safe-l));
     width:40px;height:40px;
     display:none;align-items:center;justify-content:center;
     background:rgba(0,0,0,.55);
