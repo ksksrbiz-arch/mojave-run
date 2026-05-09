@@ -129,7 +129,7 @@
     <div class="subtitle">Race the Mojave, clear campaign sectors, and upgrade your Rust Bucket.<br><b>Zombie Wasteland unlocks mid-campaign.</b></div>
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
-      <button class="btn" data-act="gauntlet">CAMPAIGN (12 SECTORS)</button>
+      <button class="btn" data-act="campaign">CAMPAIGN (12 SECTORS)</button>
       <button class="btn" id="zombieBtn" data-act="zombie">ZOMBIE WASTELAND</button>
       <button class="btn" data-act="garage">GARAGE</button>
       <button class="btn" data-act="stats">STATS</button>
@@ -578,7 +578,7 @@ function updateZombieMenuBtn(){
     btn.classList.remove('primary');
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — unlocked');
   } else {
-    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks after '+ZOMBIE_UNLOCK_SECTORS+'/'+SECTORS.length+' Campaign Sectors ('+cleared+'/'+ZOMBIE_UNLOCK_SECTORS+')</span>';
+    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks at '+ZOMBIE_UNLOCK_SECTORS+'/'+SECTORS.length+' Campaign Sectors ('+cleared+'/'+SECTORS.length+')</span>';
     btn.style.opacity = '0.75'; btn.style.borderColor = '';
     btn.classList.remove('primary');
     btn.setAttribute('aria-label', 'Zombie Wasteland mode — locked. Complete '+ZOMBIE_UNLOCK_SECTORS+' campaign sectors to unlock. Progress: '+cleared+' of '+ZOMBIE_UNLOCK_SECTORS);
@@ -1407,7 +1407,7 @@ document.addEventListener('click', e=>{
   const a = e.target.closest('[data-act]'); if(!a) return;
   const act = a.dataset.act; Audio.ui();
   if(act==='play') startGame('rust');
-  else if(act==='gauntlet') startGame('gauntlet');
+  else if(act==='campaign') startGame('gauntlet');
   // === ZOMBIE WASTELAND unlock check ===
   else if(act==='zombie'){
     if(!isZombieUnlocked()){
