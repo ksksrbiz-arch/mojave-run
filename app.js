@@ -3983,7 +3983,7 @@ function drawBackground() {
       ctx.arc(sx, sy, sz, 0, Math.PI * 2);
       ctx.fill();
     }
-    // shooting star — streaks across the sky every ~9 seconds
+    // shooting star — 9 s cycle; visible for the first 1 s of each cycle (~11 % of the time)
     const starPeriod = 9;
     const starPhase = (Game.t + 2.7) % starPeriod;
     if (starPhase < 1.0) {
