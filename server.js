@@ -126,7 +126,10 @@ const server = http.createServer((req, res) => {
 
   if (urlPathApi === '/api/scores' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 2048) req.destroy(); });
+    req.on('data', chunk => {
+      if (body.length + chunk.length > 2048) { req.destroy(); return; }
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const entry = JSON.parse(body);

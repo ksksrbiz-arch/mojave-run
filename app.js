@@ -263,7 +263,7 @@ const MODES = [
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
   { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
-  { id: 'zombie',     name: 'ZOMBIE HORDE', desc: 'The dead walk the Mojave. No bullets — just claws, teeth, and numbers. Survive the endless shamble.' },
+  { id: 'zombie',     name: 'ZOMBIE HORDE',     desc: 'The dead walk the Mojave. No bullets — just claws, teeth, and numbers. Survive the endless shamble.' },
 ];
 
 // Zombie enemy definitions for ZOMBIE HORDE mode
@@ -1295,6 +1295,9 @@ const PULSE_DAMAGE = { normal: 1.5, elite: 2 };
 const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, zombie: 80 };
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
+// Zombie horde burst spawn distance thresholds — horde grows denser past these
+const ZOMBIE_BURST_DIST_1 = 4000;  // first burst tier: occasional double-spawn
+const ZOMBIE_BURST_DIST_2 = 10000; // second burst tier: triple-spawn waves
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -2575,7 +2578,12 @@ function update(dt) {
     if (ch) {
       Game._lastStoryDistance = ch.distance;
       announceEvent(ch.title, '#a8c890');
-      addPopup(ch.text.slice(0, 40), W * 0.5, H * 0.38, '#a8c890', 10);
+      const maxLen = 40;
+      const text = ch.text;
+      const snippet = text.length > maxLen
+        ? text.slice(0, text.lastIndexOf(' ', maxLen) || maxLen) + '…'
+        : text;
+      addPopup(snippet, W * 0.5, H * 0.38, '#a8c890', 10);
     }
   }
 
@@ -2997,8 +3005,8 @@ function update(dt) {
       spawnEnemy();
       // burst spawn in time attack or zombie mode (increasing burst over time)
       if (Game.mode === 'timeattack' && Math.random() < 0.4) spawnEnemy();
-      if (isZombieMode && Game.distance > 4000 && Math.random() < 0.45) spawnEnemy();
-      if (isZombieMode && Game.distance > 10000 && Math.random() < 0.35) spawnEnemy();
+      if (isZombieMode && Game.distance > ZOMBIE_BURST_DIST_1 && Math.random() < 0.45) spawnEnemy();
+      if (isZombieMode && Game.distance > ZOMBIE_BURST_DIST_2 && Math.random() < 0.35) spawnEnemy();
     }
     Game.pickupTimer -= dt;
     if (Game.pickupTimer <= 0) {
@@ -4472,7 +4480,7 @@ function submitGlobalScore() {
     name,
     score,
     mode: Game.mode || 'classic',
-    kills: Game.kills | 0,
+    kills: Math.floor(Game.kills),
     distance: Math.floor(Game.distance),
     vehicle,
   };
@@ -4911,7 +4919,7 @@ const UI = {
     this.show('scoreboard');
     const url = '/api/scores?mode=' + encodeURIComponent(modeId);
     fetch(url)
-      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(data => {
         if (!data || !data.scores || data.scores.length === 0) {
           el.innerHTML = '<div class="small center" style="padding:14px">NO SCORES YET. BE THE FIRST!</div>';
