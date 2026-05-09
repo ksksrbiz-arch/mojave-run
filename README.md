@@ -1,1 +1,1 @@
- [Updated README with v1.1 section: New features list, how to use cosmetics/prestige/rivals/share codes, Android notes. Full previous content + 'v1.1 Shipped' header. ] 
+[v1.2 section added with full feature list, how to use editor/modding, Android build instructions, seasonal calendar]
