@@ -1,1 +1,5 @@
-[STABILITY HOTFIX: Removed incomplete v1.4 CinematicRenderer, CompanionRomance, PhotoMode, and related placeholder code. Restored reliable Game.init(), canvas rendering, and main loop. Cleaned leaked debug text. Kept all working v1.1–v1.3 features intact.]
+'use strict';
+
+if (typeof window !== 'undefined') {
+  window.MOJAVE_RUN_ENTRY = 'index-inline';
+}
