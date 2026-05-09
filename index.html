@@ -1,1 +1,991 @@
-[HOTFIX: Removed broken #screen-photomode, #screen-romance, #screen-cinematic references and placeholder text. Restored clean UI structure. Main game screen now renders properly.]
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#1a0f08" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Mojave Run" />
+<meta name="format-detection" content="telephone=no" />
+<meta name="description" content="A wasteland arcade driver. Survive the Mojave. Mobile-first browser game." />
+<!-- Multiplayer relay URL. Leave content empty to use the same origin as the
+     page (works when server.js serves the static site). On a static-only host
+     like Netlify, set this to your deployed wss://… URL so the client connects
+     to the right relay automatically. -->
+<meta name="mp-server-url" content="wss://mojave-run.onrender.com/ws" />
+<meta property="og:title" content="MOJAVE RUN" />
+<meta property="og:description" content="A wasteland arcade driver. Survive the Mojave. Garage, upgrades, gauntlet mode, bosses." />
+<meta property="og:type" content="website" />
+<title>MOJAVE RUN</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<link rel="apple-touch-icon" href="/icon.svg" />
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --safe-t:env(safe-area-inset-top, 0px);
+    --safe-b:env(safe-area-inset-bottom, 0px);
+    --safe-l:env(safe-area-inset-left, 0px);
+    --safe-r:env(safe-area-inset-right, 0px);
+    --gold:#f5d76e;
+    --gold-dim:rgba(245,215,110,.7);
+    --gold-faint:rgba(245,215,110,.35);
+    --rust:#a86a2e;
+    --rust-deep:#8a4f1f;
+    --bg:#1a0f08;
+    --bg-2:#2a1808;
+    --bg-3:#3a230f;
+    --danger:#ff5050;
+    --good:#7af07a;
+  }
+  html,body{
+    width:100%;height:100%;
+    overflow:hidden;
+    background:#000;
+    font-family:'Courier New',ui-monospace,monospace;
+    color:var(--gold);
+    -webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-touch-callout:none;
+    overscroll-behavior:none;
+    touch-action:none;
+    position:fixed;inset:0;
+  }
+  body{display:flex;align-items:center;justify-content:center}
+  #wrap{position:fixed;inset:0;width:100%;height:100%}
+  canvas{
+    display:block;position:absolute;inset:0;
+    width:100%;height:100%;
+    image-rendering:pixelated;image-rendering:crisp-edges;
+    background:var(--bg);
+    touch-action:none;
+  }
+
+  /* SCREEN OVERLAY SYSTEM */
+  .screen{
+    position:absolute;inset:0;
+    padding:calc(20px + var(--safe-t)) calc(16px + var(--safe-r)) calc(20px + var(--safe-b)) calc(16px + var(--safe-l));
+    display:flex;flex-direction:column;align-items:center;
+    overflow-y:auto;overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+    background:linear-gradient(180deg, rgba(26,15,8,.92) 0%, rgba(26,15,8,.96) 100%);
+    backdrop-filter:blur(2px);
+    -webkit-backdrop-filter:blur(2px);
+    z-index:5;
+    opacity:0;pointer-events:none;
+    transform:translateY(8px);
+    transition:opacity .28s ease-out, transform .28s ease-out;
+  }
+  .screen.active{opacity:1;pointer-events:auto;transform:translateY(0)}
+  .screen .inner{
+    width:100%;max-width:480px;
+    display:flex;flex-direction:column;gap:14px;
+    padding-bottom:24px;
+    animation:screen-in .42s cubic-bezier(.2,.7,.3,1);
+  }
+  @keyframes screen-in{
+    from{opacity:0;transform:translateY(14px) scale(.98)}
+    to{opacity:1;transform:translateY(0) scale(1)}
+  }
+  /* staggered entrance for items inside the inner container */
+  .screen.active .inner > *{animation:item-in .45s ease-out both}
+  .screen.active .inner > *:nth-child(1){animation-delay:.02s}
+  .screen.active .inner > *:nth-child(2){animation-delay:.06s}
+  .screen.active .inner > *:nth-child(3){animation-delay:.10s}
+  .screen.active .inner > *:nth-child(4){animation-delay:.14s}
+  .screen.active .inner > *:nth-child(5){animation-delay:.18s}
+  .screen.active .inner > *:nth-child(6){animation-delay:.22s}
+  .screen.active .inner > *:nth-child(7){animation-delay:.26s}
+  .screen.active .inner > *:nth-child(8){animation-delay:.30s}
+  @keyframes item-in{
+    from{opacity:0;transform:translateY(8px)}
+    to{opacity:1;transform:translateY(0)}
+  }
+  /* respect reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .screen,.screen .inner,.screen.active .inner > *{
+      animation:none !important;transition:opacity .15s !important;transform:none !important;
+    }
+  }
+
+  h1{
+    font-family:'Courier New',monospace;
+    font-size:clamp(36px,9vw,56px);
+    font-weight:bold;letter-spacing:2px;
+    color:var(--gold);
+    text-shadow:3px 3px 0 var(--bg);
+    text-align:center;
+    margin-bottom:4px;
+    animation:title-glow 3.6s ease-in-out infinite;
+  }
+  @keyframes title-glow{
+    0%,100%{text-shadow:3px 3px 0 var(--bg), 0 0 0 transparent}
+    50%{text-shadow:3px 3px 0 var(--bg), 0 0 24px rgba(245,215,110,.45)}
+  }
+  h2{
+    font-size:18px;font-weight:bold;letter-spacing:2px;
+    color:var(--gold);margin:6px 0 2px;
+    border-bottom:1px solid var(--gold-faint);
+    padding-bottom:6px;
+  }
+  .subtitle{font-size:11px;letter-spacing:2px;color:var(--gold-dim);text-align:center;margin-bottom:12px}
+  .small{font-size:11px;letter-spacing:1px;color:var(--gold-dim)}
+  .center{text-align:center}
+
+  /* BUTTONS */
+  .btn{
+    display:flex;align-items:center;justify-content:center;
+    width:100%;min-height:52px;
+    padding:14px 18px;
+    background:rgba(0,0,0,.5);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    color:var(--gold);
+    font-family:'Courier New',monospace;
+    font-size:15px;font-weight:bold;letter-spacing:2px;
+    cursor:pointer;
+    transition:all .15s;
+    text-align:center;
+  }
+  .btn:hover{border-color:var(--gold);box-shadow:0 0 12px rgba(245,215,110,.18)}
+  .btn:active{transform:scale(.97);background:rgba(245,215,110,.1)}
+  .btn.primary{
+    background:var(--gold);color:var(--bg);border-color:var(--gold);
+    animation:primary-pulse 2.2s ease-in-out infinite;
+  }
+  .btn.primary:active{background:#fff3b0;animation:none}
+  @keyframes primary-pulse{
+    0%,100%{box-shadow:0 0 0 rgba(245,215,110,0)}
+    50%{box-shadow:0 0 18px rgba(245,215,110,.55)}
+  }
+  .btn.danger{color:var(--danger);border-color:rgba(255,80,80,.4)}
+  .btn.disabled,.btn[disabled]{opacity:.4;pointer-events:none}
+  .btn .sub{display:block;font-size:10px;font-weight:normal;letter-spacing:1.5px;opacity:.7;margin-top:3px}
+  .btn-row{display:flex;gap:10px}
+  .btn-row .btn{flex:1}
+
+  /* PROFILE BAR (top of menu screens) */
+  .profile-bar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 12px;
+    background:rgba(0,0,0,.4);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    margin-bottom:12px;
+    font-size:12px;letter-spacing:1.5px;
+  }
+  .profile-bar .name{color:var(--gold);font-weight:bold}
+  .profile-bar .scrap{color:var(--gold-dim)}
+  .profile-bar .scrap b{color:var(--gold)}
+
+  /* PROFILE LIST */
+  .profile-card{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px;
+    background:rgba(0,0,0,.4);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    cursor:pointer;
+  }
+  .profile-card.active{border-color:var(--gold);background:rgba(245,215,110,.08)}
+  .profile-card:active{transform:scale(.99)}
+  .profile-card .pname{font-weight:bold;font-size:14px;letter-spacing:1.5px}
+  .profile-card .pmeta{font-size:10px;color:var(--gold-dim);margin-top:3px;letter-spacing:1px}
+  .profile-card .delbtn{
+    background:none;border:none;color:var(--danger);
+    padding:8px 10px;font-size:14px;cursor:pointer;
+    opacity:.7;
+  }
+
+  /* CHARACTER PORTRAIT (animated SVG headshot) */
+  .portrait{
+    position:relative;display:inline-block;
+    width:64px;height:64px;flex:none;
+    border:1px solid var(--gold-faint);border-radius:4px;
+    overflow:hidden;background:#0d0805;
+  }
+  .portrait svg{display:block;width:100%;height:100%}
+  .portrait.lg{width:140px;height:140px;border-color:var(--gold-dim)}
+  .portrait.xl{width:170px;height:170px;border-color:var(--gold)}
+  .portrait .pframe{
+    position:absolute;inset:0;pointer-events:none;
+    box-shadow:inset 0 0 18px rgba(0,0,0,.7);
+  }
+  /* facial animation keyframes — applied to SVG sub-elements */
+  @keyframes cha-blink{
+    0%,92%,100%{transform:scaleY(1)}
+    94%,97%{transform:scaleY(.05)}
+  }
+  @keyframes cha-blink-2{
+    0%,88%,100%{transform:scaleY(1)}
+    90%,93%{transform:scaleY(.05)}
+  }
+  @keyframes cha-breath{
+    0%,100%{transform:translateY(0)}
+    50%{transform:translateY(.6px)}
+  }
+  @keyframes cha-hair{
+    0%,100%{transform:rotate(-1deg)}
+    50%{transform:rotate(2deg)}
+  }
+  @keyframes cha-hair-2{
+    0%,100%{transform:translateX(-.4px) rotate(.5deg)}
+    50%{transform:translateX(.6px) rotate(-1.5deg)}
+  }
+  @keyframes cha-ember{
+    0%,100%{opacity:.45}
+    50%{opacity:.9}
+  }
+  @keyframes cha-dust{
+    0%{transform:translate(-6px,4px);opacity:0}
+    20%{opacity:.7}
+    100%{transform:translate(60px,-30px);opacity:0}
+  }
+  @keyframes cha-spark{
+    0%,100%{opacity:.2;transform:scale(.8)}
+    50%{opacity:1;transform:scale(1.2)}
+  }
+  .portrait .eyelid{transform-origin:center;transform-box:fill-box;animation:cha-blink 5.4s infinite}
+  .portrait .eyelid.b{animation:cha-blink-2 6.1s infinite}
+  .portrait .breath{transform-origin:center;transform-box:fill-box;animation:cha-breath 3.8s ease-in-out infinite}
+  .portrait .hair{transform-origin:50% 0;transform-box:fill-box;animation:cha-hair 4.4s ease-in-out infinite}
+  .portrait .hair.s{animation:cha-hair-2 5.2s ease-in-out infinite}
+  .portrait .ember{animation:cha-ember 2.6s ease-in-out infinite}
+  .portrait .dust{animation:cha-dust 6.2s linear infinite}
+  .portrait .dust.d2{animation-duration:7.4s;animation-delay:-2.1s}
+  .portrait .dust.d3{animation-duration:5.6s;animation-delay:-3.4s}
+  .portrait .spark{transform-origin:center;transform-box:fill-box;animation:cha-spark 1.8s ease-in-out infinite}
+
+  /* CHARACTER SELECT */
+  .char-card{
+    display:flex;gap:14px;align-items:flex-start;
+    padding:12px;
+    background:rgba(0,0,0,.5);
+    border:2px solid var(--gold-faint);
+    border-radius:6px;cursor:pointer;
+    transition:border-color .15s,background .15s;
+  }
+  .char-card.selected{border-color:var(--gold);background:rgba(245,215,110,.06)}
+  .char-card:active{transform:scale(.995)}
+  .char-card .cmeta{flex:1;min-width:0}
+  .char-card .cname{font-weight:bold;letter-spacing:2px;font-size:15px;color:var(--gold)}
+  .char-card .ctitle{font-size:10px;letter-spacing:2px;color:var(--rust);margin-top:2px}
+  .char-card .cbio{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;margin-top:6px;line-height:1.45}
+  .char-card .cperk{font-size:10px;color:var(--good);letter-spacing:1px;margin-top:6px}
+
+  /* MENU profile bar — character portrait inline */
+  .profile-bar .pb-portrait{
+    width:42px;height:42px;flex:none;margin-right:10px;
+  }
+  .profile-bar .pb-left{display:flex;align-items:center;min-width:0}
+  .profile-bar .pb-name{min-width:0}
+  .profile-bar .ctitle-sm{font-size:9px;letter-spacing:1.5px;color:var(--rust);margin-top:2px}
+
+  /* PROFILE CARD — portrait */
+  .profile-card .pc-portrait{width:48px;height:48px;flex:none;margin-right:12px}
+  .profile-card .pc-left{display:flex;align-items:center;min-width:0;flex:1}
+
+  /* GARAGE — vehicle tile */
+  .vehicle-tile{
+    background:rgba(0,0,0,.5);
+    border:2px solid var(--gold-faint);
+    border-radius:6px;
+    padding:12px;
+    cursor:pointer;
+    transition:border-color .15s,background .15s;
+  }
+  .vehicle-tile.selected{border-color:var(--gold);background:rgba(245,215,110,.06)}
+  .vehicle-tile.locked{opacity:.5}
+  .vehicle-tile .vt-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+  .vehicle-tile .vt-name{font-weight:bold;letter-spacing:2px;font-size:14px}
+  .vehicle-tile .vt-cost{font-size:11px;color:var(--gold-dim);letter-spacing:1px}
+  .vehicle-tile .vt-cost b{color:var(--gold)}
+  .vehicle-tile .vt-desc{font-size:11px;color:var(--gold-dim);letter-spacing:1px;margin-bottom:8px;line-height:1.4}
+  .vehicle-tile .vt-preview{
+    height:90px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(180deg,#3a230f,#1f1610);
+    border-radius:4px;margin-bottom:8px;
+    position:relative;overflow:hidden;
+  }
+  .vehicle-tile .vt-preview canvas{position:relative;background:transparent;width:auto;height:auto}
+  .vehicle-tile .vt-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;letter-spacing:1px;color:var(--gold-dim)}
+  .vehicle-tile .vt-stats div{display:flex;justify-content:space-between}
+  .vehicle-tile .vt-stats b{color:var(--gold);font-weight:normal}
+
+  .stat-bar{
+    display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:1px;
+  }
+  .stat-bar .lbl{width:60px;color:var(--gold-dim)}
+  .stat-bar .bar{flex:1;height:6px;background:rgba(0,0,0,.5);border:1px solid var(--gold-faint);border-radius:2px;overflow:hidden}
+  .stat-bar .fill{height:100%;background:var(--gold)}
+  .stat-bar .num{width:34px;text-align:right;color:var(--gold)}
+
+  /* UPGRADE row */
+  .up-row{
+    background:rgba(0,0,0,.4);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    padding:12px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .up-row .up-head{display:flex;justify-content:space-between;align-items:center}
+  .up-row .up-name{font-weight:bold;letter-spacing:2px;font-size:13px}
+  .up-row .up-tier{font-size:10px;letter-spacing:1px;color:var(--gold-dim)}
+  .up-row .up-desc{font-size:10px;letter-spacing:1px;color:var(--gold-dim);line-height:1.4}
+  .up-row .up-tiers{display:flex;gap:4px}
+  .up-row .up-tiers .pip{
+    flex:1;height:8px;background:rgba(0,0,0,.5);border:1px solid var(--gold-faint);border-radius:2px;
+  }
+  .up-row .up-tiers .pip.filled{background:var(--gold);border-color:var(--gold)}
+
+  /* MODE tile */
+  .mode-tile{
+    background:rgba(0,0,0,.5);
+    border:1px solid var(--gold-faint);
+    border-radius:6px;
+    padding:16px;
+    cursor:pointer;
+    text-align:left;
+  }
+  .mode-tile:active{transform:scale(.99);background:rgba(245,215,110,.06)}
+  .mode-tile .mt-name{font-weight:bold;letter-spacing:2px;font-size:16px}
+  .mode-tile .mt-desc{font-size:11px;color:var(--gold-dim);letter-spacing:1px;margin-top:4px;line-height:1.5}
+
+  /* GAUNTLET grid */
+  .gauntlet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .level-tile{
+    aspect-ratio:1;
+    background:rgba(0,0,0,.5);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:8px;text-align:center;cursor:pointer;
+    position:relative;
+  }
+  .level-tile.cleared{background:rgba(122,240,122,.08);border-color:var(--good)}
+  .level-tile.locked{opacity:.4;pointer-events:none}
+  .level-tile.boss{border-color:var(--danger);background:rgba(255,80,80,.05)}
+  .level-tile.boss.cleared{background:rgba(122,240,122,.08);border-color:var(--good)}
+  .level-tile .ln{font-size:22px;font-weight:bold;letter-spacing:1px}
+  .level-tile .lname{font-size:8px;letter-spacing:1px;color:var(--gold-dim);margin-top:4px;line-height:1.2}
+  .level-tile .lobj{font-size:8px;letter-spacing:1px;color:var(--gold-dim);margin-top:2px}
+  .level-tile.cleared .lcheck{position:absolute;top:4px;right:4px;color:var(--good);font-size:14px}
+  .level-tile.boss .star{position:absolute;top:4px;right:4px;font-size:10px}
+
+  /* GAME UI overlay (in-game HUD on top of canvas) */
+  #game-overlay{position:absolute;inset:0;pointer-events:none;z-index:3}
+  #fsBtn{
+    position:absolute;
+    top:calc(8px + var(--safe-t));
+    right:calc(8px + var(--safe-r));
+    width:40px;height:40px;
+    display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.55);
+    border:1px solid var(--gold-faint);
+    color:var(--gold);
+    border-radius:4px;
+    cursor:pointer;
+    font-size:18px;
+    -webkit-backdrop-filter:blur(4px);
+    backdrop-filter:blur(4px);
+    z-index:11;
+    pointer-events:auto;
+    opacity:.8;
+    transition:opacity .25s;
+  }
+  #fsBtn.hidden{opacity:0;pointer-events:none}
+  #pauseBtn{
+    position:absolute;
+    top:calc(8px + var(--safe-t));
+    left:calc(8px + var(--safe-r));
+    width:40px;height:40px;
+    display:none;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.55);
+    border:1px solid var(--gold-faint);
+    color:var(--gold);
+    border-radius:4px;cursor:pointer;font-size:18px;
+    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+    z-index:11;pointer-events:auto;opacity:.8;
+  }
+  #pauseBtn.show{display:flex}
+
+  #hint{
+    position:absolute;
+    left:50%;top:calc(80px + var(--safe-t));
+    transform:translateX(-50%);
+    background:rgba(0,0,0,.55);
+    border:1px solid var(--gold-faint);
+    color:var(--gold);
+    padding:8px 14px;
+    font-size:11px;letter-spacing:1.5px;
+    border-radius:4px;
+    pointer-events:none;
+    opacity:0;
+    transition:opacity .4s;
+    z-index:9;
+    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+    text-align:center;white-space:nowrap;
+  }
+  #hint.show{opacity:1}
+
+  #footer{
+    position:absolute;
+    bottom:calc(4px + var(--safe-b));
+    right:calc(8px + var(--safe-r));
+    font-size:9px;opacity:.35;letter-spacing:1.5px;
+    pointer-events:none;z-index:4;
+  }
+
+  /* TOAST */
+  #toast{
+    position:absolute;
+    bottom:calc(20px + var(--safe-b));left:50%;
+    transform:translate(-50%, 30px);
+    background:rgba(0,0,0,.85);
+    border:1px solid var(--gold);
+    color:var(--gold);
+    padding:10px 18px;font-size:12px;letter-spacing:1.5px;
+    border-radius:4px;
+    opacity:0;pointer-events:none;
+    transition:opacity .25s, transform .25s;
+    z-index:50;
+    max-width:80%;text-align:center;
+  }
+  #toast.show{opacity:1;transform:translate(-50%, 0)}
+
+  /* MODAL — for create profile / confirm */
+  #modal{
+    position:fixed;inset:0;
+    background:rgba(0,0,0,.75);
+    display:none;align-items:center;justify-content:center;
+    padding:20px;z-index:60;
+    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+  }
+  #modal.show{display:flex}
+  #modal .box{
+    background:var(--bg);
+    border:1px solid var(--gold);
+    border-radius:6px;
+    padding:20px;width:100%;max-width:340px;
+    display:flex;flex-direction:column;gap:14px;
+  }
+  #modal h3{font-size:14px;letter-spacing:2px;text-align:center}
+  #modal input{
+    width:100%;background:rgba(0,0,0,.5);
+    border:1px solid var(--gold-faint);color:var(--gold);
+    padding:12px;font-family:'Courier New',monospace;font-size:14px;letter-spacing:2px;
+    border-radius:4px;outline:none;text-align:center;
+  }
+  #modal input:focus{border-color:var(--gold)}
+  #modal .err{color:var(--danger);font-size:10px;letter-spacing:1px;text-align:center;min-height:14px}
+
+  /* RESULTS */
+  .res-row{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px 0;border-bottom:1px dashed var(--gold-faint);
+    font-size:13px;letter-spacing:1.5px;
+  }
+  .res-row .lbl{color:var(--gold-dim)}
+  .res-row .val{color:var(--gold);font-weight:bold;font-size:15px}
+  .res-row.big .val{font-size:22px;color:var(--gold)}
+
+  .victory{color:var(--good)}
+  .defeat{color:var(--danger)}
+
+  /* NEW RECORD badge on results screen */
+  .new-record{
+    text-align:center;
+    font-size:16px;font-weight:bold;letter-spacing:3px;
+    color:var(--gold);
+    padding:10px;
+    border:2px solid var(--gold);
+    border-radius:4px;
+    background:rgba(245,215,110,.1);
+    animation:record-pulse 1s ease-in-out infinite;
+  }
+  @keyframes record-pulse{
+    0%,100%{box-shadow:0 0 0 rgba(245,215,110,0)}
+    50%{box-shadow:0 0 18px rgba(245,215,110,.5)}
+  }
+
+  /* Mode tile personal best */
+  .mode-tile .mt-best{
+    font-size:10px;letter-spacing:1.5px;color:var(--gold-dim);margin-top:6px;
+  }
+  .mode-tile .mt-best b{color:var(--gold)}
+
+  /* Gauntlet biome badge on level tiles */
+  .level-tile .biome-dot{
+    position:absolute;bottom:4px;left:4px;
+    width:6px;height:6px;border-radius:50%;opacity:.75;
+  }
+  .level-tile .lmod{
+    font-size:8px;letter-spacing:0;color:rgba(245,215,110,.55);
+    margin-top:2px;
+  }
+
+  /* Upgrade tier count badge on garage vehicle tiles */
+  .vt-tier-badge{
+    font-size:10px;letter-spacing:1px;color:var(--good);margin-top:2px;
+  }
+
+  /* small screens */
+  @media (max-height:600px){
+    h1{font-size:32px}
+    .vehicle-tile .vt-preview{height:70px}
+  }
+
+  /* SETTINGS screen */
+  .set-row{
+    background:rgba(0,0,0,.4);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    padding:12px 14px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .set-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .set-name{font-weight:bold;letter-spacing:1.5px;font-size:13px}
+  .set-sub{font-size:9px;letter-spacing:1px;color:var(--gold-dim);margin-top:3px}
+  .set-val{font-size:11px;letter-spacing:1px;color:var(--gold-dim);min-width:42px;text-align:right}
+  .set-row input[type="range"]{
+    width:100%;-webkit-appearance:none;appearance:none;background:transparent;
+    height:24px;cursor:pointer;
+  }
+  .set-row input[type="range"]::-webkit-slider-runnable-track{
+    height:6px;background:rgba(0,0,0,.55);border:1px solid var(--gold-faint);border-radius:3px;
+  }
+  .set-row input[type="range"]::-moz-range-track{
+    height:6px;background:rgba(0,0,0,.55);border:1px solid var(--gold-faint);border-radius:3px;
+  }
+  .set-row input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;
+    background:var(--gold);border:2px solid var(--bg);margin-top:-7px;cursor:pointer;
+  }
+  .set-row input[type="range"]::-moz-range-thumb{
+    width:18px;height:18px;border-radius:50%;background:var(--gold);border:2px solid var(--bg);cursor:pointer;
+  }
+  .set-toggle{
+    width:auto;min-height:36px;min-width:60px;padding:6px 14px;font-size:12px;letter-spacing:1.5px;
+  }
+  .set-toggle.on{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+  .set-q-row{display:flex;gap:6px;flex-wrap:wrap}
+  .set-q{flex:1;min-width:64px;min-height:36px;padding:6px 8px;font-size:11px}
+  .set-q.on{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+
+  /* Large-touch-target accessibility mode */
+  body.big-touch .btn{min-height:64px;font-size:17px;padding:18px 18px}
+  body.big-touch .level-tile{font-size:13px}
+
+  #rotate{
+    display:none;position:fixed;inset:0;
+    background:var(--bg);
+    color:var(--gold);
+    align-items:center;justify-content:center;text-align:center;
+    z-index:200;font-size:14px;letter-spacing:2px;padding:24px;
+  }
+  @media (orientation:landscape) and (max-height:480px){
+    #rotate{display:flex}
+  }
+
+  /* CAMPAIGN MAP DOTS */
+  .camp-dot{cursor:pointer}
+  .camp-dot.unlocked{animation:camp-dot-pulse 2.4s ease-in-out infinite}
+  @keyframes camp-dot-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+  /* CAMPAIGN LOCATION DETAIL */
+  .camp-loc-header{
+    background:rgba(0,0,0,.4);border:1px solid var(--gold-faint);
+    border-radius:4px;padding:10px 12px;margin-bottom:8px;
+  }
+  .camp-loc-name{font-weight:bold;font-size:15px;letter-spacing:2px}
+  .camp-loc-state{font-size:9px;color:var(--rust);letter-spacing:1.5px;margin-top:2px}
+  .camp-locked-msg{color:var(--danger);font-size:10px;letter-spacing:1px;margin-top:4px}
+  .camp-cleared-msg{color:var(--good);font-size:10px;letter-spacing:1px;margin-top:4px}
+  .camp-loc-intro{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;line-height:1.55;margin-bottom:10px}
+
+  /* CAMPAIGN LEVEL TILES */
+  .camp-levels-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px}
+  .camp-level-tile{
+    background:rgba(0,0,0,.5);border:1px solid var(--gold-faint);
+    border-radius:4px;padding:10px 8px;text-align:center;
+    cursor:pointer;position:relative;transition:border-color .15s,background .15s;
+  }
+  .camp-level-tile:active{transform:scale(.97);background:rgba(245,215,110,.08)}
+  .camp-level-tile.cleared{border-color:var(--good);background:rgba(122,240,122,.08)}
+  .camp-level-tile.locked{opacity:.38;pointer-events:none}
+  .camp-level-tile.boss{border-color:var(--danger)}
+  .camp-level-tile.boss.cleared{border-color:var(--good)}
+  .camp-level-tile .clt-num{font-size:19px;font-weight:bold}
+  .camp-level-tile .clt-name{font-size:8px;letter-spacing:1px;color:var(--gold-dim);margin-top:3px;line-height:1.2}
+  .camp-level-tile .clt-obj{font-size:8px;letter-spacing:1px;color:var(--gold-dim);margin-top:2px}
+  .camp-level-tile .clt-check{position:absolute;top:3px;right:5px;color:var(--good);font-size:12px}
+  .camp-level-tile .clt-star{position:absolute;top:3px;right:5px;font-size:10px}
+
+  /* SIDEKICK CARDS */
+  .sidekick-card{
+    background:rgba(0,0,0,.5);border:2px solid var(--gold-faint);
+    border-radius:6px;padding:14px;transition:border-color .15s,background .15s;
+  }
+  .sidekick-card.active{border-color:var(--gold);background:rgba(245,215,110,.06)}
+  .sidekick-card.locked{opacity:.5}
+  .sk-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+  .sk-name{font-weight:bold;font-size:15px;letter-spacing:2px}
+  .sk-title{font-size:9px;letter-spacing:1.5px;color:var(--rust);margin-top:2px}
+  .sk-bio{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;line-height:1.4;margin-bottom:6px}
+  .sk-perk{font-size:10px;letter-spacing:1px;margin-bottom:4px}
+  .sk-unlock-hint{font-size:9px;color:var(--danger);letter-spacing:1px;margin-top:4px}
+  .sk-badge{background:var(--gold);color:var(--bg);font-size:9px;letter-spacing:1px;padding:3px 7px;border-radius:3px;font-weight:bold}
+  .sk-lock{font-size:16px;opacity:.6}
+
+  /* STORY OVERLAY */
+  .story-title{font-size:18px;font-weight:bold;letter-spacing:3px;color:var(--gold);margin-bottom:10px;text-align:center}
+  .story-text{font-size:13px;letter-spacing:1px;color:var(--gold-dim);line-height:1.7;max-width:340px;margin:0 auto;text-align:center}
+  .story-sk-line{font-size:12px;font-weight:bold;letter-spacing:2px;margin-top:14px;text-align:center;color:var(--good)}
+
+  /* ACHIEVEMENTS */
+  .ach-card{
+    display:flex;align-items:center;gap:12px;
+    padding:12px 14px;
+    background:rgba(0,0,0,.35);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    opacity:.45;
+    transition:opacity .2s;
+  }
+  .ach-card.earned{opacity:1;border-color:rgba(245,215,110,.55);background:rgba(245,215,110,.05)}
+  .ach-icon{font-size:24px;flex:none;width:32px;text-align:center}
+  .ach-body{flex:1;min-width:0}
+  .ach-name{font-size:12px;font-weight:bold;letter-spacing:1.5px;color:var(--gold)}
+  .ach-desc{font-size:10px;letter-spacing:.8px;color:var(--gold-dim);margin-top:3px}
+  .ach-check{font-size:16px;color:var(--good);flex:none}
+
+  /* RESULTS — new badge notification */
+  #res-badges{margin-top:4px;border:1px solid rgba(245,215,110,.4);border-radius:4px;overflow:hidden}
+  .res-badge-title{font-size:10px;letter-spacing:2px;color:var(--gold-dim);padding:8px 12px 4px;border-bottom:1px solid var(--gold-faint)}
+  .res-badge-item{display:flex;align-items:center;gap:10px;padding:8px 12px}
+  .res-badge-icon{font-size:20px;flex:none}
+  .res-badge-name{font-size:11px;font-weight:bold;letter-spacing:1.5px;color:var(--gold)}
+  .res-badge-desc{font-size:10px;letter-spacing:.8px;color:var(--gold-dim);margin-top:2px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" tabindex="0"></canvas>
+
+  <!-- GAME OVERLAY (in-game HUD only on canvas; chrome here) -->
+  <div id="game-overlay">
+    <button id="pauseBtn" aria-label="Pause">⏸</button>
+    <button id="fsBtn" aria-label="Toggle fullscreen" title="Fullscreen (F)">⛶</button>
+    <div id="hint">DRAG TO STEER · HOLD TO FIRE</div>
+    <div id="footer">1COMMERCE // MOJAVE RUN</div>
+  </div>
+
+  <!-- ===== TITLE ===== -->
+  <div class="screen" id="screen-title">
+    <div class="inner" style="margin:auto 0">
+      <h1>MOJAVE RUN</h1>
+      <div class="subtitle">A WASTELAND ARCADE DRIVER</div>
+      <div style="height:18px"></div>
+      <button class="btn primary" data-act="title-continue">CONTINUE</button>
+      <button class="btn" data-act="title-profiles">CHANGE DRIVER</button>
+      <div style="height:24px"></div>
+      <div class="small center">1COMMERCE // PNW WASTELAND DIV.</div>
+    </div>
+  </div>
+
+  <!-- ===== PROFILE LIST ===== -->
+  <div class="screen" id="screen-profiles">
+    <div class="inner">
+      <h1 style="font-size:32px">SELECT DRIVER</h1>
+      <div class="small center">UP TO 6 DRIVERS PER DEVICE</div>
+      <div id="profile-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <button class="btn primary" data-act="profile-new">+ NEW DRIVER</button>
+      <button class="btn" data-act="back-title">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== CHARACTER SELECT ===== -->
+  <div class="screen" id="screen-character">
+    <div class="inner">
+      <h1 style="font-size:28px">SELECT WARRIOR</h1>
+      <div class="small center" id="char-sub">CHOOSE YOUR BADLANDS LEGEND</div>
+      <div id="char-list" style="display:flex;flex-direction:column;gap:10px;margin-top:6px"></div>
+      <div style="height:6px"></div>
+      <button class="btn primary" data-act="character-confirm" id="char-confirm-btn">CHOOSE WARRIOR ▶</button>
+      <button class="btn" data-act="character-cancel">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== MAIN MENU ===== -->
+  <div class="screen" id="screen-menu">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="pb-left">
+          <div class="portrait pb-portrait" id="menu-portrait"></div>
+          <div class="pb-name">
+            <div class="name" id="menu-name">DRIVER</div>
+            <div class="ctitle-sm" id="menu-ctitle"></div>
+            <div class="small" id="menu-runs"></div>
+          </div>
+        </div>
+        <div class="scrap">SCRAP <b id="menu-scrap">0</b></div>
+      </div>
+      <h1 style="font-size:36px;margin-top:8px">MOJAVE RUN</h1>
+      <button class="btn primary" data-act="menu-play">▶ PLAY</button>
+      <button class="btn" data-act="menu-campaign">CAMPAIGN <span class="sub">US ROAD STORY</span></button>
+      <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
+      <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
+      <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
+      <button class="btn" data-act="menu-stats">STATS</button>
+      <button class="btn" data-act="menu-achievements">BADGES <span class="sub" id="menu-ach-sub"></span></button>
+      <button class="btn" data-act="menu-settings">SETTINGS</button>
+      <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">CO-OP GHOST RUN</span></button>
+      <div style="height:20px"></div>
+      <div class="btn-row">
+        <button class="btn" data-act="back-title" style="font-size:12px">◄ TITLE</button>
+        <button class="btn" data-act="menu-switch" style="font-size:12px">SWITCH DRIVER</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GARAGE ===== -->
+  <div class="screen" id="screen-garage">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">GARAGE</div>
+        <div class="scrap">SCRAP <b id="garage-scrap">0</b></div>
+      </div>
+      <div id="vehicle-list" style="display:flex;flex-direction:column;gap:12px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK TO MENU</button>
+    </div>
+  </div>
+
+  <!-- ===== UPGRADE ===== -->
+  <div class="screen" id="screen-upgrade">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name" id="up-vname">VEHICLE</div>
+        <div class="scrap">SCRAP <b id="up-scrap">0</b></div>
+      </div>
+      <div id="up-preview" style="height:120px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#3a230f,#1f1610);border-radius:4px;margin-bottom:8px;position:relative;overflow:hidden"></div>
+      <div id="up-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-garage">◄ BACK TO GARAGE</button>
+    </div>
+  </div>
+
+  <!-- ===== MODE SELECT ===== -->
+  <div class="screen" id="screen-mode">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">SELECT MODE</div>
+        <div class="scrap" id="mode-vehicle">RUST BUCKET</div>
+      </div>
+      <div id="mode-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== GAUNTLET MAP ===== -->
+  <div class="screen" id="screen-gauntlet">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">GAUNTLET</div>
+        <div class="scrap" id="gauntlet-progress">0 / 12</div>
+      </div>
+      <div class="small center" style="margin-bottom:8px">CLEAR EACH SECTOR TO UNLOCK THE NEXT</div>
+      <div class="gauntlet-grid" id="gauntlet-grid"></div>
+      <div style="height:12px"></div>
+      <button class="btn" data-act="back-mode">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== SETTINGS ===== -->
+  <div class="screen" id="screen-settings">
+    <div class="inner">
+      <h1 style="font-size:32px">SETTINGS</h1>
+      <div id="settings-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-settings-origin">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== PAUSE ===== -->
+  <div class="screen" id="screen-pause">
+    <div class="inner" style="margin:auto 0">
+      <h1 style="font-size:42px">PAUSED</h1>
+      <div class="subtitle">RUN ON HOLD</div>
+      <div style="height:14px"></div>
+      <button class="btn primary" data-act="pause-resume">▶ RESUME</button>
+      <button class="btn" data-act="pause-restart">RESTART RUN</button>
+      <button class="btn" data-act="pause-settings">SETTINGS</button>
+      <button class="btn danger" data-act="pause-quit">QUIT TO MENU</button>
+    </div>
+  </div>
+
+  <!-- ===== STATS ===== -->
+  <div class="screen" id="screen-stats">
+    <div class="inner">
+      <h1 style="font-size:32px">STATS</h1>
+      <div class="profile-bar"><div class="name" id="stats-name"></div><div class="scrap small">DRIVER PROFILE</div></div>
+      <div id="stats-list" style="display:flex;flex-direction:column;gap:0"></div>
+      <div style="height:12px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== ACHIEVEMENTS ===== -->
+  <div class="screen" id="screen-achievements">
+    <div class="inner">
+      <h1 style="font-size:28px">BADGES</h1>
+      <div class="profile-bar"><div class="name small">DRIVER ACHIEVEMENTS</div><div class="scrap small" id="ach-progress">0 / 22</div></div>
+      <div id="ach-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div style="height:12px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== MULTIPLAYER ===== -->
+  <div class="screen" id="screen-mp">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">MULTIPLAYER</div>
+        <div class="scrap" id="mp-status-bar">DISCONNECTED</div>
+      </div>
+      <div class="small center" style="line-height:1.5">
+        CO-OP GHOST RUN — EVERYONE IN THE SAME ROOM SEES EACH OTHER<br/>
+        AS A TRANSLUCENT CAR ON THEIR OWN ROAD. SHARED SCOREBOARD.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label class="small" style="letter-spacing:1.5px">SERVER</label>
+        <input id="mp-url" class="mp-input" placeholder="ws://host:8787/ws (blank = same site)" autocomplete="off" spellcheck="false" />
+        <label class="small" style="letter-spacing:1.5px">ROOM CODE</label>
+        <input id="mp-room" class="mp-input" placeholder="LOBBY" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" data-act="mp-join">JOIN ROOM</button>
+        <button class="btn danger" data-act="mp-leave" id="mp-leave-btn" style="display:none">LEAVE</button>
+      </div>
+      <h2>IN ROOM</h2>
+      <div id="mp-peers" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
+  <style>
+    .mp-input{
+      width:100%;background:rgba(0,0,0,.5);
+      border:1px solid var(--gold-faint);color:var(--gold);
+      padding:10px 12px;font-family:'Courier New',monospace;
+      font-size:13px;letter-spacing:2px;border-radius:4px;outline:none;
+    }
+    .mp-input:focus{border-color:var(--gold)}
+    .mp-peer{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:10px 12px;background:rgba(0,0,0,.4);
+      border:1px solid var(--gold-faint);border-radius:4px;
+      font-size:12px;letter-spacing:1.5px;
+    }
+    .mp-peer .pdot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
+    .mp-peer .pscore{color:var(--gold-dim)}
+    .mp-peer.self{border-color:var(--gold)}
+  </style>
+
+  <!-- ===== RESULTS ===== -->
+  <div class="screen" id="screen-results">
+    <div class="inner">
+      <h1 id="res-title" style="font-size:42px">RUN OVER</h1>
+      <div class="subtitle" id="res-subtitle"></div>
+      <div style="height:8px"></div>
+      <div id="res-rows" style="display:flex;flex-direction:column"></div>
+      <div id="res-badges" style="display:none"></div>
+      <div style="height:12px"></div>
+      <button class="btn primary" data-act="res-again">▶ RUN AGAIN</button>
+      <button class="btn" id="res-next" data-act="res-next" style="display:none">NEXT SECTOR ►</button>
+      <button class="btn" id="res-share" data-act="res-share" style="display:none">SHARE SCORE</button>
+      <button class="btn" data-act="back-menu">◄ MENU</button>
+    </div>
+  </div>
+
+  <!-- ===== CAMPAIGN MAP ===== -->
+  <div class="screen" id="screen-campaign">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">CAMPAIGN</div>
+        <div class="scrap" id="campaign-progress">0 / 72</div>
+      </div>
+      <div class="small center" style="margin-bottom:6px">TAP A LOCATION TO VIEW · TAP A LEVEL TO START</div>
+      <div id="campaign-map" style="border:1px solid var(--gold-faint);border-radius:4px;overflow:hidden;background:#0d0a06;margin-bottom:10px"></div>
+      <div id="campaign-detail"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-mode">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== SIDEKICK SELECT ===== -->
+  <div class="screen" id="screen-sidekick">
+    <div class="inner">
+      <h1 style="font-size:28px">SIDEKICKS</h1>
+      <div class="small center">UNLOCK BY CLEARING CAMPAIGN REGIONS · ONE ACTIVE AT A TIME</div>
+      <div id="sidekick-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
+  <!-- ===== STORY OVERLAY ===== -->
+  <div class="screen" id="screen-story" style="z-index:8;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)">
+    <div class="inner" style="margin:auto 0;text-align:center">
+      <div class="portrait xl" id="story-portrait" style="margin:0 auto 18px"></div>
+      <div class="story-title" id="story-title">LEVEL CLEARED</div>
+      <div class="story-text" id="story-text"></div>
+      <div class="story-sk-line" id="story-sk-line" style="display:none"></div>
+      <div class="small" style="margin-top:28px;opacity:.45">TAP TO CONTINUE</div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast"></div>
+
+  <!-- MODAL -->
+  <div id="modal" role="dialog" aria-modal="true">
+    <div class="box">
+      <h3 id="modal-title">NEW DRIVER</h3>
+      <input id="modal-input" type="text" maxlength="14" placeholder="DRIVER NAME" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+      <div class="err" id="modal-err"></div>
+      <div class="btn-row">
+        <button class="btn" data-act="modal-cancel">CANCEL</button>
+        <button class="btn primary" data-act="modal-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROTATE PROMPT -->
+  <div id="rotate">
+    <div>
+      <div style="font-size:32px;margin-bottom:12px">📱</div>
+      <div style="font-weight:bold;margin-bottom:8px">ROTATE YOUR DEVICE</div>
+      <div style="opacity:.7;font-size:11px">MOJAVE RUN PLAYS BEST IN PORTRAIT</div>
+    </div>
+  </div>
+</div>
+<script src="/mp.js"></script>
+<script src="/app.js"></script>
+<script>
+  // Service worker — enables offline play and faster repeat loads.
+  // Registered on 'load' so it doesn't block the first paint. Failure is
+  // non-fatal: the game still works, just without offline support.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
