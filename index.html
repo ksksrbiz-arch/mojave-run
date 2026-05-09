@@ -332,6 +332,7 @@ const TOUCH_STEER_SPEED = 28;
 const TOUCH_STEER_ENGINE_BONUS = 6;
 const TOUCH_STEER_RESPONSE = 20;
 const TOUCH_STEER_DELTA_CAP = 140;
+const TOUCH_STEER_TARGET_VX_CAP = 4800;
 function comboMultiplier(combo){
   return 1 + Math.min(combo*COMBO_PER_KILL, COMBO_MAX_BONUS);
 }
@@ -416,7 +417,7 @@ class Player{
       const target = clamp(Input.x, 100, W-100);
       const steerDelta = clamp(target - this.x, -TOUCH_STEER_DELTA_CAP, TOUCH_STEER_DELTA_CAP);
       const touchSpeedGain = TOUCH_STEER_SPEED + this.spd * TOUCH_STEER_ENGINE_BONUS;
-      const targetVx = steerDelta * touchSpeedGain; // px/s target from horizontal pointer distance
+      const targetVx = clamp(steerDelta * touchSpeedGain, -TOUCH_STEER_TARGET_VX_CAP, TOUCH_STEER_TARGET_VX_CAP);
       const touchFollow = 1 - Math.exp(-dt * TOUCH_STEER_RESPONSE);
       this.vx += (targetVx - this.vx) * touchFollow;
     }
