@@ -607,6 +607,31 @@
   .story-title{font-size:18px;font-weight:bold;letter-spacing:3px;color:var(--gold);margin-bottom:10px;text-align:center}
   .story-text{font-size:13px;letter-spacing:1px;color:var(--gold-dim);line-height:1.7;max-width:340px;margin:0 auto;text-align:center}
   .story-sk-line{font-size:12px;font-weight:bold;letter-spacing:2px;margin-top:14px;text-align:center;color:var(--good)}
+
+  /* ACHIEVEMENTS */
+  .ach-card{
+    display:flex;align-items:center;gap:12px;
+    padding:12px 14px;
+    background:rgba(0,0,0,.35);
+    border:1px solid var(--gold-faint);
+    border-radius:4px;
+    opacity:.45;
+    transition:opacity .2s;
+  }
+  .ach-card.earned{opacity:1;border-color:rgba(245,215,110,.55);background:rgba(245,215,110,.05)}
+  .ach-icon{font-size:24px;flex:none;width:32px;text-align:center}
+  .ach-body{flex:1;min-width:0}
+  .ach-name{font-size:12px;font-weight:bold;letter-spacing:1.5px;color:var(--gold)}
+  .ach-desc{font-size:10px;letter-spacing:.8px;color:var(--gold-dim);margin-top:3px}
+  .ach-check{font-size:16px;color:var(--good);flex:none}
+
+  /* RESULTS — new badge notification */
+  #res-badges{margin-top:4px;border:1px solid rgba(245,215,110,.4);border-radius:4px;overflow:hidden}
+  .res-badge-title{font-size:10px;letter-spacing:2px;color:var(--gold-dim);padding:8px 12px 4px;border-bottom:1px solid var(--gold-faint)}
+  .res-badge-item{display:flex;align-items:center;gap:10px;padding:8px 12px}
+  .res-badge-icon{font-size:20px;flex:none}
+  .res-badge-name{font-size:11px;font-weight:bold;letter-spacing:1.5px;color:var(--gold)}
+  .res-badge-desc{font-size:10px;letter-spacing:.8px;color:var(--gold-dim);margin-top:2px}
 </style>
 </head>
 <body>
@@ -678,6 +703,7 @@
       <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
       <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
       <button class="btn" data-act="menu-stats">STATS</button>
+      <button class="btn" data-act="menu-achievements">BADGES <span class="sub" id="menu-ach-sub"></span></button>
       <button class="btn" data-act="menu-settings">SETTINGS</button>
       <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">CO-OP GHOST RUN</span></button>
       <div style="height:20px"></div>
@@ -776,6 +802,17 @@
     </div>
   </div>
 
+  <!-- ===== ACHIEVEMENTS ===== -->
+  <div class="screen" id="screen-achievements">
+    <div class="inner">
+      <h1 style="font-size:28px">BADGES</h1>
+      <div class="profile-bar"><div class="name small">DRIVER ACHIEVEMENTS</div><div class="scrap small" id="ach-progress">0 / 22</div></div>
+      <div id="ach-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div style="height:12px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK</button>
+    </div>
+  </div>
+
   <!-- ===== MULTIPLAYER ===== -->
   <div class="screen" id="screen-mp">
     <div class="inner">
@@ -830,6 +867,7 @@
       <div class="subtitle" id="res-subtitle"></div>
       <div style="height:8px"></div>
       <div id="res-rows" style="display:flex;flex-direction:column"></div>
+      <div id="res-badges" style="display:none"></div>
       <div style="height:12px"></div>
       <button class="btn primary" data-act="res-again">▶ RUN AGAIN</button>
       <button class="btn" id="res-next" data-act="res-next" style="display:none">NEXT SECTOR ►</button>

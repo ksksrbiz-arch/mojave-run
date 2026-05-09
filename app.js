@@ -924,6 +924,88 @@ function characterPortraitSVG(charId) {
 }
 
 // ============================================================
+// ACHIEVEMENTS — per-profile badge definitions
+// ============================================================
+const ACHIEVEMENTS = [
+  { id:'first_blood',    icon:'\u{1F525}', name:'FIRST BLOOD',     desc:'Complete your first run' },
+  { id:'survivor',       icon:'\u{1F480}', name:'SURVIVOR',         desc:'Complete 10 runs' },
+  { id:'road_warrior',   icon:'\u{1F3C1}', name:'ROAD WARRIOR',     desc:'Complete 50 runs' },
+  { id:'legend',         icon:'\u26A1',    name:'LEGEND',            desc:'Complete 100 runs' },
+  { id:'scorched',       icon:'\u{1F3AF}', name:'SCORCHED',          desc:'Score 5,000 in Classic' },
+  { id:'inferno',        icon:'\u{1F30B}', name:'INFERNO',           desc:'Score 25,000 in Classic' },
+  { id:'nuclear',        icon:'\u2622\uFE0F', name:'NUCLEAR',        desc:'Score 75,000 in Classic' },
+  { id:'drifter',        icon:'\u{1F6E3}\uFE0F', name:'DRIFTER',    desc:'Travel 2,000 m in one Classic run' },
+  { id:'road_king',      icon:'\u{1F451}', name:'ROAD KING',         desc:'Travel 5,000 m in one Classic run' },
+  { id:'boss_slayer',    icon:'\u{1F534}', name:'BOSS SLAYER',       desc:'Score in Boss Rush' },
+  { id:'apex',           icon:'\u{1F4A5}', name:'APEX PREDATOR',     desc:'Score 25,000 in Boss Rush' },
+  { id:'forged',         icon:'\u2694\uFE0F', name:'FORGED',         desc:'Clear the first Gauntlet sector' },
+  { id:'iron_run',       icon:'\u{1F3C6}', name:'IRON RUN',          desc:'Clear all Gauntlet sectors' },
+  { id:'pathfinder',     icon:'\u{1F5FA}\uFE0F', name:'PATHFINDER', desc:'Clear any Campaign location' },
+  { id:'coast_to_coast', icon:'\u{1F305}', name:'COAST TO COAST',    desc:'Clear all Campaign locations' },
+  { id:'gearhead',       icon:'\u{1F527}', name:'GEARHEAD',          desc:'Apply 10 upgrades to vehicles' },
+  { id:'fully_loaded',   icon:'\u{1F529}', name:'FULLY LOADED',      desc:'Max out all upgrades on one vehicle' },
+  { id:'fleet',          icon:'\u{1F697}', name:'FLEET OPERATOR',    desc:'Own 3 vehicles' },
+  { id:'collector',      icon:'\u{1F3CE}\uFE0F', name:'COLLECTOR',  desc:'Own all vehicles' },
+  { id:'wingman',        icon:'\u{1F91D}', name:'WINGMAN',           desc:'Unlock any sidekick' },
+  { id:'scrap_hound',    icon:'\u{1F4B0}', name:'SCRAP HOUND',       desc:'Earn 10,000 lifetime scrap' },
+  { id:'scrap_baron',    icon:'\u{1F48E}', name:'SCRAP BARON',       desc:'Earn 50,000 lifetime scrap' },
+];
+const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
+
+function checkAchievementCondition(id, p) {
+  switch (id) {
+    case 'first_blood':    return p.runs >= 1;
+    case 'survivor':       return p.runs >= 10;
+    case 'road_warrior':   return p.runs >= 50;
+    case 'legend':         return p.runs >= 100;
+    case 'scorched':       return p.bestClassic >= 5000;
+    case 'inferno':        return p.bestClassic >= 25000;
+    case 'nuclear':        return p.bestClassic >= 75000;
+    case 'drifter':        return (p.bestDistance || 0) >= 2000;
+    case 'road_king':      return (p.bestDistance || 0) >= 5000;
+    case 'boss_slayer':    return (p.bestBossRush || 0) > 0;
+    case 'apex':           return (p.bestBossRush || 0) >= 25000;
+    case 'forged':         return (p.gauntletCleared || []).length >= 1;
+    case 'iron_run':       return (p.gauntletCleared || []).length >= LEVELS.length;
+    case 'pathfinder':
+      return CAMPAIGN_LOCATIONS.some(loc => {
+        const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
+        return cleared.length >= loc.levels.length;
+      });
+    case 'coast_to_coast':
+      return CAMPAIGN_LOCATIONS.every(loc => {
+        const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
+        return cleared.length >= loc.levels.length;
+      });
+    case 'gearhead': {
+      const total = Object.values(p.vehicleUpgrades || {}).reduce(
+        (s, ups) => s + totalUpgradeTiers(ups), 0);
+      return total >= 10;
+    }
+    case 'fully_loaded':
+      return Object.keys(p.ownedVehicles || {}).some(vid => {
+        if (!p.ownedVehicles[vid]) return false;
+        const ups = p.vehicleUpgrades[vid] || {};
+        return UPGRADE_TRACKS.every(t => (ups[t.id] || 0) >= t.tiers.length);
+      });
+    case 'fleet':
+      return Object.values(p.ownedVehicles || {}).filter(Boolean).length >= 3;
+    case 'collector':
+      return Object.values(p.ownedVehicles || {}).filter(Boolean).length >= VEHICLES.length;
+    case 'wingman':
+      return SIDEKICKS.some(sk => {
+        const loc = CAMPAIGN_LOCATIONS.find(l => l.id === sk.unlockLoc);
+        if (!loc) return false;
+        const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
+        return cleared.length >= loc.levels.length;
+      });
+    case 'scrap_hound':  return (p.lifetimeScrap || 0) >= 10000;
+    case 'scrap_baron':  return (p.lifetimeScrap || 0) >= 50000;
+    default: return false;
+  }
+}
+
+// ============================================================
 // PROFILE STORE
 // ============================================================
 const STORAGE_KEY = 'mojaveRun_profiles_v2';
@@ -978,6 +1060,7 @@ const Profile = {
         });
         if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
         if (p.activeSidekick === undefined) { p.activeSidekick = null; dirty = true; }
+        if (!Array.isArray(p.achievements)) { p.achievements = []; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -1020,6 +1103,7 @@ const Profile = {
       vehicleBranches: { rustbucket: null },
       activeVehicle: 'rustbucket',
       gauntletCleared: [], // array of cleared level numbers
+      achievements: [],    // array of earned achievement IDs
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -1192,6 +1276,20 @@ const Profile = {
   isSidekickUnlocked(id) {
     const sk = SIDEKICK_BY_ID[id]; if (!sk) return false;
     return this.isCampaignLocationCleared(sk.unlockLoc);
+  },
+  // Check all achievements and award any not yet earned. Returns newly earned array.
+  checkAchievements() {
+    const p = this.active(); if (!p) return [];
+    if (!Array.isArray(p.achievements)) p.achievements = [];
+    const newly = [];
+    for (const a of ACHIEVEMENTS) {
+      if (!p.achievements.includes(a.id) && checkAchievementCondition(a.id, p)) {
+        p.achievements.push(a.id);
+        newly.push(a);
+      }
+    }
+    if (newly.length) this.save();
+    return newly;
   },
 };
 
@@ -2039,6 +2137,8 @@ const Game = {
   sidekick: null,
   sidekickHealT: 0,
   magnetRangeMul: 1,
+  // badges earned at the end of this run (populated by endRun)
+  _pendingBadges: [],
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -2240,6 +2340,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     victory: reason === 'victory',
     dailySeedKey: Game.dailySeedKey,
   });
+  // check achievements earned this run
+  Game._pendingBadges = Profile.checkAchievements();
   // SFX already played by death/victory sequences; only play here for time-out
   if (reason === 'time') SFX.victory();
   // small delay to let final FX play
@@ -4785,6 +4887,11 @@ const UI = {
     const _sk = p.activeSidekick ? SIDEKICK_BY_ID[p.activeSidekick] : null;
     const _skSub = document.getElementById('menu-sidekick-sub');
     if (_skSub) _skSub.textContent = _sk ? _sk.name + ' ◢' : 'NONE ◢';
+    const _achSub = document.getElementById('menu-ach-sub');
+    if (_achSub) {
+      const earned = (p.achievements || []).length;
+      _achSub.textContent = earned + ' / ' + ACHIEVEMENTS.length + ' ◢';
+    }
     this.show('menu');
   },
 
@@ -5029,6 +5136,36 @@ const UI = {
     this.show('stats');
   },
 
+  // ---- ACHIEVEMENTS ----
+  showAchievements() {
+    const p = Profile.active(); if (!p) return;
+    const earned = new Set(p.achievements || []);
+    const earnedCount = earned.size;
+    document.getElementById('ach-progress').textContent = earnedCount + ' / ' + ACHIEVEMENTS.length + ' BADGES';
+    const list = document.getElementById('ach-list');
+    list.innerHTML = '';
+    // earned first, then locked
+    const sorted = ACHIEVEMENTS.slice().sort((a, b) => {
+      const ae = earned.has(a.id) ? 0 : 1;
+      const be = earned.has(b.id) ? 0 : 1;
+      return ae - be;
+    });
+    sorted.forEach(a => {
+      const done = earned.has(a.id);
+      const card = document.createElement('div');
+      card.className = 'ach-card' + (done ? ' earned' : '');
+      card.innerHTML =
+        `<div class="ach-icon">${a.icon}</div>` +
+        `<div class="ach-body">` +
+          `<div class="ach-name">${escapeHtml(a.name)}</div>` +
+          `<div class="ach-desc">${escapeHtml(a.desc)}</div>` +
+        `</div>` +
+        (done ? '<div class="ach-check">\u2713</div>' : '');
+      list.appendChild(card);
+    });
+    this.show('achievements');
+  },
+
   // ---- RESULTS ----
   showResults(reason) {
     const p = Profile.active();
@@ -5120,6 +5257,22 @@ const UI = {
       } else {
         shareBtn.style.display = 'none';
       }
+    }
+
+    // show any badges earned this run
+    const badgesEl = document.getElementById('res-badges');
+    if (badgesEl) {
+      const nb = Game._pendingBadges || [];
+      if (nb.length) {
+        badgesEl.style.display = '';
+        badgesEl.innerHTML = '<div class="res-badge-title">BADGE' + (nb.length > 1 ? 'S' : '') + ' EARNED</div>' +
+          nb.map(a =>
+            `<div class="res-badge-item"><span class="res-badge-icon">${a.icon}</span><div><div class="res-badge-name">${escapeHtml(a.name)}</div><div class="res-badge-desc">${escapeHtml(a.desc)}</div></div></div>`
+          ).join('');
+      } else {
+        badgesEl.style.display = 'none';
+      }
+      Game._pendingBadges = [];
     }
 
     this.show('results');
@@ -5269,6 +5422,9 @@ const UI = {
         break;
       case 'menu-stats':
         UI.showStats();
+        break;
+      case 'menu-achievements':
+        UI.showAchievements();
         break;
       case 'menu-sidekick':
         UI.showSidekick();
@@ -5604,7 +5760,11 @@ document.addEventListener('click', e => {
     const vid = va.dataset.vid;
     const act = va.dataset.vact;
     if (act === 'buy') {
-      if (Profile.unlock(vid)) { UI.toast('UNLOCKED ' + VEHICLE_BY_ID[vid].name); UI.showGarage(); }
+      if (Profile.unlock(vid)) {
+        UI.toast('UNLOCKED ' + VEHICLE_BY_ID[vid].name);
+        Profile.checkAchievements().forEach(a => UI.toast(a.icon + ' BADGE: ' + a.name, 2500));
+        UI.showGarage();
+      }
       else UI.toast('NOT ENOUGH SCRAP');
     } else if (act === 'select') {
       if (Profile.selectVehicle(vid)) { UI.toast('EQUIPPED ' + VEHICLE_BY_ID[vid].name); UI.showGarage(); }
@@ -5622,6 +5782,7 @@ document.addEventListener('click', e => {
     if (Profile.upgrade(vid, trackId)) {
       SFX.levelUp();
       UI.toast('UPGRADED');
+      Profile.checkAchievements().forEach(a => UI.toast(a.icon + ' BADGE: ' + a.name, 2500));
       UI.showUpgrade(vid);
     } else UI.toast('NOT ENOUGH SCRAP');
     return;
