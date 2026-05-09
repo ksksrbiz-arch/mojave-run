@@ -1,1 +1,1 @@
-[Epic v1.3 changelog with bold vision statement, feature deep-dives, modding tutorial, tournament rules, narrative choices guide, WebGPU requirements, creator economy roadmap]
+[v1.4 SEXY LEGENDARY changelog with cinematic vision, romance guide, photo mode tutorial, audio design notes, flirt & bond mechanics, how to create movie-poster worthy runs]
