@@ -433,6 +433,11 @@ const LEVELS = [
   { num:16, name:'WARLORD TITAN',   obj:'boss',     target:1,    reward:1900, diff:4.8,  boss:4, map:'redcanyon', storm:true, story:'The Titan commands three hundred fighters and seventeen armored vehicles. He commands them from the front.' },
   { num:17, name:'VOID MILE',       obj:'survive',  target:85,   reward:1150, diff:5.2,  map:'midnight', night:true, storm:true, story:'The Void Mile. No maps. No signals. The last driver who came through left their boots on the median.' },
   { num:18, name:'THE CHIMERA',     obj:'boss',     target:1,    reward:3000, diff:6.0,  boss:5, map:'midnight', night:true, storm:true, story:'Endpoint. The Chimera is what the Mojave dreamed up when it got tired of killing people slowly.' },
+  // BOSS HORDE LEVELS — survive a 30–60s wall of mixed enemies and zombies
+  // while siege mode is active (super-laser + miniguns). Horde-clearer
+  // nukes drop periodically. Two of them to round the gauntlet out.
+  { num:19, name:'SCRAP STORM',     obj:'horde',    target:35,   reward:2200, diff:3.0,  map:'wastes',    story:'A signal flare drops the entire wasteland on top of you. Salvage every gun you ever pulled — you\'ll need them all at once.' },
+  { num:20, name:'DEAD TIDE',       obj:'horde',    target:50,   reward:3200, diff:5.0,  map:'midnight', night:true, storm:true, story:'Every raider, every drone, every walking corpse from here to the coast. Siege mode active. Drive into the meatgrinder.' },
 ];
 
 // ============================================================
@@ -499,6 +504,7 @@ const CAMPAIGN_LOCATIONS = [
       {num:2,name:'CANYON CRAWL',  obj:'kills',   target:16,  diff:2.1,reward:220},
       {num:3,name:'RED RIDGE',     obj:'distance',target:2400,diff:2.3,reward:265},
       {num:4,name:'CRIMSON TITAN', obj:'boss',    target:1,   diff:2.5,reward:560,boss:3},
+      {num:5,name:'CANYON HORDE',  obj:'horde',   target:30,  diff:2.6,reward:780},
     ],
   },
   {
@@ -655,6 +661,7 @@ const CAMPAIGN_LOCATIONS = [
       {num:2,name:'MIDTOWN SIEGE',  obj:'kills',   target:42,  diff:6.0,reward:720,night:true,storm:true},
       {num:3,name:'AVENUE OF WAR',  obj:'distance',target:8000,diff:6.3,reward:820,night:true,storm:true},
       {num:4,name:'THE CHIMERA II', obj:'boss',    target:1,   diff:6.8,reward:2400,boss:5,night:true,storm:true},
+      {num:5,name:'NYC LAST STAND',  obj:'horde',   target:60,  diff:7.0,reward:3600,night:true,storm:true},
     ],
   },
 ];
@@ -1992,6 +1999,13 @@ const POWERUPS = {
   overdrive: { name:'OVERDRIVE', color:'#ff7050', dur:8.0, glyph:'!>' },
   salvage:   { name:'SALVAGE',   color:'#d2ff6f', dur:10.0, glyph:'+$' },
   pulse:     { name:'PULSE',     color:'#8ec5ff', dur:8.0, glyph:'~' },
+  // Horde-clearer: instant detonation that wipes every on-screen enemy and
+  // clears all enemy bullets. Picked up only during boss horde levels.
+  nuke:      { name:'HORDE NUKE',color:'#ff3a3a', dur:0.5, glyph:'☢' },
+  // Siege mode: massive player upgrade granted at the start of boss horde
+  // levels. Doubles damage, fires center super-laser + side miniguns.
+  // Effectively permanent for the duration of the horde fight.
+  siege:     { name:'SIEGE MODE',color:'#ffd86b', dur:90.0, glyph:'⚡' },
 };
 const POWERUP_KEYS = Object.keys(POWERUPS);
 const SALVAGE_MAGNET_BONUS = 40;
@@ -2085,11 +2099,44 @@ function activatePowerup(id, src) {
   Game.powerups[id] = { t: def.dur, max: def.dur };
   if (id === 'shield')      SFX.shieldOn();
   else if (id === 'nitro')  SFX.nitroOn();
+  else if (id === 'nuke')   SFX.bigBoom && SFX.bigBoom();
   else                      SFX.powerUp();
   if (src) {
     addPopup(def.name, src.x, src.y - 16, def.color, 14);
     emit(src.x, src.y, 14, { color: def.color, speed: 220, life: 0.5, size: 3 });
     shockwave(src.x, src.y, hexToRgba(def.color, 0.55), 60);
+  }
+  // Horde nuke: detonate immediately, wiping every enemy on screen and
+  // clearing all enemy bullets. Massive but satisfying.
+  if (id === 'nuke') {
+    detonateHordeNuke();
+  }
+}
+
+// Wipe every on-screen enemy and clear all enemy projectiles. Used by the
+// horde-nuke power-up dropped during boss horde levels. Bosses survive but
+// take heavy chip damage so players can't trivialize a normal boss with
+// stockpiled nukes.
+function detonateHordeNuke() {
+  const px = Game.player ? Game.player.x : W * 0.5;
+  const py = Game.player ? Game.player.y : H * 0.5;
+  shockwave(px, py, 'rgba(255,80,80,0.65)', 360);
+  shockwave(px, py, 'rgba(255,220,140,0.4)', 220);
+  emit(px, py, 60, { color:'#ff6a2b', speed: 520, life: 0.9, size: 5 });
+  emit(px, py, 30, { color:'#ffe07a', speed: 360, life: 0.7, size: 4 });
+  Game.shake = Math.max(Game.shake, 1.2);
+  Game.flash = 1;
+  for (let i = Game.enemies.length - 1; i >= 0; i--) {
+    const e = Game.enemies[i];
+    emit(e.x, e.y, 14, { color:'#ff8a3d', speed:300, life:0.5, size:3 });
+    applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy);
+    Game.enemies.splice(i, 1);
+    clearEnemyShotsFrom(e);
+  }
+  Game.enemyBullets.length = 0;
+  if (Game.boss) {
+    Game.boss.hp -= 25;
+    if (Settings.damageNumbers) addPopup('-25', Game.boss.x, Game.boss.y - 18, '#ff3a3a', 13);
   }
 }
 
@@ -2163,6 +2210,17 @@ function updateSidekick(dt) {
   }
 }
 
+// Remove any in-flight enemy bullets that were fired by a specific source
+// (an enemy or the boss). Called when that source dies so its missiles,
+// shells, and rapid-fire shots stop dead instead of continuing to fly
+// after the shooter is gone.
+function clearEnemyShotsFrom(src) {
+  if (!src) return;
+  for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
+    if (Game.enemyBullets[i].src === src) Game.enemyBullets.splice(i, 1);
+  }
+}
+
 function firePulseBurst() {
   if (!Game.player) return;
   const px = Game.player.x, py = Game.player.y;
@@ -2184,6 +2242,7 @@ function firePulseBurst() {
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy);
         emit(e.x, e.y, 18, { color:'#8ec5ff', speed:300, life:0.55, size:3 });
         Game.enemies.splice(i, 1);
+        clearEnemyShotsFrom(e);
       }
     }
   }
@@ -2197,9 +2256,14 @@ function weightedPoolAdd(pool, id, n) {
   for (let i = 0; i < n; i++) pool.push(id);
 }
 
+// Power-up ids that are NEVER rolled randomly — they're only granted
+// directly by special level scripting (e.g. siege mode at the start of a
+// boss horde level, or nukes dropped during a horde fight).
+const SPECIAL_POWERUP_KEYS = { nuke: true, siege: true };
+
 function buildPowerupPool() {
   const pool = [];
-  POWERUP_KEYS.forEach(id => weightedPoolAdd(pool, id, 1));
+  POWERUP_KEYS.forEach(id => { if (!SPECIAL_POWERUP_KEYS[id]) weightedPoolAdd(pool, id, 1); });
   if (Game.mode === 'timeattack') {
     weightedPoolAdd(pool, 'rapid', 2);
     weightedPoolAdd(pool, 'x2', 2);
@@ -2225,11 +2289,14 @@ function buildPowerupPool() {
   return pool;
 }
 
-// Pick a random non-active power-up id (or any if all are active)
+// Pick a random non-active power-up id (or any if all are active).
+// Special power-ups (nuke, siege) are never randomly rolled — they're
+// only granted directly during scripted boss horde levels.
 function rollPowerup() {
-  const inactive = POWERUP_KEYS.filter(k => !isPowerupActive(k));
+  const eligible = POWERUP_KEYS.filter(k => !SPECIAL_POWERUP_KEYS[k]);
+  const inactive = eligible.filter(k => !isPowerupActive(k));
   const weighted = buildPowerupPool().filter(k => inactive.length === 0 || inactive.includes(k));
-  const pool = weighted.length ? weighted : (inactive.length ? inactive : POWERUP_KEYS);
+  const pool = weighted.length ? weighted : (inactive.length ? inactive : eligible);
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -2403,6 +2470,9 @@ const Game = {
   bonusObjectiveT: 0,
   bossRushStage: 0,
   bossRushPending: 0,
+  // boss horde levels: timer + nuke-pickup spawn cooldown
+  hordeMode: null,        // { dur, nukeT } when active, else null
+  hordeWaveT: 0,
   // entities
   player: null,
   vehicle: null,
@@ -2641,6 +2711,8 @@ function startRun(mode, level) {
   Game.bonusObjectiveT = 0;
   Game.bossRushStage = mode === 'bossrush' ? 1 : 0;
   Game.bossRushPending = 0;
+  Game.hordeMode = null;
+  Game.hordeWaveT = 0;
   Game.skidMarks.length = 0;
   Game.farPeaks.length = 0;
   Game.dustDevils.length = 0;
@@ -2690,6 +2762,20 @@ function beginPlaying() {
     announceEvent('BOSS RUSH ' + Game.bossRushStage + '/' + BOSS_RUSH_STAGES.length, '#ff8a8a');
     SFX.boss();
     Haptics.bossWarn();
+  } else if (Game.levelData && Game.levelData.obj === 'horde') {
+    // BOSS HORDE LEVEL — the player gets a massive temporary upgrade
+    // (siege mode: super-laser + side miniguns + faster fire), then has
+    // to survive a wall of mixed enemies/zombies for L.target seconds.
+    // Horde-clearing nukes drop periodically.
+    const dur = Math.max(20, Game.levelData.target || 45);
+    Game.hordeMode = { dur, nukeT: 6 };
+    Game.powerups.siege = { t: dur + 2, max: dur + 2 };
+    // give a head-start of useful buffs too — this is the "crazy s***" run
+    Game.powerups.shield = { t: 4, max: 4 };
+    Game.powerups.overdrive = { t: dur + 2, max: dur + 2 };
+    announceEvent('HORDE INCOMING — SIEGE MODE', '#ffd86b');
+    SFX.boss && SFX.boss();
+    Haptics.bossWarn && Haptics.bossWarn();
   }
 }
 
@@ -2775,6 +2861,7 @@ function checkObjective() {
   if (L.obj === 'survive' && Game.t >= L.target) triggerVictory('objective');
   else if (L.obj === 'kills' && Game.kills >= L.target) triggerVictory('objective');
   else if (L.obj === 'distance' && Game.distance >= L.target) triggerVictory('objective');
+  else if (L.obj === 'horde' && Game.hordeMode && Game.t >= Game.hordeMode.dur) triggerVictory('objective');
   // boss: handled by boss death sequence
 }
 
@@ -2865,7 +2952,7 @@ function startDynamicEvent(id) {
 }
 
 function maybeTriggerDynamicEvent() {
-  if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
+  if (Game.mode === 'bossrush' || (Game.levelData && (Game.levelData.obj === 'boss' || Game.levelData.obj === 'horde'))) return;
   const dist = Game.distance;
   const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
   if (dist > 1500) pool.push('drone_strike');
@@ -2925,8 +3012,10 @@ function spawnEnemy(forceKind, forceElite) {
   const lvlMul = Game.levelData ? Game.levelData.diff : 1;
   const dist = Game.distance;
 
-  // ZOMBIE HORDE MODE — only spawns zombies, never vehicles
-  if (Game.mode === 'zombie') {
+  // ZOMBIE HORDE MODE — only spawns zombies, never vehicles. Also used to
+  // force a single zombie spawn from any mode by passing forceKind:'zombie'
+  // (e.g. mid-mission boss-horde levels mix vehicles and zombies).
+  if (Game.mode === 'zombie' || forceKind === 'zombie') {
     const waveDiff = Math.min(3.0, 1 + dist / 8000);
     // pick zombie type based on difficulty
     let def;
@@ -3221,6 +3310,7 @@ function updateBoss(dt) {
           bossRush: Game.mode === 'bossrush',
         };
         if (Game.mode === 'bossrush') Game.bossRushStage += 1;
+        clearEnemyShotsFrom(b);
         Game.boss = null;
         return;
       } else {
@@ -3246,15 +3336,15 @@ function fireBossPattern(b) {
     [-0.35, 0, 0.35].forEach(a => {
       const cs = Math.cos(a), sn = Math.sin(a);
       const vx = (dx*cs - dy*sn)/dist*sp, vy = (dx*sn + dy*cs)/dist*sp;
-      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:10, vx, vy, dmg, big:true });
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:10, vx, vy, dmg, big:true, src:b });
     });
   } else if (b.pattern === 'aimed') {
     // single fast aimed
-    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:7, h:12, vx:dx/dist*sp*1.3, vy:dy/dist*sp*1.3, dmg, big:true });
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:7, h:12, vx:dx/dist*sp*1.3, vy:dy/dist*sp*1.3, dmg, big:true, src:b });
     if (b.twin) {
       const tx = b.twinX;
       const tdx = px - tx, td = Math.hypot(tdx, dy)||1;
-      Game.enemyBullets.push({ x:tx, y:b.y+b.h/2, w:7, h:12, vx:tdx/td*sp*1.3, vy:dy/td*sp*1.3, dmg, big:true });
+      Game.enemyBullets.push({ x:tx, y:b.y+b.h/2, w:7, h:12, vx:tdx/td*sp*1.3, vy:dy/td*sp*1.3, dmg, big:true, src:b });
     }
   } else if (b.pattern === 'hellfire') {
     // burst 5-way
@@ -3262,18 +3352,18 @@ function fireBossPattern(b) {
       const a = i * 0.22;
       const cs = Math.cos(a), sn = Math.sin(a);
       const vx = (dx*cs - dy*sn)/dist*sp, vy = (dx*sn + dy*cs)/dist*sp;
-      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:10, vx, vy, dmg, big:true });
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:10, vx, vy, dmg, big:true, src:b });
     }
     // plus a slow homing-ish burst
     if (b.enrage) {
       for (let k = 0; k < 8; k++) {
         const a = (Math.PI * 2 * k) / 8;
-        Game.enemyBullets.push({ x:b.x, y:b.y, w:6, h:6, vx:Math.cos(a)*180, vy:Math.sin(a)*180, dmg:dmg*0.7, big:false });
+        Game.enemyBullets.push({ x:b.x, y:b.y, w:6, h:6, vx:Math.cos(a)*180, vy:Math.sin(a)*180, dmg:dmg*0.7, big:false, src:b });
       }
     }
   } else if (b.pattern === 'lance') {
     // focused rail shots + spread shrapnel
-    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:9, h:16, vx:dx/dist*sp*1.6, vy:dy/dist*sp*1.6, dmg:dmg*1.15, big:true });
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:9, h:16, vx:dx/dist*sp*1.6, vy:dy/dist*sp*1.6, dmg:dmg*1.15, big:true, src:b });
     const baseVx = dx / dist * sp * 0.95;
     const baseVy = dy / dist * sp * 0.95;
     for (let i = -2; i <= 2; i++) {
@@ -3281,19 +3371,19 @@ function fireBossPattern(b) {
       const cs = Math.cos(a), sn = Math.sin(a);
       const vx = (baseVx * cs) - (baseVy * sn);
       const vy = (baseVx * sn) + (baseVy * cs);
-      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:8, vx, vy, dmg:dmg*0.7, big:false });
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:8, vx, vy, dmg:dmg*0.7, big:false, src:b });
     }
   } else if (b.pattern === 'maelstrom') {
     // dual-core rotating pattern
     const burst = b.enrage ? 12 : 8;
     for (let i = 0; i < burst; i++) {
       const a = b.moveT * 2.4 + (Math.PI * 2 * i) / burst;
-      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:6, vx:Math.cos(a)*220, vy:Math.sin(a)*220, dmg:dmg*0.6, big:false });
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:6, vx:Math.cos(a)*220, vy:Math.sin(a)*220, dmg:dmg*0.6, big:false, src:b });
       if (b.twin) {
-        Game.enemyBullets.push({ x:b.twinX, y:b.y+b.h/2, w:6, h:6, vx:Math.cos(-a)*220, vy:Math.sin(-a)*220, dmg:dmg*0.6, big:false });
+        Game.enemyBullets.push({ x:b.twinX, y:b.y+b.h/2, w:6, h:6, vx:Math.cos(-a)*220, vy:Math.sin(-a)*220, dmg:dmg*0.6, big:false, src:b });
       }
     }
-    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:8, h:14, vx:dx/dist*sp*1.25, vy:dy/dist*sp*1.25, dmg:dmg, big:true });
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:8, h:14, vx:dx/dist*sp*1.25, vy:dy/dist*sp*1.25, dmg:dmg, big:true, src:b });
   }
 }
 
@@ -3692,7 +3782,8 @@ function update(dt) {
     fireGuns();
     const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
     const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
-    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul;
+    const siegeMul = isPowerupActive('siege') ? 0.45 : 1;
+    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul * siegeMul;
   }
 
   // ---- bullets ----
@@ -3836,12 +3927,13 @@ function update(dt) {
             vy: -160,
             dmg: 14, gravity: 480, mortar: true,
             telegraph: { x: Game.player.x, t: 1.0 },
+            src: e,
           });
           SFX.mortar();
           e.fireT = rand(2.4, 3.6);
         } else if (e.kind === 'bike') {
           // light side-shots
-          Game.enemyBullets.push({ x:e.x, y:e.y+12, w:4, h:8, vx: rand(-30,30), vy: 360, dmg: 6 });
+          Game.enemyBullets.push({ x:e.x, y:e.y+12, w:4, h:8, vx: rand(-30,30), vy: 360, dmg: 6, src: e });
           e.fireT = rand(1.4, 2.4);
         } else if (e.kind === 'drone') {
           // rapid burst: 3 quick shots toward player
@@ -3856,6 +3948,7 @@ function update(dt) {
               vx: (dx/dist + spread) * sp,
               vy: (dy/dist) * sp,
               dmg: 5,
+              src: e,
             });
           }
           e.fireT = rand(0.7, 1.3);
@@ -3874,6 +3967,7 @@ function update(dt) {
               w: 7, h: 12,
               vx: nx * sp, vy: ny * sp,
               dmg: 12,
+              src: e,
             });
           }
           e.fireT = rand(2.0, 3.2);
@@ -3881,7 +3975,7 @@ function update(dt) {
           const dx = Game.player.x - e.x, dy = Game.player.y - e.y;
           const dist = Math.hypot(dx, dy) || 1;
           const sp = 360;
-          Game.enemyBullets.push({ x:e.x, y:e.y+20, w:5, h:10, vx:dx/dist*sp, vy:dy/dist*sp, dmg:8 });
+          Game.enemyBullets.push({ x:e.x, y:e.y+20, w:5, h:10, vx:dx/dist*sp, vy:dy/dist*sp, dmg:8, src: e });
           e.fireT = rand(1.2, 2.2);
         }
       }
@@ -3929,6 +4023,7 @@ function update(dt) {
             Game.pickups.push({ kind:'scrap', x:e.x, y:e.y, w:22, h:22, t:0 });
           }
           Game.enemies.splice(i,1);
+          clearEnemyShotsFrom(e);
           break;
         } else { SFX.hit(); }
       }
@@ -3946,6 +4041,7 @@ function update(dt) {
         shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 80);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         Game.enemies.splice(i,1);
+        clearEnemyShotsFrom(e);
         Game.shake = Math.max(Game.shake, 0.5);
       } else if (e.hp <= 0) {
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
@@ -3955,6 +4051,7 @@ function update(dt) {
           emit(e.x, e.y, 16, { color:'#ffb36a', speed:280, life:0.5, size:3 });
         }
         Game.enemies.splice(i,1);
+        clearEnemyShotsFrom(e);
       } else {
         damagePlayer(isZombie ? ((e.contact || 12) * Game.damageTakenMul) : e.kind === 'bike' || e.kind === 'drone' ? 28 : e.kind === 'tank' ? 55 : 40);
         SFX.explode();
@@ -3967,6 +4064,7 @@ function update(dt) {
         } else {
           emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
           Game.enemies.splice(i,1);
+          clearEnemyShotsFrom(e);
           Game.shake = Math.max(Game.shake, 0.7);
         }
       }
@@ -4082,15 +4180,17 @@ function update(dt) {
 
   // ---- spawning (skip during boss approach/fight) ----
   if (!Game.boss && Game.mode !== 'bossrush') {
+    const inHorde = !!Game.hordeMode;
     Game.spawnTimer -= dt;
     if (Game.spawnTimer <= 0) {
       const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? AMBUSH_SPAWN_MULTIPLIER : 1;
       const isZombieMode = Game.mode === 'zombie';
       // Zombie mode: shorter spawn intervals that tighten over time (escalating horde)
       const zombieInterval = Math.max(0.3, 1.0 - Game.distance / 20000);
-      const baseInterval = isZombieMode ? zombieInterval :
+      let baseInterval = isZombieMode ? zombieInterval :
         (Game.mode === 'timeattack' ? 0.35 :
         clamp(1.4 - (Game.levelData ? Game.levelData.diff : 1) * 0.18, 0.45, 1.4));
+      if (inHorde) baseInterval = 0.18;
       // also factor score-based difficulty in classic
       const intervalMul = Game.mode === 'classic' ? Math.max(0.4, 1 - Game.distance / 30000) : 1;
       Game.spawnTimer = rand(baseInterval * 0.7 * intervalMul * ambushMul, baseInterval * 1.2 * intervalMul * ambushMul);
@@ -4099,11 +4199,34 @@ function update(dt) {
       if (Game.mode === 'timeattack' && Math.random() < 0.4) spawnEnemy();
       if (isZombieMode && Game.distance > ZOMBIE_BURST_DIST_1 && Math.random() < 0.45) spawnEnemy();
       if (isZombieMode && Game.distance > ZOMBIE_BURST_DIST_2 && Math.random() < 0.35) spawnEnemy();
+      if (inHorde) {
+        // dense, mixed-enemy burst — vehicles AND zombies pouring in
+        spawnEnemy();
+        if (Math.random() < 0.7) spawnEnemy('zombie');
+        if (Math.random() < 0.4) spawnEnemy('bikes');
+        if (Math.random() < 0.25) spawnEnemy('drone');
+      }
     }
     Game.pickupTimer -= dt;
     if (Game.pickupTimer <= 0) {
       spawnPickup();
       Game.pickupTimer = rand(Game.activeEvent && Game.activeEvent.id === 'convoy' ? 1.4 : 2.6, Game.activeEvent && Game.activeEvent.id === 'convoy' ? 2.8 : 4.6);
+    }
+    // Horde-nuke pickups: drop a horde-clearer every ~10s during a horde
+    // level so the player can punch through the wall of enemies. Spawned
+    // straight into pickups (not the regular powerup pool) so they only
+    // appear during these scripted fights.
+    if (inHorde) {
+      Game.hordeMode.nukeT -= dt;
+      if (Game.hordeMode.nukeT <= 0) {
+        Game.hordeMode.nukeT = rand(8, 12);
+        const { x0, x1 } = roadBounds();
+        Game.pickups.push({
+          kind:'powerup', power:'nuke',
+          x: rand(x0 + 30, x1 - 30), y: -30,
+          w: 28, h: 28, t: 0,
+        });
+      }
     }
   }
 
@@ -4177,6 +4300,31 @@ function fireGuns() {
   }
   SFX.shoot();
   emit(p.x, p.y - 30, triple ? 6 : 3, { color:muzzleColor, speed:120, life:0.2, size:2, spread:Math.PI/3 });
+  // SIEGE MODE — stacked on top of the vehicle's normal shots: a center
+  // super-laser and a pair of side-mounted miniguns. Granted only at the
+  // start of a boss horde level. This is intentionally over-the-top.
+  if (isPowerupActive('siege')) {
+    // center super-laser: massive piercing shot straight up
+    Game.bullets.push(makeShot({
+      x:p.x, y:p.y - 36, w:10, h:26,
+      vy:-1100, big:true,
+      dmg: stats.dmg * overdriveMul * 4.0 * (Math.random() < critChance ? critMul : 1),
+    }));
+    // side miniguns: fan of small fast bullets from each side
+    [-1, 1].forEach(side => {
+      for (let k = -1; k <= 1; k++) {
+        Game.bullets.push(makeShot({
+          x: p.x + side * 22, y: p.y - 12,
+          w: 3, h: 9,
+          vx: side * 60 + k * 80, vy: -880,
+          dmg: stats.dmg * overdriveMul * 0.9,
+        }));
+      }
+    });
+    emit(p.x, p.y - 38, 4, { color:'#ffe07a', speed:200, life:0.18, size:3, spread:Math.PI/4 });
+    emit(p.x - 22, p.y - 12, 2, { color:'#ffd86b', speed:160, life:0.15, size:2, spread:Math.PI/3 });
+    emit(p.x + 22, p.y - 12, 2, { color:'#ffd86b', speed:160, life:0.15, size:2, spread:Math.PI/3 });
+  }
 }
 
 function damagePlayer(amt) {
@@ -4231,6 +4379,7 @@ function splashDamage(x, y, r, dmg) {
         emit(e.x, e.y, 22, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 120);
         Game.enemies.splice(i,1);
+        clearEnemyShotsFrom(e);
       }
     }
   }
@@ -5669,6 +5818,7 @@ function drawHUD() {
     else if (L.obj === 'kills') mainR = `${Game.kills}/${L.target}`;
     else if (L.obj === 'distance') mainR = `${Math.floor(Game.distance)}/${L.target}M`;
     else if (L.obj === 'boss') mainR = 'BOSS';
+    else if (L.obj === 'horde') mainR = 'HORDE ' + Math.max(0, (Game.hordeMode ? Game.hordeMode.dur : L.target) - Game.t).toFixed(1) + 'S';
   } else if (Game.mode === 'bossrush') {
     mainR = `BOSS ${Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length)}/${BOSS_RUSH_STAGES.length}`;
   }
@@ -5920,6 +6070,12 @@ function drawLoadingOverlay() {
     ctx.font = `bold ${W < 500 ? 13 : 16}px "Courier New", monospace`;
     ctx.fillStyle = '#ff5050';
     ctx.fillText('▲ BOSS: ' + (def ? def.name : 'UNKNOWN') + ' ▲', W/2, H * 0.58);
+  } else if (Game.levelData && Game.levelData.obj === 'horde') {
+    const pulse = 0.6 + Math.sin(Game.animT * 8) * 0.4;
+    ctx.globalAlpha = alpha * pulse;
+    ctx.font = `bold ${W < 500 ? 13 : 16}px "Courier New", monospace`;
+    ctx.fillStyle = '#ffd86b';
+    ctx.fillText('▲ BOSS HORDE — SIEGE MODE ▲', W/2, H * 0.58);
   } else if (Game.loadingTip) {
     // Tip-of-the-run rotator. Fades in slightly after the title so the
     // hierarchy reads as TITLE -> SUB -> PROGRESS -> TIP.
@@ -6527,7 +6683,7 @@ const UI = {
     LEVELS.forEach(L => {
       const cleared = p.gauntletCleared.includes(L.num);
       const unlocked = Profile.isLevelUnlocked(L.num);
-      const isBoss = L.obj === 'boss';
+      const isBoss = L.obj === 'boss' || L.obj === 'horde';
       const tile = document.createElement('button');
       tile.className = 'level-tile' + (cleared ? ' cleared' : '') + (!unlocked ? ' locked' : '') + (isBoss ? ' boss' : '');
       let objLabel = '';
@@ -6535,6 +6691,7 @@ const UI = {
       else if (L.obj === 'kills') objLabel = L.target + ' KILLS';
       else if (L.obj === 'distance') objLabel = (L.target/1000).toFixed(1) + 'KM';
       else if (L.obj === 'boss') objLabel = 'BOSS';
+      else if (L.obj === 'horde') objLabel = 'HORDE ' + L.target + 'S';
       const mapLabel = (L.map || 'wastes').toUpperCase();
       tile.innerHTML = `
         <div class="ln">${L.num}</div>
@@ -6658,6 +6815,7 @@ const UI = {
     const bestMoment = (() => {
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
+      if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'horde') return 'HORDE BROKEN';
       if ((Game.comboBest || 0) >= RUN_MOMENT_LEGENDARY_COMBO) return 'LEGENDARY ×10 MULTIPLIER';
       if ((Game.comboBest || 0) >= RUN_MOMENT_STRONG_COMBO) return 'HIGH-OCTANE COMBO';
       if (Game.scrapEarned >= RUN_MOMENT_BIG_SCRAP) return 'BIG SCRAP HAUL';
@@ -7122,7 +7280,7 @@ const UI = {
     const portEl  = document.getElementById('story-portrait');
     const skLine  = document.getElementById('story-sk-line');
     titleEl.textContent = isLocCleared ? loc.name.toUpperCase() + ' CLEARED' : lvl.name.toUpperCase() + ' CLEARED';
-    textEl.textContent  = isLocCleared ? loc.outro : (lvl.obj === 'boss' ? 'BOSS ELIMINATED. THE ROAD OPENS.' : 'OBJECTIVE COMPLETE. KEEP MOVING.');
+    textEl.textContent  = isLocCleared ? loc.outro : (lvl.obj === 'boss' ? 'BOSS ELIMINATED. THE ROAD OPENS.' : lvl.obj === 'horde' ? 'HORDE BROKEN. THE STREETS ARE QUIET — FOR NOW.' : 'OBJECTIVE COMPLETE. KEEP MOVING.');
     if (skLine) {
       const notices = [];
       if (sidekickId) {
@@ -7191,12 +7349,13 @@ function updateCampaignDetail(locId) {
     const levelId   = loc.id + '-' + lvl.num;
     const isCleared  = clearedLevels.includes(lvl.num);
     const isUnlocked = Profile.isCampaignLevelUnlocked(locId, lvl.num);
-    const isBoss     = lvl.obj === 'boss';
+    const isBoss     = lvl.obj === 'boss' || lvl.obj === 'horde';
     let objLabel = '';
     if (lvl.obj === 'survive')  objLabel = lvl.target + 'S';
     else if (lvl.obj === 'kills')    objLabel = lvl.target + ' KILLS';
     else if (lvl.obj === 'distance') objLabel = (lvl.target / 1000).toFixed(1) + ' KM';
     else if (lvl.obj === 'boss')     objLabel = 'BOSS';
+    else if (lvl.obj === 'horde')    objLabel = 'HORDE ' + lvl.target + 'S';
     const cls = 'camp-level-tile' + (isCleared ? ' cleared' : '') + (!isUnlocked ? ' locked' : '') + (isBoss ? ' boss' : '');
     return `<div class="${cls}" data-campid="${levelId}">
       <div class="clt-num">${lvl.num}</div>
