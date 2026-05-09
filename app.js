@@ -66,6 +66,135 @@ const VEHICLES = [
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
+const VEHICLE_BRANCHES = {
+  rustbucket: [
+    {
+      id: 'scrapper',
+      name: 'SCRAPPER',
+      desc: 'Salvage-tuned guns. Better economy and steadier fire.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.90, dmg: 1.08 },
+      effects: { scrapMul: 1.15, pickupScoreMul: 1.20 },
+    },
+    {
+      id: 'bulwark',
+      name: 'BULWARK',
+      desc: 'Armor-first setup. More hull with lighter incoming damage.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.20, maxV: 0.94 },
+      effects: { damageTakenMul: 0.88 },
+    },
+  ],
+  junker: [
+    {
+      id: 'hauler',
+      name: 'HAULER',
+      desc: 'Heavy scavenger rig. Extra scrap with pickup pull.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.15, accel: 0.95 },
+      effects: { scrapMul: 1.22, pickupRadius: 60 },
+    },
+    {
+      id: 'crusher',
+      name: 'CRUSHER',
+      desc: 'Close-range bruiser. Bigger shells and stronger contact pressure.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.18, fireRate: 0.95 },
+      effects: { contactDamageMul: 1.35, damageTakenMul: 0.92 },
+    },
+  ],
+  roadrunner: [
+    {
+      id: 'interceptor',
+      name: 'INTERCEPTOR',
+      desc: 'Pure speed line. Faster top end and sharper crit bursts.',
+      unlockTotal: 8,
+      statMods: { accel: 1.14, maxV: 1.10 },
+      effects: { critChance: 0.12, critMul: 1.8 },
+    },
+    {
+      id: 'raider',
+      name: 'RAIDER',
+      desc: 'Aggressive skirmisher. Better pickups, better kill score.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.92, dmg: 1.05 },
+      effects: { pickupRadius: 90, killScoreMul: 1.12 },
+    },
+  ],
+  goliath: [
+    {
+      id: 'siege',
+      name: 'SIEGE',
+      desc: 'Boss-breaking cannon package with heavier direct hits.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.22, fireRate: 0.94 },
+      effects: { bossDamageMul: 1.22 },
+    },
+    {
+      id: 'bastion',
+      name: 'BASTION',
+      desc: 'Fortress conversion. Thick hull and reduced incoming damage.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.24, maxV: 0.92 },
+      effects: { damageTakenMul: 0.84 },
+    },
+  ],
+  phantom: [
+    {
+      id: 'specter',
+      name: 'SPECTER',
+      desc: 'High-risk burst. Faster shots with stronger crit chance.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.86, dmg: 1.06 },
+      effects: { critChance: 0.16, critMul: 1.9 },
+    },
+    {
+      id: 'ghostline',
+      name: 'GHOSTLINE',
+      desc: 'Momentum build. Faster pickup control and lighter damage intake.',
+      unlockTotal: 8,
+      statMods: { accel: 1.08, maxV: 1.04 },
+      effects: { pickupRadius: 100, damageTakenMul: 0.90 },
+    },
+  ],
+  sandviper: [
+    {
+      id: 'sunlance',
+      name: 'SUNLANCE',
+      desc: 'Nitro addict. More speed and harder boost-fueled kills.',
+      unlockTotal: 8,
+      statMods: { accel: 1.10, maxV: 1.08 },
+      effects: { nitroDamageMul: 1.35, critChance: 0.08, critMul: 1.7 },
+    },
+    {
+      id: 'dustfox',
+      name: 'DUST FOX',
+      desc: 'Fast looter. Wider pickup reach with bonus score conversion.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.94, dmg: 1.04 },
+      effects: { pickupRadius: 110, pickupScoreMul: 1.25, scrapMul: 1.12 },
+    },
+  ],
+  ironclad: [
+    {
+      id: 'juggernaut',
+      name: 'JUGGERNAUT',
+      desc: 'Rolling bunker. More hull with punishing contact pressure.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.22, dmg: 1.10, maxV: 0.92 },
+      effects: { damageTakenMul: 0.82, contactDamageMul: 1.45 },
+    },
+    {
+      id: 'arsenal',
+      name: 'ARSENAL',
+      desc: 'Ordnance platform. Stronger bursts and better boss damage.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.92, dmg: 1.14 },
+      effects: { bossDamageMul: 1.18, critChance: 0.08, critMul: 1.7 },
+    },
+  ],
+};
+
 const UPGRADE_TRACKS = [
   {
     id: 'engine', name: 'ENGINE',
@@ -105,12 +234,36 @@ const UPGRADE_TRACKS = [
   },
 ];
 
+function totalUpgradeTiers(ups) {
+  return Object.values(ups || {}).reduce((sum, val) => sum + (Number(val) || 0), 0);
+}
+
+function getVehicleBranches(vehicleId) {
+  return VEHICLE_BRANCHES[vehicleId] || [];
+}
+
+function getVehicleBranchDef(vehicleId, branchId) {
+  return getVehicleBranches(vehicleId).find(b => b.id === branchId) || null;
+}
+
+function applyVehicleBranchStats(st, branchDef) {
+  if (!branchDef || !branchDef.statMods) return;
+  const m = branchDef.statMods;
+  if (typeof m.maxHp === 'number') st.maxHp *= m.maxHp;
+  if (typeof m.accel === 'number') st.accel *= m.accel;
+  if (typeof m.maxV === 'number') st.maxV *= m.maxV;
+  if (typeof m.fireRate === 'number') st.fireRate *= m.fireRate;
+  if (typeof m.dmg === 'number') st.dmg *= m.dmg;
+  if (typeof m.gunsAdd === 'number') st.guns += m.gunsAdd;
+}
+
 const MODES = [
   { id: 'classic',    name: 'CLASSIC',     desc: 'Endless run. Survive as long as you can. Difficulty climbs forever.' },
   { id: 'campaign',   name: 'CAMPAIGN',    desc: 'Drive coast to coast. 18 US locations, 72 levels, story, bosses & sidekicks.' },
   { id: 'gauntlet',   name: 'GAUNTLET',    desc: '18 tiered sectors. Clear objectives. Multi-biome bosses every 4-6 levels.' },
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
+  { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
 ];
 
 // 18 gauntlet levels. obj: 'survive' (seconds), 'kills' (count), 'distance' (meters), 'boss' (boss tier)
@@ -788,8 +941,13 @@ const Profile = {
           p.characterId = DEFAULT_CHARACTER_ID;
           dirty = true;
         }
+        if (typeof p.bestBossRush !== 'number') {
+          p.bestBossRush = 0;
+          dirty = true;
+        }
         p.ownedVehicles = p.ownedVehicles || { rustbucket: true };
         p.vehicleUpgrades = p.vehicleUpgrades || {};
+        p.vehicleBranches = p.vehicleBranches || {};
         Object.keys(p.ownedVehicles).forEach(vid => {
           if (!p.ownedVehicles[vid]) return;
           if (!p.vehicleUpgrades[vid]) {
@@ -802,6 +960,15 @@ const Profile = {
               p.vehicleUpgrades[vid][tid] = 0;
               dirty = true;
             }
+          }
+          if (!(vid in p.vehicleBranches)) {
+            p.vehicleBranches[vid] = null;
+            dirty = true;
+          }
+          const branchId = p.vehicleBranches[vid];
+          if (branchId && !getVehicleBranchDef(vid, branchId)) {
+            p.vehicleBranches[vid] = null;
+            dirty = true;
           }
         });
         if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
@@ -841,9 +1008,11 @@ const Profile = {
       runs: 0,
       bestClassic: 0,
       bestTime: 0,
+      bestBossRush: 0,
       bestDistance: 0,
       ownedVehicles: { rustbucket: true },
       vehicleUpgrades: { rustbucket: { engine: 0, plating: 0, weapons: 0, reactor: 0 } },
+      vehicleBranches: { rustbucket: null },
       activeVehicle: 'rustbucket',
       gauntletCleared: [], // array of cleared level numbers
     };
@@ -888,6 +1057,7 @@ const Profile = {
     p.scrap -= v.cost;
     p.ownedVehicles[vehicleId] = true;
     p.vehicleUpgrades[vehicleId] = { engine: 0, plating: 0, weapons: 0, reactor: 0 };
+    p.vehicleBranches[vehicleId] = null;
     this.save();
     return true;
   },
@@ -919,6 +1089,16 @@ const Profile = {
     this.save();
     return true;
   },
+  selectBranch(vehicleId, branchId) {
+    const p = this.active(); if (!p) return false;
+    if (!p.ownedVehicles[vehicleId]) return false;
+    const branch = getVehicleBranchDef(vehicleId, branchId); if (!branch) return false;
+    const ups = p.vehicleUpgrades[vehicleId] || UPGRADE_TRACK_DEFAULTS;
+    if (totalUpgradeTiers(ups) < (branch.unlockTotal || 8)) return false;
+    p.vehicleBranches[vehicleId] = branchId;
+    this.save();
+    return true;
+  },
   character() {
     const p = this.active();
     return p ? (CHARACTER_BY_ID[p.characterId] || CHARACTER_BY_ID[DEFAULT_CHARACTER_ID]) : null;
@@ -928,8 +1108,15 @@ const Profile = {
     const v = VEHICLE_BY_ID[vehicleId]; if (!v) return null;
     const p = this.active();
     const ups = (p && p.vehicleUpgrades && p.vehicleUpgrades[vehicleId]) || {engine:0,plating:0,weapons:0};
+    const branchId = p && p.vehicleBranches ? p.vehicleBranches[vehicleId] : null;
+    const branch = getVehicleBranchDef(vehicleId, branchId);
     const st = Object.assign({}, v.base);
     UPGRADE_TRACKS.forEach(t => t.apply(st, ups[t.id] || 0));
+    applyVehicleBranchStats(st, branch);
+    st.branchId = branch ? branch.id : null;
+    st.branchName = branch ? branch.name : null;
+    st.branchDesc = branch ? branch.desc : '';
+    st.branchEffects = Object.assign({}, branch ? branch.effects : null);
     return st;
   },
   recordRunResult(result) {
@@ -937,6 +1124,7 @@ const Profile = {
     p.runs += 1;
     if (result.mode === 'classic' && result.score > p.bestClassic) p.bestClassic = result.score;
     if (result.mode === 'timeattack' && result.score > p.bestTime) p.bestTime = result.score;
+    if (result.mode === 'bossrush' && result.score > (p.bestBossRush || 0)) p.bestBossRush = result.score;
     if (result.mode === 'classic' && result.distance > p.bestDistance) p.bestDistance = result.distance;
     if (result.mode === 'daily' && result.dailySeedKey) {
       p.dailyBest = p.dailyBest || {};
@@ -1022,6 +1210,12 @@ const Settings = {
   haptics: true,
   // 1.5x hit areas for menu buttons (accessibility)
   bigButtons: false,
+  // always fire while driving (assist)
+  autoFire: false,
+  // show incoming/outgoing damage numbers
+  damageNumbers: true,
+  // darker HUD backing + brighter labels for readability
+  hudContrast: false,
   load() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
@@ -1029,10 +1223,13 @@ const Settings = {
       const o = JSON.parse(raw);
       if (typeof o.master === 'number')    this.master    = clampSet(o.master, 0, 1);
       if (typeof o.sfx === 'number')       this.sfx       = clampSet(o.sfx, 0, 1);
-      if (typeof o.shake === 'number')     this.shake     = clampSet(o.shake, 0, 1.5);
-      if (typeof o.particles === 'number') this.particles = clampSet(o.particles, 0, 1.5);
-      if (typeof o.haptics === 'boolean')  this.haptics   = o.haptics;
-      if (typeof o.bigButtons === 'boolean') this.bigButtons = o.bigButtons;
+       if (typeof o.shake === 'number')     this.shake     = clampSet(o.shake, 0, 1.5);
+       if (typeof o.particles === 'number') this.particles = clampSet(o.particles, 0, 1.5);
+       if (typeof o.haptics === 'boolean')  this.haptics   = o.haptics;
+       if (typeof o.bigButtons === 'boolean') this.bigButtons = o.bigButtons;
+       if (typeof o.autoFire === 'boolean') this.autoFire = o.autoFire;
+       if (typeof o.damageNumbers === 'boolean') this.damageNumbers = o.damageNumbers;
+       if (typeof o.hudContrast === 'boolean') this.hudContrast = o.hudContrast;
     } catch (_) {}
   },
   save() {
@@ -1040,6 +1237,7 @@ const Settings = {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
         master: this.master, sfx: this.sfx, shake: this.shake,
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
+        autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
       }));
     } catch (_) {}
     this.applyBodyClass();
@@ -1136,6 +1334,45 @@ function getCharacterPerkState(characterId) {
     ram:     { scrapMul: 1.10, killScoreMul: 1.00, nightVisionMul: 1.00 },
   };
   return perks[characterId] ?? perks[DEFAULT_CHARACTER_ID];
+}
+
+const RUN_MUTATOR_DEFS = {
+  scavenger: { id:'scavenger', name:'SCAVENGER', desc:'More scrap and supply drops.' },
+  blackout:  { id:'blackout',  name:'BLACKOUT',  desc:'Night conditions linger longer.' },
+  volatile:  { id:'volatile',  name:'VOLATILE',  desc:'Explosive hazards and pulse drops.' },
+  hotstreak: { id:'hotstreak', name:'HOT STREAK', desc:'Bonus chains in Time Attack.' },
+  bosschain: { id:'bosschain', name:'BOSS CHAIN', desc:'Bosses arrive without rest.' },
+};
+
+const BOSS_RUSH_STAGES = [1, 2, 3, 4, 5];
+
+function pickDailyMutator(seedKey) {
+  const ids = ['scavenger', 'blackout', 'volatile'];
+  const seeded = seedFromString('daily-mutator-' + seedKey);
+  return ids[((seeded % ids.length) + ids.length) % ids.length];
+}
+
+function getRunMutators(mode, levelData, dailySeedKey) {
+  const mutators = [];
+  if (mode === 'daily' && dailySeedKey) {
+    mutators.push(RUN_MUTATOR_DEFS[pickDailyMutator(dailySeedKey)]);
+  }
+  if (mode === 'timeattack') {
+    mutators.push(RUN_MUTATOR_DEFS.hotstreak);
+  }
+  if (mode === 'bossrush') {
+    mutators.push(RUN_MUTATOR_DEFS.bosschain);
+  }
+  if (mode === 'gauntlet' && levelData) {
+    if (levelData.map === 'midnight' || levelData.night) mutators.push(RUN_MUTATOR_DEFS.blackout);
+    if (levelData.map === 'ash' || levelData.storm) mutators.push(RUN_MUTATOR_DEFS.volatile);
+  }
+  return mutators.filter(Boolean);
+}
+
+function announceEvent(text, color = '#ffe07a') {
+  addPopup(text, W * 0.5, H * 0.24, color, 18);
+  Game.eventBanner = { text, color, t: 2.2, max: 2.2 };
 }
 
 // ============================================================
@@ -1333,8 +1570,19 @@ const POWERUPS = {
   nitro:  { name:'NITRO',      color:'#7af0ff', dur:3.5,  glyph:'»»' },
   magnet: { name:'MAGNET',     color:'#f070ff', dur:8.0,  glyph:'⌒' },
   x2:     { name:'SCORE x2',   color:'#7af07a', dur:10.0, glyph:'×2' },
+  overdrive: { name:'OVERDRIVE', color:'#ff7050', dur:8.0, glyph:'!>' },
+  salvage:   { name:'SALVAGE',   color:'#d2ff6f', dur:10.0, glyph:'+$' },
+  pulse:     { name:'PULSE',     color:'#8ec5ff', dur:8.0, glyph:'~' },
 };
 const POWERUP_KEYS = Object.keys(POWERUPS);
+const SALVAGE_MAGNET_BONUS = 40;
+const BOSS_RUSH_REWARD_BASE = 1200;
+const BOSS_RUSH_REWARD_PER_STAGE = 250;
+const BASE_RAM_DAMAGE = 10;
+const PULSE_DAMAGE = { normal: 1.5, elite: 2 };
+const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250 };
+const ELITE_SCORE_MULTIPLIER = 1.8;
+const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -1401,6 +1649,13 @@ function updatePowerups(dt) {
   for (const id of POWERUP_KEYS) {
     const p = Game.powerups[id];
     if (p && p.t > 0) {
+      if (id === 'pulse') {
+        p.tick = (p.tick || 0) - dt;
+        if (p.tick <= 0) {
+          p.tick = 1.15;
+          firePulseBurst();
+        }
+      }
       p.t -= dt;
       if (p.t <= 0) {
         Game.powerups[id] = null;
@@ -1420,9 +1675,11 @@ function updatePowerups(dt) {
 
 // Magnet: pull pickups toward player when active
 function applyMagnet(dt) {
-  if (!isPowerupActive('magnet')) return;
+  const hasMagnetEffect = isPowerupActive('magnet') || !!(Game.branchState && Game.branchState.pickupRadius > 0);
+  if (!hasMagnetEffect) return;
   const p = Game.player;
-  const range = 240 * (Game.magnetRangeMul || 1);
+  const bonus = (Game.branchState && Game.branchState.pickupRadius) || 0;
+  const range = (240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0)) * (Game.magnetRangeMul || 1);
   for (const pk of Game.pickups) {
     const dx = p.x - pk.x, dy = p.y - pk.y;
     const d = Math.hypot(dx, dy);
@@ -1449,10 +1706,73 @@ function updateSidekick(dt) {
   }
 }
 
+function firePulseBurst() {
+  if (!Game.player) return;
+  const px = Game.player.x, py = Game.player.y;
+  shockwave(px, py, 'rgba(142,197,255,0.55)', 150);
+  emit(px, py, 18, { color:'#8ec5ff', speed:280, life:0.55, size:3 });
+  for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
+    const b = Game.enemyBullets[i];
+    if (Math.hypot((b.x || 0) - px, (b.y || 0) - py) < 130) {
+      Game.enemyBullets.splice(i, 1);
+    }
+  }
+  for (let i = Game.enemies.length - 1; i >= 0; i--) {
+    const e = Game.enemies[i];
+    if (Math.hypot(e.x - px, e.y - py) < 140) {
+      const pulseDmg = e.elite ? PULSE_DAMAGE.elite : PULSE_DAMAGE.normal;
+      e.hp -= pulseDmg;
+      if (Settings.damageNumbers) addPopup('-' + pulseDmg, e.x, e.y - 10, '#8ec5ff', 12);
+      if (e.hp <= 0) {
+        applyKill(e.x, e.y, e.kind === 'mortar' ? ENEMY_SCORE.mortar : e.kind === 'bike' ? ENEMY_SCORE.bike : ENEMY_SCORE.buggy);
+        emit(e.x, e.y, 18, { color:'#8ec5ff', speed:300, life:0.55, size:3 });
+        Game.enemies.splice(i, 1);
+      }
+    }
+  }
+  if (Game.boss && Math.hypot(Game.boss.x - px, Game.boss.y - py) < 170) {
+    Game.boss.hp -= 4;
+    if (Settings.damageNumbers) addPopup('-4', Game.boss.x, Game.boss.y - 18, '#8ec5ff', 12);
+  }
+}
+
+function weightedPoolAdd(pool, id, n) {
+  for (let i = 0; i < n; i++) pool.push(id);
+}
+
+function buildPowerupPool() {
+  const pool = [];
+  POWERUP_KEYS.forEach(id => weightedPoolAdd(pool, id, 1));
+  if (Game.mode === 'timeattack') {
+    weightedPoolAdd(pool, 'rapid', 2);
+    weightedPoolAdd(pool, 'x2', 2);
+    weightedPoolAdd(pool, 'overdrive', 2);
+  }
+  if (Game.mode === 'gauntlet' && Game.levelData && Game.levelData.obj === 'boss') {
+    weightedPoolAdd(pool, 'shield', 2);
+    weightedPoolAdd(pool, 'pulse', 2);
+  }
+  if (Game.mode === 'bossrush') {
+    weightedPoolAdd(pool, 'shield', 2);
+    weightedPoolAdd(pool, 'pulse', 2);
+    weightedPoolAdd(pool, 'overdrive', 2);
+  }
+  if (Game.mode === 'daily') {
+    weightedPoolAdd(pool, 'salvage', 2);
+  }
+  if (Game.biome === 'midnight') weightedPoolAdd(pool, 'pulse', 2);
+  if (Game.biome === 'redcanyon') weightedPoolAdd(pool, 'nitro', 2);
+  if (Game.biome === 'saltflats') weightedPoolAdd(pool, 'magnet', 1);
+  if (Game.runMutators.some(m => m.id === 'scavenger')) weightedPoolAdd(pool, 'salvage', 2);
+  if (Game.runMutators.some(m => m.id === 'volatile')) weightedPoolAdd(pool, 'pulse', 1);
+  return pool;
+}
+
 // Pick a random non-active power-up id (or any if all are active)
 function rollPowerup() {
   const inactive = POWERUP_KEYS.filter(k => !isPowerupActive(k));
-  const pool = inactive.length ? inactive : POWERUP_KEYS;
+  const weighted = buildPowerupPool().filter(k => inactive.length === 0 || inactive.includes(k));
+  const pool = weighted.length ? weighted : (inactive.length ? inactive : POWERUP_KEYS);
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -1608,6 +1928,21 @@ const Game = {
   scrapMul: 1,
   killScoreMul: 1,
   nightVisionMul: 1,
+  pickupScoreMul: 1,
+  damageTakenMul: 1,
+  bossDamageMul: 1,
+  contactDamageMul: 1,
+  nitroDamageMul: 1,
+  branchState: {},
+  runMutators: [],
+  activeEvent: null,
+  eventTimer: 0,
+  eventCooldown: 0,
+  eventBanner: null,
+  bonusObjective: null,
+  bonusObjectiveT: 0,
+  bossRushStage: 0,
+  bossRushPending: 0,
   // entities
   player: null,
   vehicle: null,
@@ -1638,7 +1973,7 @@ const Game = {
   comboT: 0,
   comboBest: 0,
   // power-ups: id -> { t, max } | null
-  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null },
+  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null },
   // tire skid marks (drawn under road decals)
   skidMarks: [],
   // far parallax peaks (deepest layer)
@@ -1708,6 +2043,7 @@ function startRun(mode, level) {
     Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
   }
   Game.biome = pickBiome(mode, Game.levelData, Game.dailySeedKey);
+  Game.runMutators = getRunMutators(mode, Game.levelData, Game.dailySeedKey);
   Game.state = 'loading';
   Game.paused = false;
   Game.t = 0;
@@ -1732,9 +2068,24 @@ function startRun(mode, level) {
   Game.laneOffset = 0;
   Game.isNight = !!(Game.levelData && Game.levelData.night);
   Game.isStorm = !!(Game.levelData && Game.levelData.storm);
+  if (Game.runMutators.some(m => m.id === 'blackout')) Game.isNight = true;
+  if (Game.runMutators.some(m => m.id === 'volatile')) Game.isStorm = true;
   Game.scrapMul = perkState.scrapMul || 1;
   Game.killScoreMul = perkState.killScoreMul || 1;
   Game.nightVisionMul = perkState.nightVisionMul || 1;
+  Game.pickupScoreMul = 1;
+  Game.damageTakenMul = 1;
+  Game.bossDamageMul = 1;
+  Game.contactDamageMul = 1;
+  Game.nitroDamageMul = 1;
+  Game.branchState = Object.assign({}, stats.branchEffects || null);
+  if (Game.branchState.scrapMul) Game.scrapMul *= Game.branchState.scrapMul;
+  if (Game.branchState.killScoreMul) Game.killScoreMul *= Game.branchState.killScoreMul;
+  if (Game.branchState.pickupScoreMul) Game.pickupScoreMul *= Game.branchState.pickupScoreMul;
+  if (Game.branchState.damageTakenMul) Game.damageTakenMul *= Game.branchState.damageTakenMul;
+  if (Game.branchState.bossDamageMul) Game.bossDamageMul *= Game.branchState.bossDamageMul;
+  if (Game.branchState.contactDamageMul) Game.contactDamageMul *= Game.branchState.contactDamageMul;
+  if (Game.branchState.nitroDamageMul) Game.nitroDamageMul *= Game.branchState.nitroDamageMul;
   Game.vehicle = v;
   Game.vehicleStats = stats;
   // sidekick passive effects
@@ -1758,6 +2109,14 @@ function startRun(mode, level) {
   Game.comboT = 0;
   Game.comboBest = 0;
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
+  Game.activeEvent = null;
+  Game.eventTimer = 0;
+  Game.eventCooldown = rand(12, 18);
+  Game.eventBanner = null;
+  Game.bonusObjective = null;
+  Game.bonusObjectiveT = 0;
+  Game.bossRushStage = mode === 'bossrush' ? 1 : 0;
+  Game.bossRushPending = 0;
   Game.skidMarks.length = 0;
   Game.farPeaks.length = 0;
   Game.dustDevils.length = 0;
@@ -1796,6 +2155,12 @@ function beginPlaying() {
     Game.bossWarning = 2.4;
     SFX.boss();
     Haptics.bossWarn();
+  } else if (Game.mode === 'bossrush') {
+    spawnBoss(BOSS_RUSH_STAGES[Game.bossRushStage - 1] || 1);
+    Game.bossWarning = 2.4;
+    announceEvent('BOSS RUSH ' + Game.bossRushStage + '/' + BOSS_RUSH_STAGES.length, '#ff8a8a');
+    SFX.boss();
+    Haptics.bossWarn();
   }
 }
 
@@ -1812,6 +2177,9 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   const baseScrap = Math.floor((Game.score / 10) * Game.scrapMul);
   let bonus = 0;
   if (reason === 'victory' && Game.levelData) bonus = Game.levelData.reward;
+  if (reason === 'victory' && Game.mode === 'bossrush') {
+    bonus += BOSS_RUSH_REWARD_BASE + Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) * BOSS_RUSH_REWARD_PER_STAGE;
+  }
   Game.scrapEarned = baseScrap + bonus;
   Profile.earn(Game.scrapEarned);
   // record stats
@@ -1860,6 +2228,10 @@ function triggerVictory(kind /* 'objective' | 'time' */) {
 
 // Check level objective each frame
 function checkObjective() {
+  if (Game.mode === 'timeattack' && Game.t >= 60) {
+    triggerVictory('time');
+    return;
+  }
   if (Game.mode !== 'gauntlet' && Game.mode !== 'campaign') return;
   if (!Game.levelData) return;
   const L = Game.levelData;
@@ -1867,16 +2239,89 @@ function checkObjective() {
   else if (L.obj === 'kills' && Game.kills >= L.target) triggerVictory('objective');
   else if (L.obj === 'distance' && Game.distance >= L.target) triggerVictory('objective');
   // boss: handled by boss death sequence
-  // Time attack: 60s timer
-  if (Game.mode === 'timeattack' && Game.t >= 60) {
-    triggerVictory('time');
+}
+
+function makeBonusObjective() {
+  if (Game.mode !== 'timeattack') return null;
+  const target = Math.max(6, 8 + Math.floor(Game.t / 12) * 2);
+  return {
+    kind: 'kills',
+    name: 'HOT STREAK',
+    target,
+    startKills: Game.kills,
+    reward: 900 + target * 35,
+    t: 10,
+    max: 10,
+  };
+}
+
+function startDynamicEvent(id) {
+  if (Game.boss || Game.state !== 'playing') return;
+  if (id === 'ambush') {
+    Game.activeEvent = { id, name:'RAIDER AMBUSH', t: 7, max: 7 };
+    for (let i = 0; i < 3; i++) spawnEnemyWave('bikes');
+    announceEvent('RAIDER AMBUSH', '#ff8a8a');
+  } else if (id === 'convoy') {
+    Game.activeEvent = { id, name:'SCRAP CONVOY', t: 8, max: 8 };
+    for (let i = 0; i < 2; i++) spawnEnemyWave('buggy', true);
+    Game.pickups.push({ kind:'scrap', x: W * 0.4, y:-30, w:22, h:22, t:0 });
+    Game.pickups.push({ kind:'scrap', x: W * 0.6, y:-60, w:22, h:22, t:0 });
+    announceEvent('SCRAP CONVOY', '#d2ff6f');
+  } else if (id === 'hazard') {
+    Game.activeEvent = { id, name:'HAZARD FIELD', t: 8, max: 8 };
+    spawnHazardField();
+    announceEvent('HAZARD FIELD', '#ffb36a');
+  } else if (id === 'stormfront') {
+    Game.activeEvent = { id, name:'STORM FRONT', t: 9, max: 9 };
+    Game.isStorm = true;
+    announceEvent('STORM FRONT', '#8ec5ff');
+  }
+}
+
+function maybeTriggerDynamicEvent() {
+  if (Game.mode === 'bossrush' || (Game.levelData && Game.levelData.obj === 'boss')) return;
+  const pool = ['ambush', 'convoy', 'hazard', 'stormfront'];
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  startDynamicEvent(pick);
+}
+
+function spawnHazardField() {
+  const { x0, x1 } = roadBounds();
+  for (let i = 0; i < 4; i++) {
+    Game.obstacles.push({
+      kind: i % 2 === 0 ? 'barrel' : 'wreck',
+      x: rand(x0 + 28, x1 - 28),
+      y: -50 - i * 38,
+      w: i % 2 === 0 ? 22 : 44,
+      h: i % 2 === 0 ? 24 : 64,
+      hp: 1,
+      rot: rand(-0.35, 0.35),
+    });
   }
 }
 
 // ============================================================
 // SPAWNERS
 // ============================================================
-function spawnEnemy() {
+function spawnEnemyWave(forceKind, eliteWave) {
+  spawnEnemy(forceKind, eliteWave);
+}
+
+function maybeEliteEnemy(enemy, forceElite) {
+  const chance = Game.mode === 'timeattack'
+    ? 0.18
+    : Game.mode === 'classic'
+      ? Math.min(0.22, 0.05 + Game.distance / 22000)
+      : 0.12;
+  if (!forceElite && Math.random() >= chance) return enemy;
+  enemy.elite = true;
+  enemy.hp = Math.ceil(enemy.hp * 2);
+  enemy.fireT *= 0.7;
+  enemy.vy *= 1.08;
+  return enemy;
+}
+
+function spawnEnemy(forceKind, forceElite) {
   if (Game.boss) return; // bosses pause normal spawns mid-fight
   const { x0, x1 } = roadBounds();
   const margin = 32;
@@ -1886,28 +2331,28 @@ function spawnEnemy() {
   const unlockBike   = lvlMul >= 1.1 || Game.distance > 800;
   const unlockMortar = lvlMul >= 1.4 || Game.distance > 2400;
   // pick spawn type
-  let pick;
-  if (unlockMortar && r < 0.10) pick = 'mortar';
-  else if (unlockBike && r < 0.30) pick = 'bikes';
-  else if (r < 0.55) pick = 'buggy';
-  else if (r < 0.85) pick = 'wreck';
-  else pick = 'barrels';
+  let pick = forceKind || null;
+  if (!pick && unlockMortar && r < 0.10) pick = 'mortar';
+  else if (!pick && unlockBike && r < 0.30) pick = 'bikes';
+  else if (!pick && r < 0.55) pick = 'buggy';
+  else if (!pick && r < 0.85) pick = 'wreck';
+  else if (!pick) pick = 'barrels';
 
   if (pick === 'buggy') {
-    Game.enemies.push({
+    Game.enemies.push(maybeEliteEnemy({
       kind:'buggy',
       x: rand(x0+margin, x1-margin),
       y: -50, w:40, h:56,
       vx: rand(-40, 40),
       vy: rand(60, 110) * Math.min(1.5, 1 + (lvlMul-1)*0.3),
       hp: 2, fireT: rand(0.8, 1.6),
-    });
+    }, forceElite));
   } else if (pick === 'bikes') {
     // 1-2 weaving bikes side by side
     const n = Math.random() < 0.6 ? 2 : 1;
     const cx = rand(x0 + margin + 30, x1 - margin - 30);
     for (let i = 0; i < n; i++) {
-      Game.enemies.push({
+      Game.enemies.push(maybeEliteEnemy({
         kind:'bike',
         x: cx + (i - (n-1)/2) * 50 + rand(-6, 6),
         y: -50 - i * 30, w:24, h:38,
@@ -1915,7 +2360,7 @@ function spawnEnemy() {
         hp: 1, fireT: rand(1.4, 2.4),
         wave: rand(0, Math.PI * 2), waveSpeed: rand(2.6, 4.0), waveAmp: rand(40, 80),
         baseX: cx + (i - (n-1)/2) * 50,
-      });
+      }, forceElite || !!(Game.activeEvent && Game.activeEvent.id === 'ambush')));
     }
   } else if (pick === 'mortar') {
     // stationary roadside emplacement that arcs shells
@@ -1923,11 +2368,11 @@ function spawnEnemy() {
     const x = side === 'L'
       ? rand(8, Math.max(12, x0 - 12))
       : rand(x1 + 12, W - 12);
-    Game.enemies.push({
+    Game.enemies.push(maybeEliteEnemy({
       kind:'mortar', x, y: -40, w: 30, h: 30,
       vx: 0, vy: 0, hp: 3, fireT: rand(1.4, 2.4),
       stationary: true,
-    });
+    }, forceElite));
   } else if (pick === 'wreck') {
     Game.obstacles.push({
       kind:'wreck',
@@ -1950,15 +2395,18 @@ function spawnEnemy() {
 function spawnPickup() {
   const { x0, x1 } = roadBounds();
   const r = Math.random();
-  // 8% power-up, 16% repair, 76% scrap
+  // 10% power-up, 16% repair, 12% cache, 62% scrap
   let kind;
-  if (r < 0.08) kind = 'powerup';
-  else if (r < 0.24) kind = 'repair';
+  if (r < 0.10) kind = 'powerup';
+  else if (r < 0.26) kind = 'repair';
+  else if (r < 0.38) kind = 'cache';
   else kind = 'scrap';
   const pk = { kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 };
   if (kind === 'powerup') {
     pk.power = rollPowerup();
     pk.w = 26; pk.h = 26;
+  } else if (kind === 'cache') {
+    pk.w = 28; pk.h = 28;
   }
   Game.pickups.push(pk);
 }
@@ -2035,8 +2483,9 @@ function updateBoss(dt) {
     const bu = Game.bullets[j];
     if (Math.abs(bu.x - b.x)*2 < b.w && Math.abs(bu.y - b.y)*2 < b.h) {
       Game.bullets.splice(j,1);
-      const dmg = bu.dmg || 1;
+      const dmg = (bu.dmg || 1) * Game.bossDamageMul;
       b.hp -= dmg;
+      if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), bu.x, bu.y - 10, '#ffd86b', 11);
       emit(bu.x, bu.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
       if (b.hp <= 0) {
         SFX.bigBoom();
@@ -2052,7 +2501,9 @@ function updateBoss(dt) {
           x: b.x, y: b.y, w: b.w, h: b.h,
           color: b.color, twin: b.twin, twinX: b.twinX,
           levelClear: isBossLevel,
+          bossRush: Game.mode === 'bossrush',
         };
+        if (Game.mode === 'bossrush') Game.bossRushStage += 1;
         Game.boss = null;
         return;
       } else {
@@ -2269,6 +2720,15 @@ function updateBossDeath(dt) {
       releaseWakeLock();
       pauseBtn.classList.remove('show');
       SFX.victory();
+    } else if (seq.bossRush) {
+      Game.pickups.push({ kind:'powerup', power: rollPowerup(), x: seq.x - 18, y: seq.y, w:26, h:26, t:0 });
+      Game.pickups.push({ kind:'repair', x: seq.x + 18, y: seq.y, w:22, h:22, t:0 });
+      if (Game.bossRushStage >= BOSS_RUSH_STAGES.length) {
+        triggerVictory('bossrush');
+      } else {
+        Game.bossRushPending = 2.1;
+        announceEvent('NEXT BOSS INBOUND', '#ff8a8a');
+      }
     }
   }
 }
@@ -2343,6 +2803,10 @@ function update(dt) {
   if (Game.hintTime > 0) Game.hintTime -= dt;
   if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.hitFlash > 0) Game.hitFlash -= dt;
+  if (Game.eventBanner) {
+    Game.eventBanner.t -= dt;
+    if (Game.eventBanner.t <= 0) Game.eventBanner = null;
+  }
 
   // ---- power-ups & combo decay ----
   updatePowerups(dt);
@@ -2358,6 +2822,53 @@ function update(dt) {
   Game.shake = Math.max(0, Game.shake - dt * 2.4);
   Game.flash = Math.max(0, Game.flash - dt * 3);
   if (Game.muzzleT > 0) Game.muzzleT -= dt;
+
+  if (Game.activeEvent) {
+    Game.activeEvent.t -= dt;
+    if (Game.activeEvent.id === 'stormfront' && Game.activeEvent.t <= 0 && !Game.runMutators.some(m => m.id === 'volatile')) {
+      Game.isStorm = !!(Game.levelData && Game.levelData.storm);
+    }
+    if (Game.activeEvent.t <= 0) Game.activeEvent = null;
+  } else {
+    Game.eventCooldown -= dt;
+    if (Game.eventCooldown <= 0) {
+      maybeTriggerDynamicEvent();
+      Game.eventCooldown = rand(Game.mode === 'classic' ? 14 : 11, Game.mode === 'classic' ? 22 : 17);
+    }
+  }
+
+  if (Game.mode === 'timeattack') {
+    if (!Game.bonusObjective) {
+      Game.bonusObjective = makeBonusObjective();
+    } else {
+      Game.bonusObjective.t -= dt;
+      const progress = Game.kills - Game.bonusObjective.startKills;
+      if (progress >= Game.bonusObjective.target) {
+        Game.score += Game.bonusObjective.reward;
+        addPopup('BONUS +' + Game.bonusObjective.reward, W * 0.5, H * 0.28, '#7af07a', 16);
+        Game.bonusObjective = makeBonusObjective();
+      } else if (Game.bonusObjective.t <= 0) {
+        Game.bonusObjective = makeBonusObjective();
+      }
+    }
+  } else {
+    Game.bonusObjective = null;
+  }
+
+  if (Game.mode === 'bossrush' && !Game.boss && !Game.bossDeathSeq && Game.bossRushPending > 0) {
+    Game.bossRushPending -= dt;
+    if (Game.bossRushPending <= 0 && Game.state === 'playing') {
+      const tier = BOSS_RUSH_STAGES[Game.bossRushStage - 1];
+      if (tier) {
+        spawnBoss(tier);
+        Game.bossWarning = 2.1;
+        SFX.boss();
+        Haptics.bossWarn();
+      } else {
+        triggerVictory('bossrush');
+      }
+    }
+  }
 
   // ---- skid marks: emitted when steering hard ----
   const ph = Game.player;
@@ -2445,9 +2956,12 @@ function update(dt) {
 
   // ---- fire ----
   Game.fireCooldown -= dt;
-  if (input.fire && Game.fireCooldown <= 0) {
+  const wantsFire = input.fire || Settings.autoFire;
+  if (wantsFire && Game.fireCooldown <= 0) {
     fireGuns();
-    Game.fireCooldown = stats.fireRate * (isPowerupActive('rapid') ? 0.5 : 1);
+    const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
+    const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
+    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul;
   }
 
   // ---- bullets ----
@@ -2554,13 +3068,16 @@ function update(dt) {
       const b = Game.bullets[j];
       if (aabb(e, b)) {
         Game.bullets.splice(j,1);
-        e.hp -= (b.dmg || 1);
+        const dmg = (b.dmg || 1) * (isPowerupActive('overdrive') ? 1.20 : 1) *
+          ((isPowerupActive('nitro') ? Game.nitroDamageMul : 1));
+        e.hp -= dmg;
+        if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', 11);
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
         if (e.hp <= 0) {
           SFX.explode();
           const isBike = e.kind === 'bike';
           const isMortar = e.kind === 'mortar';
-          const baseScore = isBike ? 200 : isMortar ? 250 : 150;
+          const baseScore = (isBike ? ENEMY_SCORE.bike : isMortar ? ENEMY_SCORE.mortar : ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
           emit(e.x, e.y, isMortar ? 36 : 28, { color:'#ff6a2b', speed:360, life:0.8, size:4 });
           emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
           shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', isMortar ? 110 : 70);
@@ -2569,9 +3086,10 @@ function update(dt) {
           applyKill(e.x, e.y, baseScore);
           // drops
           const dropR = Math.random();
-          if (isMortar && dropR < 0.5) {
+          const salvageBoost = isPowerupActive('salvage') || Game.runMutators.some(m => m.id === 'scavenger');
+          if ((isMortar || e.elite) && dropR < (salvageBoost ? 0.8 : 0.5)) {
             Game.pickups.push({ kind:'powerup', power: rollPowerup(), x:e.x, y:e.y, w:26, h:26, t:0 });
-          } else if (dropR < 0.4) {
+          } else if (dropR < (salvageBoost ? 0.7 : 0.4)) {
             Game.pickups.push({ kind:'scrap', x:e.x, y:e.y, w:22, h:22, t:0 });
           }
           Game.enemies.splice(i,1);
@@ -2582,6 +3100,8 @@ function update(dt) {
     if (!Game.enemies[i]) continue;
 
     if (aabb(e, Game.player)) {
+      const ramDmg = BASE_RAM_DAMAGE * Game.contactDamageMul;
+      if (ramDmg > 0) e.hp -= ramDmg;
       // shield blocks contact damage but breaks the enemy
       if (isPowerupActive('shield')) {
         emit(e.x, e.y, 24, { color:'#7aaaff', speed: 280, life: 0.5, size: 3 });
@@ -2589,6 +3109,10 @@ function update(dt) {
         applyKill(e.x, e.y, e.kind === 'bike' ? 200 : 150);
         Game.enemies.splice(i,1);
         Game.shake = Math.max(Game.shake, 0.5);
+      } else if (e.hp <= 0) {
+        applyKill(e.x, e.y, e.kind === 'bike' ? 200 : 150);
+        emit(e.x, e.y, 16, { color:'#ffb36a', speed:280, life:0.5, size:3 });
+        Game.enemies.splice(i,1);
       } else {
         damagePlayer(e.kind === 'bike' ? 28 : 40);
         SFX.explode();
@@ -2640,7 +3164,8 @@ function update(dt) {
     if (aabb(pk, Game.player)) {
       if (pk.kind === 'scrap') {
         const x2 = isPowerupActive('x2') ? 2 : 1;
-        const score = 75 * x2;
+        const salvageMul = isPowerupActive('salvage') ? 1.5 : 1;
+        const score = Math.round(75 * x2 * Game.pickupScoreMul * salvageMul);
         Game.score += score;
         emit(pk.x, pk.y, 12, { color:'#f5d76e', speed:220, life:0.5, size:3 });
         addPopup((x2 > 1 ? 'x2 ' : '') + '+' + score, pk.x, pk.y - 12, '#f5d76e', 13);
@@ -2650,6 +3175,14 @@ function update(dt) {
         Game.health = Math.min(Game.maxHealth, Game.health + Game.maxHealth * 0.3);
         emit(pk.x, pk.y, 14, { color:'#7af07a', speed:220, life:0.5, size:3 });
         addPopup('+HULL', pk.x, pk.y - 12, '#7af07a', 13);
+        SFX.pickup();
+        Haptics.pickup();
+      } else if (pk.kind === 'cache') {
+        const bundle = 250 + (isPowerupActive('salvage') ? 150 : 0);
+        Game.score += Math.round(bundle * Game.pickupScoreMul);
+        Game.pickups.push({ kind:'powerup', power: rollPowerup(), x:pk.x, y:pk.y - 10, w:26, h:26, t:0 });
+        emit(pk.x, pk.y, 20, { color:'#d2ff6f', speed:240, life:0.55, size:3 });
+        addPopup('SUPPLY CACHE', pk.x, pk.y - 12, '#d2ff6f', 13);
         SFX.pickup();
         Haptics.pickup();
       } else if (pk.kind === 'powerup') {
@@ -2698,14 +3231,15 @@ function update(dt) {
   while (Game.decor.length < 36) Game.decor.push(makeDecor());
 
   // ---- spawning (skip during boss approach/fight) ----
-  if (!Game.boss) {
+  if (!Game.boss && Game.mode !== 'bossrush') {
     Game.spawnTimer -= dt;
     if (Game.spawnTimer <= 0) {
+      const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? AMBUSH_SPAWN_MULTIPLIER : 1;
       const baseInterval = Game.mode === 'timeattack' ? 0.35 :
         clamp(1.4 - (Game.levelData ? Game.levelData.diff : 1) * 0.18, 0.45, 1.4);
       // also factor score-based difficulty in classic
       const intervalMul = Game.mode === 'classic' ? Math.max(0.4, 1 - Game.distance / 30000) : 1;
-      Game.spawnTimer = rand(baseInterval * 0.7 * intervalMul, baseInterval * 1.2 * intervalMul);
+      Game.spawnTimer = rand(baseInterval * 0.7 * intervalMul * ambushMul, baseInterval * 1.2 * intervalMul * ambushMul);
       spawnEnemy();
       // burst spawn in time attack
       if (Game.mode === 'timeattack' && Math.random() < 0.4) spawnEnemy();
@@ -2713,7 +3247,7 @@ function update(dt) {
     Game.pickupTimer -= dt;
     if (Game.pickupTimer <= 0) {
       spawnPickup();
-      Game.pickupTimer = rand(2.6, 4.6);
+      Game.pickupTimer = rand(Game.activeEvent && Game.activeEvent.id === 'convoy' ? 1.4 : 2.6, Game.activeEvent && Game.activeEvent.id === 'convoy' ? 2.8 : 4.6);
     }
   }
 
@@ -2736,42 +3270,53 @@ function fireGuns() {
   const stats = Game.vehicleStats;
   const v = Game.vehicle;
   const guns = stats.guns;
-  const dmg = stats.dmg;
+  const overdriveMul = isPowerupActive('overdrive') ? 1.2 : 1;
+  const critChance = (Game.branchState && Game.branchState.critChance) || 0;
+  const critMul = (Game.branchState && Game.branchState.critMul) || 1.6;
+  const makeShot = extra => {
+    const crit = Math.random() < critChance;
+    const mul = crit ? critMul : 1;
+    return Object.assign({
+      owner:'p',
+      dmg: stats.dmg * overdriveMul * mul,
+      crit,
+    }, extra);
+  };
   const bigShot = v.base.bigShot;
   const muzzleColor = v.color.glow;
   const triple = isPowerupActive('triple');
   Game.muzzleT = 0.08;
   if (bigShot) {
-    Game.bullets.push({ x:p.x, y:p.y - 30, w:8, h:18, vy:-720, owner:'p', dmg, big:true });
+    Game.bullets.push(makeShot({ x:p.x, y:p.y - 30, w:8, h:18, vy:-720, big:true }));
     if (triple) {
-      Game.bullets.push({ x:p.x - 10, y:p.y - 26, w:5, h:14, vx:-160, vy:-700, owner:'p', dmg: dmg * 0.7 });
-      Game.bullets.push({ x:p.x + 10, y:p.y - 26, w:5, h:14, vx: 160, vy:-700, owner:'p', dmg: dmg * 0.7 });
+      Game.bullets.push(makeShot({ x:p.x - 10, y:p.y - 26, w:5, h:14, vx:-160, vy:-700, dmg: stats.dmg * overdriveMul * 0.7 }));
+      Game.bullets.push(makeShot({ x:p.x + 10, y:p.y - 26, w:5, h:14, vx: 160, vy:-700, dmg: stats.dmg * overdriveMul * 0.7 }));
     }
     SFX.bigShot();
     emit(p.x, p.y - 32, 6, { color:muzzleColor, speed:120, life:0.2, size:3, spread:Math.PI/3 });
     return;
   }
   if (guns === 1) {
-    Game.bullets.push({ x:p.x, y:p.y - 30, w:5, h:14, vy:-780, owner:'p', dmg });
+    Game.bullets.push(makeShot({ x:p.x, y:p.y - 30, w:5, h:14, vy:-780 }));
     if (triple) {
-      Game.bullets.push({ x:p.x - 8, y:p.y - 28, w:4, h:12, vx:-220, vy:-740, owner:'p', dmg });
-      Game.bullets.push({ x:p.x + 8, y:p.y - 28, w:4, h:12, vx: 220, vy:-740, owner:'p', dmg });
+      Game.bullets.push(makeShot({ x:p.x - 8, y:p.y - 28, w:4, h:12, vx:-220, vy:-740 }));
+      Game.bullets.push(makeShot({ x:p.x + 8, y:p.y - 28, w:4, h:12, vx: 220, vy:-740 }));
     }
   } else if (guns === 2) {
-    Game.bullets.push({ x:p.x - 10, y:p.y - 26, w:4, h:12, vy:-780, owner:'p', dmg });
-    Game.bullets.push({ x:p.x + 10, y:p.y - 26, w:4, h:12, vy:-780, owner:'p', dmg });
+    Game.bullets.push(makeShot({ x:p.x - 10, y:p.y - 26, w:4, h:12, vy:-780 }));
+    Game.bullets.push(makeShot({ x:p.x + 10, y:p.y - 26, w:4, h:12, vy:-780 }));
     if (triple) {
-      Game.bullets.push({ x:p.x - 14, y:p.y - 24, w:4, h:12, vx:-260, vy:-720, owner:'p', dmg });
-      Game.bullets.push({ x:p.x + 14, y:p.y - 24, w:4, h:12, vx: 260, vy:-720, owner:'p', dmg });
-      Game.bullets.push({ x:p.x,      y:p.y - 30, w:5, h:14, vy:-820, owner:'p', dmg });
+      Game.bullets.push(makeShot({ x:p.x - 14, y:p.y - 24, w:4, h:12, vx:-260, vy:-720 }));
+      Game.bullets.push(makeShot({ x:p.x + 14, y:p.y - 24, w:4, h:12, vx: 260, vy:-720 }));
+      Game.bullets.push(makeShot({ x:p.x,      y:p.y - 30, w:5, h:14, vy:-820 }));
     }
   } else if (guns === 4) {
     [-16,-6,6,16].forEach(dx =>
-      Game.bullets.push({ x:p.x + dx, y:p.y - 26, w:3, h:10, vy:-820, owner:'p', dmg })
+      Game.bullets.push(makeShot({ x:p.x + dx, y:p.y - 26, w:3, h:10, vy:-820 }))
     );
     if (triple) {
-      Game.bullets.push({ x:p.x - 22, y:p.y - 22, w:3, h:10, vx:-280, vy:-720, owner:'p', dmg });
-      Game.bullets.push({ x:p.x + 22, y:p.y - 22, w:3, h:10, vx: 280, vy:-720, owner:'p', dmg });
+      Game.bullets.push(makeShot({ x:p.x - 22, y:p.y - 22, w:3, h:10, vx:-280, vy:-720 }));
+      Game.bullets.push(makeShot({ x:p.x + 22, y:p.y - 22, w:3, h:10, vx: 280, vy:-720 }));
     }
   }
   SFX.shoot();
@@ -2785,6 +3330,8 @@ function damagePlayer(amt) {
     shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 70);
     return;
   }
+  amt *= Game.damageTakenMul;
+  if (Settings.damageNumbers) addPopup('-' + Math.ceil(amt), Game.player.x, Game.player.y - 36, '#ff8a8a', 12);
   Game.health -= amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
@@ -3202,6 +3749,11 @@ function drawEnemy(e) {
   ctx.fillStyle = '#aa3030';
   ctx.fillRect(-e.w/2 + 7, -e.h/2 + 10, 2, 4);
   ctx.fillRect(e.w/2 - 9, -e.h/2 + 10, 2, 4);
+  if (e.elite) {
+    ctx.strokeStyle = '#ffb36a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
+  }
   ctx.restore();
 }
 
@@ -3231,6 +3783,11 @@ function drawBike(e) {
   ctx.fillStyle = 'rgba(255,140,60,0.55)';
   ctx.fillRect(-e.w/2 - 3, e.h/2 - 8, 3, 6);
   ctx.fillRect( e.w/2,     e.h/2 - 8, 3, 6);
+  if (e.elite) {
+    ctx.strokeStyle = '#ffb36a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
+  }
   ctx.restore();
 }
 
@@ -3260,6 +3817,11 @@ function drawMortar(e) {
   // crew/operator
   ctx.fillStyle = '#5a0a0a';
   ctx.beginPath(); ctx.arc(-e.w/2 + 4, e.h/2 - 12, 3, 0, Math.PI * 2); ctx.fill();
+  if (e.elite) {
+    ctx.strokeStyle = '#ffb36a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
+  }
   ctx.restore();
 }
 
@@ -3336,6 +3898,20 @@ function drawPickup(pk) {
     ctx.fillStyle = '#1a3a1a';
     ctx.fillRect(pk.x - 2, pk.y + bob - 7, 4, 14);
     ctx.fillRect(pk.x - 7, pk.y + bob - 2, 14, 4);
+  } else if (pk.kind === 'cache') {
+    ctx.save();
+    ctx.translate(pk.x, pk.y + bob);
+    ctx.rotate(pk.t * 1.4);
+    ctx.fillStyle = 'rgba(210,255,111,0.18)';
+    ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#41361a';
+    ctx.fillRect(-12, -10, 24, 20);
+    ctx.fillStyle = '#d2ff6f';
+    ctx.fillRect(-10, -8, 20, 16);
+    ctx.fillStyle = '#1a0f08';
+    ctx.fillRect(-3, -8, 6, 16);
+    ctx.fillRect(-10, -1, 20, 2);
+    ctx.restore();
   } else if (pk.kind === 'powerup') {
     const def = POWERUPS[pk.power] || POWERUPS.shield;
     const c = def.color;
@@ -3590,10 +4166,10 @@ function drawNitroOverlay() {
 function drawHUD() {
   const hudH = W < 500 ? 48 : 56;
   const fs = W < 500 ? 13 : 16;
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillStyle = Settings.hudContrast ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, 0, W, hudH);
 
-  ctx.fillStyle = '#f5d76e';
+  ctx.fillStyle = Settings.hudContrast ? '#fff3b0' : '#f5d76e';
   ctx.font = `bold ${fs}px "Courier New", monospace`;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   // left: score (and pause btn space, so offset by 50)
@@ -3608,6 +4184,8 @@ function drawHUD() {
     subL = `LV ${Game.levelData.num}/${LEVELS.length}  ${Game.levelData.name}`;
   } else if (Game.mode === 'timeattack') {
     subL = `TIME ATTACK`;
+  } else if (Game.mode === 'bossrush') {
+    subL = `BOSS RUSH`;
   }
   ctx.fillText(subL, 50, hudH * 0.72);
 
@@ -3628,6 +4206,8 @@ function drawHUD() {
     else if (L.obj === 'kills') mainR = `${Game.kills}/${L.target}`;
     else if (L.obj === 'distance') mainR = `${Math.floor(Game.distance)}/${L.target}M`;
     else if (L.obj === 'boss') mainR = 'BOSS';
+  } else if (Game.mode === 'bossrush') {
+    mainR = `BOSS ${Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length)}/${BOSS_RUSH_STAGES.length}`;
   }
   ctx.fillText(mainR, W - 50, hudH * 0.32);
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
@@ -3666,6 +4246,22 @@ function drawHUD() {
     ctx.font = 'bold 11px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(Game.boss.name + (Game.boss.enrage ? ' ★ ENRAGED' : ''), W/2, bbY + bbH + 10);
+  }
+
+  if (Game.runMutators.length || Game.activeEvent || Game.bonusObjective) {
+    const label = Game.activeEvent
+      ? Game.activeEvent.name
+      : Game.bonusObjective
+        ? `${Game.bonusObjective.name} ${Game.kills - Game.bonusObjective.startKills}/${Game.bonusObjective.target}`
+        : Game.runMutators.map(m => m.name).join(' · ');
+    const y = Game.boss && Game.boss.y >= Game.boss.targetY - 5 ? hudH + 34 : hudH + 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    const tw = ctx.measureText(label).width + 18;
+    ctx.fillRect((W - tw) / 2, y - 10, tw, 18);
+    ctx.fillStyle = Game.activeEvent ? '#ffb36a' : Game.bonusObjective ? '#7af07a' : '#8ec5ff';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, W / 2, y);
   }
 }
 
@@ -3799,6 +4395,9 @@ function drawLoadingOverlay() {
   } else if (Game.mode === 'classic') {
     title = 'OPEN ROAD';
     sub = 'ENDLESS · ' + (Game.vehicle ? Game.vehicle.name : '');
+  } else if (Game.mode === 'bossrush') {
+    title = 'BOSS RUSH';
+    sub = `CHAIN ${Game.bossRushStage}/${BOSS_RUSH_STAGES.length} · ` + (Game.vehicle ? Game.vehicle.name : '');
   } else if (Game.mode === 'daily') {
     title = 'DAILY CHALLENGE';
     sub = (Game.dailySeedKey || '') + ' · ' + (Game.vehicle ? Game.vehicle.name : '');
@@ -4269,6 +4868,31 @@ const UI = {
       `;
       list.appendChild(row);
     });
+    const totalTiers = totalUpgradeTiers(p.vehicleUpgrades[vehicleId] || {});
+    const branches = getVehicleBranches(vehicleId);
+    if (branches.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'up-row';
+      const unlocked = totalTiers >= (branches[0].unlockTotal || 8);
+      const currentBranch = p.vehicleBranches && p.vehicleBranches[vehicleId];
+      wrap.innerHTML = `
+        <div class="up-head">
+          <div class="up-name">SPECIALIZATION</div>
+          <div class="up-tier">${unlocked ? 'UNLOCKED' : `${totalTiers}/${branches[0].unlockTotal || 8} TIERS`}</div>
+        </div>
+        <div class="up-desc">${unlocked ? 'Choose a permanent branch for this vehicle.' : 'Reach 8 total upgrade tiers to unlock branching builds.'}</div>
+      `;
+      branches.forEach(branch => {
+        const btn = document.createElement('button');
+        btn.className = 'btn' + (currentBranch === branch.id ? ' primary' : '');
+        btn.setAttribute('data-bact', 'branch');
+        btn.setAttribute('data-bid', branch.id);
+        btn.disabled = !unlocked;
+        btn.innerHTML = `${branch.name}<span class="sub">${branch.desc}</span>`;
+        wrap.appendChild(btn);
+      });
+      list.appendChild(wrap);
+    }
     this.show('upgrade');
   },
 
@@ -4339,6 +4963,7 @@ const UI = {
       ['RUNS', p.runs],
       ['BEST CLASSIC', p.bestClassic],
       ['BEST TIME ATK', p.bestTime],
+      ['BEST BOSS RUSH', p.bestBossRush || 0],
       ['LONGEST RUN', p.bestDistance + ' M'],
       ['VEHICLES OWNED', ownedCount + ' / ' + VEHICLES.length],
       ['UPGRADES BUILT', ttlUpgrades],
@@ -4381,6 +5006,9 @@ const UI = {
       rows.push(['BEST', p.bestClassic, false]);
     } else if (Game.mode === 'timeattack') {
       rows.push(['BEST', p.bestTime, false]);
+    } else if (Game.mode === 'bossrush') {
+      rows.push(['BOSSES', Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) + ' / ' + BOSS_RUSH_STAGES.length, false]);
+      rows.push(['BEST', p.bestBossRush || 0, false]);
     } else if (Game.mode === 'daily' && Game.dailySeedKey) {
       const best = (p.dailyBest && p.dailyBest[Game.dailySeedKey]) || Math.floor(Game.score);
       rows.push(['DAILY', Game.dailySeedKey, false]);
@@ -4490,9 +5118,13 @@ const UI = {
         <div class="set-head"><div class="set-name">QUALITY</div></div>
         <div class="set-q-row">${qopts}</div>
       </div>
+      ${toggle('HIGH CONTRAST HUD', 'hudContrast', 'STRONGER HUD BACKDROP + BRIGHTER LABELS')}
       <h2>CONTROLS</h2>
       ${toggle('HAPTICS', 'haptics', 'VIBRATE ON HIT / KILL / DEATH')}
       ${toggle('LARGE TOUCH TARGETS', 'bigButtons', 'EASIER TO TAP ON SMALL SCREENS')}
+      ${toggle('AUTO FIRE', 'autoFire', 'CONTINUOUS FIRE ASSIST DURING RUNS')}
+      <h2>READABILITY</h2>
+      ${toggle('DAMAGE NUMBERS', 'damageNumbers', 'SHOW DAMAGE POPUPS ON HITS')}
     `;
     this.show('settings');
   },
@@ -4943,6 +5575,18 @@ document.addEventListener('click', e => {
       UI.toast('UPGRADED');
       UI.showUpgrade(vid);
     } else UI.toast('NOT ENOUGH SCRAP');
+    return;
+  }
+  const ba = e.target.closest('[data-bact]');
+  if (ba) {
+    SFX.click();
+    const vid = UI._upVid;
+    const branchId = ba.dataset.bid;
+    if (Profile.selectBranch(vid, branchId)) {
+      SFX.levelUp();
+      UI.toast('SPECIALIZATION SET');
+      UI.showUpgrade(vid);
+    } else UI.toast('BRANCH LOCKED');
     return;
   }
   // settings: quality preset or boolean toggle

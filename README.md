@@ -10,8 +10,8 @@ Mobile-first browser game. Zero deps, zero build, zero backend. Single-page app,
 
 - **Driver profiles** — up to 6 named drivers per device, persistent locally
 - **7 vehicles** — Rust Bucket / Junker / Roadrunner / Goliath / Phantom / Sand Viper / Ironclad — each with unique stats
-- **4 upgrade tracks × 5 tiers** — Engine, Plating, Weapons, Reactor; per-vehicle progression
-- **4 modes** — Classic (endless), Gauntlet (18 tiered sectors with 5 bosses), Time Attack (60s frenzy), **Daily Challenge** (seeded run, same world for everyone, shareable score)
+- **4 upgrade tracks × 5 tiers + specialization branches** — Engine, Plating, Weapons, Reactor plus unlockable per-vehicle build branches
+- **5 modes** — Classic (endless), Gauntlet (18 tiered sectors with 5 bosses), Time Attack (60s frenzy), **Daily Challenge** (seeded run, same world for everyone, shareable score), Boss Rush (5 chained bosses)
 - **18-level Gauntlet** — survive / kill / distance / boss objectives across multiple biome maps
 - **5 boss tiers** — Alpha Raider, Twin Demons, The Overlord, Warlord Titan, The Chimera — each with unique attack patterns and enrage at 30% HP
 - **Biome map themes** — Wastes, Salt Flats, Ash Fields, Red Canyon, Midnight Rift with distinct visual palettes
@@ -19,7 +19,9 @@ Mobile-first browser game. Zero deps, zero build, zero backend. Single-page app,
 - **Day / night / sandstorm** — late levels feature night sky with stars + boosted headlight cones, or sandstorm streaks
 - **Currency loop** — earn SCRAP from runs (10% of score + boss bonuses), spend on vehicles & upgrades
 - **Stats screen** — lifetime tracking per driver
-- **Settings panel** — master/SFX volume, screen-shake intensity, particle density, haptics toggle, large touch targets, graphics quality
+- **Dynamic run events** — raider ambushes, scrap convoys, hazard fields, rotating mutators, elite enemies
+- **Expanded item pool** — shield / triple / rapid / nitro / magnet / x2 plus overdrive / salvage / pulse / supply caches
+- **Settings panel** — master/SFX volume, screen-shake intensity, particle density, haptics toggle, large touch targets, graphics quality, auto-fire, damage numbers, HUD contrast
 - **In-game pause menu** — resume / restart / settings / quit, with full DOM tap targets
 - **Offline-first PWA** — service worker caches the game so it loads instantly and plays without a network
 
