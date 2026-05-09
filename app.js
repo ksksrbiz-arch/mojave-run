@@ -559,6 +559,10 @@ function campaignLevelLabel(count) {
   return 'CAMPAIGN LEVEL' + (count === 1 ? '' : 'S');
 }
 
+function zombieLockedMessage(prefix, remaining) {
+  return `${prefix} — CLEAR ${remaining} MORE ${campaignLevelLabel(remaining)}`;
+}
+
 // ============================================================
 // SIDEKICKS — passive companions unlocked through campaign
 // ============================================================
@@ -2293,7 +2297,7 @@ function startRun(mode, level) {
   if (!profile) return;
   if (mode === 'zombie' && !Profile.isZombieModeUnlocked()) {
     const remaining = getZombieUnlockLevelsRemaining(profile);
-    UI.toast('ZOMBIE HORDE LOCKED — CLEAR ' + remaining + ' MORE ' + campaignLevelLabel(remaining));
+    UI.toast(zombieLockedMessage('ZOMBIE HORDE LOCKED', remaining));
     UI.showMode();
     return;
   }
@@ -6147,7 +6151,7 @@ const UI = {
         const m = data;
         if (m === 'zombie' && !Profile.isZombieModeUnlocked()) {
           const remaining = getZombieUnlockLevelsRemaining(Profile.active());
-          UI.toast('LOCKED — CLEAR ' + remaining + ' MORE ' + campaignLevelLabel(remaining));
+          UI.toast(zombieLockedMessage('LOCKED', remaining));
         }
         else if (m === 'gauntlet') UI.showGauntlet();
         else if (m === 'campaign') UI.showCampaign();
