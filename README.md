@@ -53,7 +53,7 @@ Upgrades stack multiplicatively: +60% accel/speed at engine T5, +100% HP at plat
 - Wake Lock API + visibility-change pause
 - Fullscreen API + portrait orientation lock
 - PWA manifest + SVG icon — installable to home screen
-- DPR cap 1.5 + reduced particle counts on mobile
+- Adaptive canvas render scale + quality governor for smoother Android/iPhone/iPad/desktop play
 
 ## Stack
 
