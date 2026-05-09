@@ -118,6 +118,7 @@
       <div>SCORE <b id="scoreHud">0</b></div>
       <div>SECTOR <b id="sectorHud">1</b></div>
       <div>KILLS <b id="killHud">0</b></div>
+      <div id="waveHudRow" class="hidden">WAVE <b id="waveHud">1</b></div>
       <div id="comboHud" class="combo hidden">COMBO <b id="comboCount">0</b> <span id="comboMult">x1.0</span></div>
     </div>
   </div>
@@ -129,6 +130,7 @@
     <div class="menu">
       <button class="btn primary" data-act="play">PLAY · RUST BUCKET</button>
       <button class="btn" data-act="gauntlet">GAUNTLET (12 SECTORS)</button>
+      <button class="btn" id="zombieBtn" data-act="zombie">ZOMBIE WASTELAND</button>
       <button class="btn" data-act="garage">GARAGE</button>
       <button class="btn" data-act="stats">STATS</button>
       <button class="btn" data-act="mp">MULTIPLAYER</button>
@@ -216,6 +218,7 @@ const defaultSave = () => ({
   active:0, hi:0, totalKills:0, totalDist:0, bestSector:1,
   settings:{crt:false,motion:false,cb:false,snd:true},
   gauntletProgress:1,
+  zombieHi:0, zombieBestWave:0,
 });
 let SAVE = (()=>{ try{ const s=JSON.parse(localStorage.getItem(SAVE_KEY));
   return s && s.drivers ? s : defaultSave(); }catch(e){return defaultSave();} })();
@@ -383,13 +386,18 @@ function decal(x,y,r){ Decals.push({x,y,r,t:6}); if(Decals.length>40) Decals.shi
 // ---------- Game state -----------------------------------------------
 const Game = {
   mode:'menu', // menu, play, pause, over
-  modeName:'rust', // rust | gauntlet
+  modeName:'rust', // rust | gauntlet | zombiewasteland
   sector:1, sectorTime:0, sectorTarget:30,
   player:null, zombies:[], bullets:[], pickups:[],
   road:0, speed:380, baseSpeed:380, nitroBoost:0, score:0, scrap:0, kills:0,
   shake:0, dist:0, weather:'clear', visibility:1,
   combo:0, comboT:0, boss:null, bossLockSector:0,
   mp:null,
+  // === ZOMBIE WASTELAND STATE ===
+  wave:0, waveStartKills:0, waveKillsNeeded:0, waveCooldown:0,
+  gauntletObj:null, gauntletObjT:0,
+  hordeSpawnQ:0, hordeSpawnT:0,
+  chainsawT:0,
 };
 
 // ---------- Player ---------------------------------------------------
@@ -527,6 +535,125 @@ function tryActivateSpecial(){
 }
 
 // ---------- Zombies ---------------------------------------------------
+// === ZOMBIE WASTELAND MODE ===
+const ZOMBIE_UNLOCK_SECTORS = 6; // complete 6 gauntlet sectors to unlock
+const ZOMBIE_WAVE_BASE      = 10; // kills needed on wave 1
+const ZOMBIE_WAVE_SCALE     = 3;  // extra kills per wave
+const ZOMBIE_OBJ_DURATION   = 60; // seconds for horde survival objective
+const ZOMBIE_POWERUPS = ['chainsaw','molotov'];
+const ZOMBIE_OBJECTIVES = ['survive_horde','kill_tank'];
+
+function isZombieUnlocked(){
+  return (SAVE.gauntletProgress - 1) >= ZOMBIE_UNLOCK_SECTORS;
+}
+
+function updateZombieMenuBtn(){
+  const btn = document.getElementById('zombieBtn'); if(!btn) return;
+  const cleared = Math.max(0, SAVE.gauntletProgress - 1);
+  if(isZombieUnlocked()){
+    btn.innerHTML = 'ZOMBIE WASTELAND';
+    btn.style.opacity = ''; btn.style.borderColor = 'var(--blood)';
+    btn.classList.add('primary');
+  } else {
+    btn.innerHTML = 'ZOMBIE WASTELAND &#x1F512;<br><span style="font-size:10px;opacity:.7">Unlocks after '+ZOMBIE_UNLOCK_SECTORS+'/12 Gauntlet Sectors ('+cleared+'/'+ZOMBIE_UNLOCK_SECTORS+')</span>';
+    btn.style.opacity = '0.75'; btn.style.borderColor = '';
+    btn.classList.remove('primary');
+  }
+}
+
+function startNextWave(){
+  Game.wave++;
+  Game.waveStartKills = Game.kills;
+  Game.waveKillsNeeded = ZOMBIE_WAVE_BASE + (Game.wave - 1) * ZOMBIE_WAVE_SCALE;
+  Game.waveCooldown = 0;
+  Game.gauntletObj = null; Game.gauntletObjT = 0;
+  Game.hordeSpawnQ = 0;
+  if(Game.wave > 1 && Game.wave % 5 === 0){
+    triggerGauntletObjective();
+  } else {
+    toast('WAVE '+Game.wave+' — KILL '+Game.waveKillsNeeded+' ZOMBIES');
+  }
+}
+
+function triggerGauntletObjective(){
+  const obj = choose(ZOMBIE_OBJECTIVES);
+  Game.gauntletObj = obj; Game.gauntletObjT = ZOMBIE_OBJ_DURATION;
+  if(obj === 'survive_horde'){
+    toast('OBJECTIVE: SURVIVE THE HORDE! '+ZOMBIE_OBJ_DURATION+'s');
+    Game.hordeSpawnQ = 25;
+    Game.hordeSpawnT = 0;
+  } else if(obj === 'kill_tank'){
+    Game.gauntletObjT = 90;
+    toast('OBJECTIVE: DESTROY THE TANK!');
+    const boss = new Zombie('tank', W/2, -80);
+    boss.maxHp = boss.hp = 300;
+    boss.objTarget = true;
+    Game.zombies.push(boss);
+  }
+}
+
+function updateZombieWasteland(dt){
+  // Horde spawn queue (for survive_horde objective)
+  if(Game.hordeSpawnQ > 0){
+    Game.hordeSpawnT -= dt;
+    if(Game.hordeSpawnT <= 0){
+      Game.hordeSpawnT = 0.1;
+      const type = choose(['walker','runner','walker','walker','crawler']);
+      const x = W*0.18 + (W*0.64)*Math.random() + rnd(-20,20);
+      Game.zombies.push(new Zombie(type, x, -60));
+      Game.hordeSpawnQ--;
+    }
+  }
+  // Objective resolution
+  if(Game.gauntletObj === 'survive_horde'){
+    Game.gauntletObjT -= dt;
+    if(Game.gauntletObjT <= 0){
+      Game.gauntletObj = null;
+      Game.score += 500;
+      toast('HORDE SURVIVED! +500 BONUS');
+      Game.waveCooldown = 3;
+    }
+  } else if(Game.gauntletObj === 'kill_tank'){
+    const hasTarget = Game.zombies.some(z=>z.alive && z.objTarget);
+    if(!hasTarget){
+      Game.gauntletObj = null;
+      Game.score += 800;
+      toast('TANK DESTROYED! +800 BONUS');
+      Game.waveCooldown = 3;
+    } else {
+      Game.gauntletObjT -= dt;
+      if(Game.gauntletObjT <= 0){
+        Game.gauntletObj = null;
+        if(Game.player) Game.player.damage(30);
+        toast('TANK ESCAPED! -30 HP');
+        Game.waveCooldown = 2;
+      }
+    }
+  }
+  // Wave completion (no active objective)
+  if(!Game.gauntletObj){
+    const waveKills = Game.kills - Game.waveStartKills;
+    if(waveKills >= Game.waveKillsNeeded && Game.waveCooldown <= 0){
+      Game.waveCooldown = 3;
+    }
+    if(Game.waveCooldown > 0){
+      Game.waveCooldown -= dt;
+      if(Game.waveCooldown <= 0) startNextWave();
+    }
+  }
+  // Chainsaw: periodic AOE damage to nearby zombies
+  if(Game.chainsawT > 0 && Game.player){
+    Game.chainsawT -= dt;
+    for(const z of Game.zombies){
+      if(!z.alive) continue;
+      if(Math.hypot(z.x-Game.player.x, z.y-Game.player.y) < 100){
+        z.hit(20*dt);
+        if(Math.random()<0.05) burst(z.x, z.y, 2, '#ff8800', 150, 0.2, 3);
+      }
+    }
+  }
+}
+
 const ZTYPES = {
   walker:{hp:18,spd:90,dmg:10,score:10,col:'#577a3a',w:38,h:48},
   runner:{hp:14,spd:170,dmg:12,score:18,col:'#7a8a3a',w:32,h:46},
@@ -694,11 +821,22 @@ class Zombie{
 
 // ---------- Pickups ---------------------------------------------------
 function makePickup(x,y){
+  if(Game.modeName==='zombiewasteland'){
+    // Zombie Wasteland exclusive drop pool (no nitro/multi, add chainsaw/molotov)
+    const types=['scrap','scrap','health','health','chainsaw','molotov','shield'];
+    return {x,y,t:choose(types),vy:80};
+  }
   const types=['scrap','scrap','scrap','health','nitro','multi','shield'];
   return {x,y,t:choose(types),vy:80};
 }
-function pickupCol(t){return {scrap:'#f5d76e',health:'#7af07a',nitro:'#5fb5ff',multi:'#ff8855',shield:'#b27aff'}[t];}
-function pickupLabel(t){return {scrap:'$',health:'+',nitro:'N',multi:'x2',shield:'S'}[t];}
+function pickupCol(t){
+  return {scrap:'#f5d76e',health:'#7af07a',nitro:'#5fb5ff',multi:'#ff8855',shield:'#b27aff',
+    chainsaw:'#ff8800',molotov:'#ff3300'}[t] || '#fff';
+}
+function pickupLabel(t){
+  return {scrap:'$',health:'+',nitro:'N',multi:'x2',shield:'S',
+    chainsaw:'C',molotov:'M'}[t] || '?';
+}
 
 // ---------- Road / world ---------------------------------------------
 const Background = {
@@ -806,10 +944,18 @@ function startGame(mode){
   Game.speed = Game.baseSpeed = 380; Game.nitroBoost=0;
   Game.score=0; Game.scrap=0; Game.kills=0; Game.dist=0; Game.shake=0;
   Game.combo=0; Game.comboT=0; Game.boss=null; Game.bossLockSector=0;
+  // === ZOMBIE WASTELAND init ===
+  Game.wave=0; Game.waveStartKills=0; Game.waveKillsNeeded=0; Game.waveCooldown=0;
+  Game.gauntletObj=null; Game.gauntletObjT=0;
+  Game.hordeSpawnQ=0; Game.hordeSpawnT=0; Game.chainsawT=0;
   applySector();
   hideOverlays(); hudShow(true); Audio.resume();
-  toast('SECTOR '+Game.sector+': '+SECTORS[(Game.sector-1)%SECTORS.length].name);
-  maybeSpawnBoss();
+  if(mode==='zombiewasteland'){
+    startNextWave();
+  } else {
+    toast('SECTOR '+Game.sector+': '+SECTORS[(Game.sector-1)%SECTORS.length].name);
+    maybeSpawnBoss();
+  }
 }
 
 function applySector(){
@@ -825,6 +971,11 @@ function nextSector(){
   if(Game.modeName==='gauntlet' && Game.sector>SECTORS.length){
     toast('GAUNTLET COMPLETE!'); SAVE.gauntletProgress = SECTORS.length+1; persist();
     gameOver(true); return;
+  }
+  // Track intermediate gauntlet progress for Zombie Wasteland unlock
+  if(Game.modeName==='gauntlet' && Game.sector > SAVE.gauntletProgress){
+    SAVE.gauntletProgress = Game.sector; persist();
+    updateZombieMenuBtn();
   }
   Game.sectorTime=0; applySector();
   Game.baseSpeed += 30;
@@ -848,15 +999,29 @@ let spawnT = 0;
 function spawnTick(dt){
   spawnT -= dt;
   if(spawnT<=0){
-    const s = SECTORS[(Game.sector-1)%SECTORS.length];
-    const density = 1 + Game.sector*0.15 + (Game.modeName==='rust' ? Game.dist/3000 : 0);
-    spawnT = clamp(0.85/density, 0.18, 1.2);
-    const type = choose(s.mix);
-    const lane = rndi(0,3);
-    const x = W*0.18 + (W*0.64) * ((lane+0.5)/3) + rnd(-30,30);
-    Game.zombies.push(new Zombie(type, x, -60));
-    // occasional pair
-    if(Math.random()<0.15) Game.zombies.push(new Zombie(type, x+rnd(-60,60), -120));
+    if(Game.modeName==='zombiewasteland'){
+      // Wave-based spawning: intensity scales with wave number
+      const density = 0.8 + Game.wave * 0.12;
+      spawnT = clamp(0.7/density, 0.12, 1.0);
+      const waveMix = Game.wave < 3  ? ['walker','walker','runner'] :
+                      Game.wave < 6  ? ['walker','runner','runner','crawler'] :
+                      Game.wave < 10 ? ['runner','crawler','screamer','exploder'] :
+                                       ['runner','crawler','screamer','exploder','tank'];
+      const type = choose(waveMix);
+      const x = W*0.18 + (W*0.64)*Math.random() + rnd(-20,20);
+      Game.zombies.push(new Zombie(type, x, -60));
+      if(Math.random()<0.12) Game.zombies.push(new Zombie(type, x+rnd(-60,60), -120));
+    } else {
+      const s = SECTORS[(Game.sector-1)%SECTORS.length];
+      const density = 1 + Game.sector*0.15 + (Game.modeName==='rust' ? Game.dist/3000 : 0);
+      spawnT = clamp(0.85/density, 0.18, 1.2);
+      const type = choose(s.mix);
+      const lane = rndi(0,3);
+      const x = W*0.18 + (W*0.64) * ((lane+0.5)/3) + rnd(-30,30);
+      Game.zombies.push(new Zombie(type, x, -60));
+      // occasional pair
+      if(Math.random()<0.15) Game.zombies.push(new Zombie(type, x+rnd(-60,60), -120));
+    }
   }
 }
 
@@ -977,6 +1142,23 @@ function update(dt){
       }
       else if(pk.t==='multi'){ Game.score += 100; }
       else if(pk.t==='shield'){ p.invuln = Math.max(p.invuln, SHIELD_DURATION); toast('SHIELD'); }
+      // === ZOMBIE WASTELAND exclusive pickups ===
+      else if(pk.t==='chainsaw'){
+        Game.chainsawT = 5;
+        toast('CHAINSAW! 5s MELEE AOE');
+        Audio.pickup();
+      } else if(pk.t==='molotov'){
+        // AOE explosion ahead of player
+        const mx = p.x, my = p.y - 160;
+        burst(mx, my, 35, '#ff4400', 420, 0.9, 5);
+        burst(mx, my, 20, '#ffaa44', 280, 0.6, 4);
+        Audio.explode(); Game.shake = Math.max(Game.shake, 16);
+        for(const z of Game.zombies){
+          if(!z.alive) continue;
+          if(Math.hypot(z.x-mx, z.y-my) < 170) z.hit(70);
+        }
+        toast('MOLOTOV!');
+      }
       pk.dead=true;
     }
     if(pk.y>H+30) pk.dead=true;
@@ -995,6 +1177,8 @@ function update(dt){
   if((Math.floor(now()/100))%2===0) MP.broadcast(p);
   // score from distance
   Game.score += Math.floor(Game.speed*dt*0.05);
+  // === ZOMBIE WASTELAND wave logic ===
+  if(Game.modeName==='zombiewasteland') updateZombieWasteland(dt);
   // hud
   updateHud();
 }
@@ -1031,6 +1215,14 @@ function draw(){
   MP.drawGhosts(ctx);
   // player
   if(Game.player) Game.player.draw(ctx);
+  // === ZOMBIE WASTELAND: chainsaw aura ===
+  if(Game.modeName==='zombiewasteland' && Game.chainsawT > 0 && Game.player){
+    const pulse = (Math.sin(performance.now()*0.025)*0.2+0.5) * clamp(Game.chainsawT/5,0,1);
+    ctx.globalAlpha = pulse * 0.7;
+    ctx.strokeStyle = '#ff8800'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(Game.player.x, Game.player.y, 100, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   // bullets
   ctx.fillStyle='#fff5a0';
   for(const b of Game.bullets) ctx.fillRect(b.x-2,b.y-10,4,12);
@@ -1055,6 +1247,12 @@ function draw(){
       const x=(i*73 + Game.road*1.5)%W, y=(i*131 + Game.road*2)%H;
       ctx.fillRect(x,y,2,2);
     }
+  }
+  // === ZOMBIE WASTELAND: blood-red vignette overlay ===
+  if(Game.modeName==='zombiewasteland' && Game.mode==='play'){
+    const vg = ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.8);
+    vg.addColorStop(0,'rgba(120,0,0,0)'); vg.addColorStop(1,'rgba(120,0,0,0.28)');
+    ctx.fillStyle = vg; ctx.fillRect(0,0,W,H);
   }
   ctx.restore();
 }
@@ -1081,21 +1279,36 @@ function hudShow(on){
   hud.el.classList.toggle('hidden', !on);
   hud.pause.classList.toggle('hidden', !on);
   hud.specialBtn.classList.toggle('hidden', !on);
-  if(!on){ hud.bossEl.classList.add('hidden'); hud.combo.classList.add('hidden'); }
+  if(!on){
+    hud.bossEl.classList.add('hidden'); hud.combo.classList.add('hidden');
+    const wr = document.getElementById('waveHudRow');
+    if(wr) wr.classList.add('hidden');
+  }
 }
 function updateHud(){
   const p = Game.player;
   hud.hp.style.width = Math.max(0,(p.hp/p.maxHp)*100)+'%';
   hud.scrap.textContent = Game.scrap;
-  hud.special.textContent = specialName(p.special);
+  hud.special.textContent = Game.modeName==='zombiewasteland' ? (Game.chainsawT>0?'CHAINSAW '+Math.ceil(Game.chainsawT)+'s':'—') : specialName(p.special);
   hud.score.textContent = Game.score;
-  hud.sector.textContent = Game.sector;
+  hud.sector.textContent = Game.modeName==='zombiewasteland' ? '—' : Game.sector;
   hud.kill.textContent = Game.kills;
-  if(p.special===SPECIAL_NITRO){
+  // wave counter (zombie wasteland only)
+  const waveRow = document.getElementById('waveHudRow');
+  const waveEl  = document.getElementById('waveHud');
+  if(waveRow && waveEl){
+    if(Game.modeName==='zombiewasteland'){
+      waveRow.classList.remove('hidden');
+      waveEl.textContent = Game.wave;
+    } else {
+      waveRow.classList.add('hidden');
+    }
+  }
+  if(p.special===SPECIAL_NITRO && Game.modeName!=='zombiewasteland'){
     hud.specialBtn.textContent = nitroButtonLabel(p);
     hud.specialBtn.disabled = p.specialCd>0;
   } else {
-    hud.specialBtn.textContent = specialName(p.special);
+    hud.specialBtn.textContent = Game.modeName==='zombiewasteland' ? 'ZOMBIE' : specialName(p.special);
     hud.specialBtn.disabled = true;
   }
   // combo
@@ -1140,17 +1353,25 @@ function hideOverlays(){ showOverlay(); }
 function backToMenu(){
   Game.mode='menu'; hudShow(false); Audio.stopEngine();
   showOverlay('title');
+  updateZombieMenuBtn();
 }
 function gameOver(win){
   Game.mode='over'; hudShow(false); Audio.stopEngine();
   if(Game.score > SAVE.hi) SAVE.hi = Game.score;
   if(Game.sector > SAVE.bestSector) SAVE.bestSector = Game.sector;
   driver().scrap += Math.floor(Game.scrap);
+  // === ZOMBIE WASTELAND high scores ===
+  if(Game.modeName==='zombiewasteland'){
+    if(Game.score > SAVE.zombieHi) SAVE.zombieHi = Game.score;
+    if(Game.wave  > (SAVE.zombieBestWave||0)) SAVE.zombieBestWave = Game.wave;
+  }
   persist();
+  const isZombie = Game.modeName==='zombiewasteland';
   document.getElementById('gameoverBody').innerHTML =
-    'SCORE <b>'+Game.score+'</b><br>SECTOR <b>'+Game.sector+'</b>'+
+    'SCORE <b>'+Game.score+'</b><br>'+(isZombie?'WAVE <b>'+Game.wave+'</b>':'SECTOR <b>'+Game.sector+'</b>')+
     '<br>KILLS <b>'+Game.kills+'</b><br>SCRAP <b>+'+Game.scrap+'</b>'+
-    (win?'<br><b style="color:var(--good)">GAUNTLET CLEAR</b>':'');
+    (win?'<br><b style="color:var(--good)">GAUNTLET CLEAR</b>':'')+
+    (isZombie && Game.wave>=(SAVE.zombieBestWave||0)?'<br><b style="color:var(--blood)">NEW BEST WAVE!</b>':'');
   showOverlay('over');
 }
 
@@ -1159,6 +1380,15 @@ document.addEventListener('click', e=>{
   const act = a.dataset.act; Audio.ui();
   if(act==='play') startGame('rust');
   else if(act==='gauntlet') startGame('gauntlet');
+  // === ZOMBIE WASTELAND unlock check ===
+  else if(act==='zombie'){
+    if(!isZombieUnlocked()){
+      const cleared = Math.max(0, SAVE.gauntletProgress - 1);
+      toast('COMPLETE '+(ZOMBIE_UNLOCK_SECTORS-cleared)+' MORE GAUNTLET SECTORS TO UNLOCK');
+      return;
+    }
+    startGame('zombiewasteland');
+  }
   else if(act==='garage'){ showOverlay('garage'); renderGarage(); }
   else if(act==='stats'){ showOverlay('stats'); renderStats(); }
   else if(act==='mp'){ showOverlay('mp'); renderMP(); }
@@ -1262,7 +1492,11 @@ function renderStats(){
     'TOTAL DISTANCE <b>'+Math.floor(SAVE.totalDist)+'M</b><br>'+
     'BEST SECTOR <b>'+SAVE.bestSector+'</b><br>'+
     'GAUNTLET PROGRESS <b>'+(SAVE.gauntletProgress-1)+'/'+SECTORS.length+'</b><br>'+
-    'DRIVERS <b>'+SAVE.drivers.length+'</b>';
+    'DRIVERS <b>'+SAVE.drivers.length+'</b><br>'+
+    '— ZOMBIE WASTELAND —<br>'+
+    'BEST WAVE <b>'+(SAVE.zombieBestWave||0)+'</b><br>'+
+    'ZOMBIE HI-SCORE <b>'+(SAVE.zombieHi||0)+'</b><br>'+
+    'UNLOCKED <b>'+(isZombieUnlocked()?'YES':'NO — '+Math.max(0,SAVE.gauntletProgress-1)+'/'+ZOMBIE_UNLOCK_SECTORS+' SECTORS')+'</b>';
 }
 
 // ---------- MP UI ----------------------------------------------------
@@ -1304,6 +1538,7 @@ if('serviceWorker' in navigator && location.protocol!=='file:'){
 Background.init();
 showOverlay('title');
 document.getElementById('scan').classList.toggle('on', SAVE.settings.crt);
+updateZombieMenuBtn(); // render zombie wasteland button state on boot
 requestAnimationFrame(loop);
 
 // dev mode
