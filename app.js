@@ -1514,7 +1514,11 @@ if (window.visualViewport) {
 // AUDIO
 // ============================================================
 let audioCtx = null;
-const GUNSHOT_PITCH_JITTER_RANGE = 32;
+const GUNSHOT_PITCH_JITTER_WIDTH = 32;
+const GUNSHOT_CRACK_MIN_SAMPLES = 64;
+const GUNSHOT_CRACK_FILTER_BASE_FREQ = 2600;
+const GUNSHOT_CRACK_FILTER_FREQ_VARIANCE = 500;
+const GUNSHOT_CRACK_FILTER_Q = 0.7;
 const gunshotCrackBufferCache = new Map();
 function ensureAudio() {
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
@@ -1526,7 +1530,7 @@ function getGunshotCrackBuffer(length) {
   if (buf) return buf;
   buf = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
   const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  for (let sampleIndex = 0; sampleIndex < data.length; sampleIndex++) data[sampleIndex] = (Math.random() * 2 - 1) * (1 - sampleIndex / data.length);
   gunshotCrackBufferCache.set(length, buf);
   return buf;
 }
@@ -1566,7 +1570,7 @@ function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
   const outVol = vol * Settings.master * Settings.sfx;
   if (outVol <= 0.0001) return;
   const t = audioCtx.currentTime;
-  const pitchJitter = (Math.random() - 0.5) * GUNSHOT_PITCH_JITTER_RANGE;
+  const pitchJitter = (Math.random() - 0.5) * GUNSHOT_PITCH_JITTER_WIDTH;
 
   const out = audioCtx.createGain();
   out.gain.setValueAtTime(outVol, t);
@@ -1596,20 +1600,21 @@ function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
   snap.stop(t + dur * 0.35);
 
   const crackDur = Math.max(0.014, dur * 0.35);
-  const crackSamples = Math.max(1, Math.floor(audioCtx.sampleRate * crackDur));
+  const crackSamples = Math.max(GUNSHOT_CRACK_MIN_SAMPLES, Math.floor(audioCtx.sampleRate * crackDur));
   const crackBuf = getGunshotCrackBuffer(crackSamples);
-  if (!crackBuf) return;
-  const crack = audioCtx.createBufferSource();
-  crack.buffer = crackBuf;
-  const crackFilter = audioCtx.createBiquadFilter();
-  crackFilter.type = 'bandpass';
-  crackFilter.frequency.setValueAtTime(2600 + Math.random() * 500, t);
-  crackFilter.Q.value = 0.7;
-  const crackGain = audioCtx.createGain();
-  crackGain.gain.setValueAtTime(crackVol, t);
-  crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
-  crack.connect(crackFilter).connect(crackGain).connect(out);
-  crack.start(t);
+  if (crackBuf) {
+    const crack = audioCtx.createBufferSource();
+    crack.buffer = crackBuf;
+    const crackFilter = audioCtx.createBiquadFilter();
+    crackFilter.type = 'bandpass';
+    crackFilter.frequency.setValueAtTime(GUNSHOT_CRACK_FILTER_BASE_FREQ + Math.random() * GUNSHOT_CRACK_FILTER_FREQ_VARIANCE, t);
+    crackFilter.Q.value = GUNSHOT_CRACK_FILTER_Q;
+    const crackGain = audioCtx.createGain();
+    crackGain.gain.setValueAtTime(crackVol, t);
+    crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
+    crack.connect(crackFilter).connect(crackGain).connect(out);
+    crack.start(t);
+  }
 }
 const SFX = {
   shoot: () => gunShot(720, 0.09, 0.085, 0.032),
