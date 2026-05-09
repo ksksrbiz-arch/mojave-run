@@ -6289,7 +6289,7 @@ const UI = {
       }
       if (zombieUnlocked) notices.push('☣ ZOMBIE HORDE UNLOCKED');
       if (notices.length) {
-        skLine.textContent = notices.join(' · ');
+        skLine.textContent = notices.join(' | ');
         skLine.style.display = '';
       } else {
         skLine.style.display = 'none';
