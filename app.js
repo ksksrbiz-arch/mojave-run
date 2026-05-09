@@ -5142,6 +5142,7 @@ const SCALE_THRESHOLD_RECOVER_MS = 13;
 const SCALE_STEP_DOWN_SEVERE = 0.12;
 const SCALE_STEP_DOWN = 0.06;
 const SCALE_STEP_UP = 0.04;
+const RENDER_SCALE_CHANGE_THRESHOLD = 0.001;
 const DEBUG_HUD = (() => {
   try {
     const p = new URLSearchParams(window.location.search);
@@ -5261,14 +5262,14 @@ function frame(now) {
   if (now - PerfMon.lastScaleAdjustAt > SCALE_ADJUST_INTERVAL_MS) {
     PerfMon.lastScaleAdjustAt = now;
     const prev = renderScale;
-    if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS && renderScale > MIN_RENDER_SCALE) {
+    if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS) {
       renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN_SEVERE);
-    } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS && renderScale > MIN_RENDER_SCALE) {
+    } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS) {
       renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN);
     } else if (PerfMon.ewmaMs < SCALE_THRESHOLD_RECOVER_MS && renderScale < 1) {
       renderScale = Math.min(1, renderScale + SCALE_STEP_UP);
     }
-    if (Math.abs(renderScale - prev) > 0.001) resize();
+    if (Math.abs(renderScale - prev) > RENDER_SCALE_CHANGE_THRESHOLD) resize();
   }
   requestAnimationFrame(frame);
 }
