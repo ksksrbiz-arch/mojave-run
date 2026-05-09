@@ -1514,9 +1514,25 @@ if (window.visualViewport) {
 // AUDIO
 // ============================================================
 let audioCtx = null;
+const GUNSHOT_PITCH_JITTER_WIDTH = 32;
+const GUNSHOT_CRACK_MIN_SAMPLES = 64;
+const GUNSHOT_CRACK_FILTER_BASE_FREQ = 2600;
+const GUNSHOT_CRACK_FILTER_FREQ_VARIANCE = 500;
+const GUNSHOT_CRACK_FILTER_Q = 0.7;
+const gunshotCrackBufferCache = new Map();
 function ensureAudio() {
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+}
+function getGunshotCrackBuffer(length) {
+  if (!audioCtx || length <= 0) return null;
+  let buf = gunshotCrackBufferCache.get(length);
+  if (buf) return buf;
+  buf = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let sampleIndex = 0; sampleIndex < data.length; sampleIndex++) data[sampleIndex] = (Math.random() * 2 - 1) * (1 - sampleIndex / data.length);
+  gunshotCrackBufferCache.set(length, buf);
+  return buf;
 }
 function blip(freq, dur, type='square', vol=0.08, slide=0) {
   if (!audioCtx) return;
@@ -1549,9 +1565,60 @@ function noise(dur, vol=0.12, filterFreq=800) {
   src.connect(f).connect(g).connect(audioCtx.destination);
   src.start(t);
 }
+function gunShot(baseFreq=640, dur=0.085, vol=0.08, crackVol=0.028) {
+  if (!audioCtx) return;
+  const outVol = vol * Settings.master * Settings.sfx;
+  if (outVol <= 0.0001) return;
+  const t = audioCtx.currentTime;
+  const pitchJitter = (Math.random() - 0.5) * GUNSHOT_PITCH_JITTER_WIDTH;
+
+  const out = audioCtx.createGain();
+  out.gain.setValueAtTime(outVol, t);
+  out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  out.connect(audioCtx.destination);
+
+  const body = audioCtx.createOscillator();
+  const bodyGain = audioCtx.createGain();
+  body.type = 'triangle';
+  body.frequency.setValueAtTime(baseFreq + pitchJitter, t);
+  body.frequency.exponentialRampToValueAtTime(Math.max(70, baseFreq * 0.58), t + dur);
+  bodyGain.gain.setValueAtTime(0.95, t);
+  bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  body.connect(bodyGain).connect(out);
+  body.start(t);
+  body.stop(t + dur);
+
+  const snap = audioCtx.createOscillator();
+  const snapGain = audioCtx.createGain();
+  snap.type = 'square';
+  snap.frequency.setValueAtTime((baseFreq * 2.1) + pitchJitter * 0.6, t);
+  snap.frequency.exponentialRampToValueAtTime(Math.max(120, baseFreq * 1.15), t + dur * 0.35);
+  snapGain.gain.setValueAtTime(0.2, t);
+  snapGain.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.28);
+  snap.connect(snapGain).connect(out);
+  snap.start(t);
+  snap.stop(t + dur * 0.35);
+
+  const crackDur = Math.max(0.014, dur * 0.35);
+  const crackSamples = Math.max(GUNSHOT_CRACK_MIN_SAMPLES, Math.floor(audioCtx.sampleRate * crackDur));
+  const crackBuf = getGunshotCrackBuffer(crackSamples);
+  if (crackBuf) {
+    const crack = audioCtx.createBufferSource();
+    crack.buffer = crackBuf;
+    const crackFilter = audioCtx.createBiquadFilter();
+    crackFilter.type = 'bandpass';
+    crackFilter.frequency.setValueAtTime(GUNSHOT_CRACK_FILTER_BASE_FREQ + Math.random() * GUNSHOT_CRACK_FILTER_FREQ_VARIANCE, t);
+    crackFilter.Q.value = GUNSHOT_CRACK_FILTER_Q;
+    const crackGain = audioCtx.createGain();
+    crackGain.gain.setValueAtTime(crackVol, t);
+    crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
+    crack.connect(crackFilter).connect(crackGain).connect(out);
+    crack.start(t);
+  }
+}
 const SFX = {
-  shoot: () => blip(880, 0.06, 'square', 0.05, -300),
-  bigShot: () => { blip(180, 0.12, 'sawtooth', 0.1, -80); noise(0.08, 0.06, 1500); },
+  shoot: () => gunShot(720, 0.09, 0.085, 0.032),
+  bigShot: () => { gunShot(260, 0.17, 0.13, 0.05); noise(0.12, 0.07, 1200); },
   hit:   () => { noise(0.18, 0.18, 1200); blip(120, 0.18, 'sawtooth', 0.06, -60); },
   pickup:() => { blip(660, 0.06, 'triangle', 0.08); setTimeout(()=>blip(990,0.08,'triangle',0.08),50); },
   scrap: () => { blip(880, 0.04, 'triangle', 0.06); setTimeout(()=>blip(1320,0.06,'triangle',0.06),40); },
