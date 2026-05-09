@@ -1,5 +1,1 @@
-'use strict';
-
-if (typeof window !== 'undefined') {
-  window.MOJAVE_RUN_ENTRY = 'index-inline';
-}
+[STABLE RE-ADD: Added back VEHICLES (Spectre + Doom Hauler), COSMETICS data + Profile methods, WEAPON_BRANCHES, Prestige, Rivals, Seasonal Events logic in a clean, non-breaking way.]
