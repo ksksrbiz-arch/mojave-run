@@ -1844,6 +1844,20 @@ const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350,
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
+// Obstacle kinds that represent innocents (must be missed). Kids and big-wheel
+// riders share the civilian penalty/collision behavior — they're just
+// pedestrians/toy cars rather than full civilian vehicles.
+const INNOCENT_OBSTACLE_KINDS = { civilian: true, kid: true, bigwheel: true };
+function isInnocentObstacle(o) { return !!(o && INNOCENT_OBSTACLE_KINDS[o.kind]); }
+// Campaign location index at which child pedestrians and Big Wheel toy cars
+// start appearing. Index 6 = Amarillo (TX) — i.e. once the campaign reaches
+// the inhabited heartland, you start seeing kids on the road.
+const LATE_CAMPAIGN_LOC_IDX = 6;
+function currentCampaignLocIdx() {
+  if (Game.mode !== 'campaign' || !Game.campaignLevelId) return -1;
+  const ce = CAMPAIGN_LEVEL_MAP[Game.campaignLevelId];
+  return ce ? ce.locIdx : -1;
+}
 // Zombie horde burst spawn distance thresholds — horde grows denser past these
 const ZOMBIE_BURST_DIST_1 = 4000;  // first burst tier: occasional double-spawn
 const ZOMBIE_BURST_DIST_2 = 10000; // second burst tier: triple-spawn waves
@@ -1882,7 +1896,7 @@ function applyKill(x, y, baseScore) {
   addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
 }
 
-function applyCivilianPenalty(x, y) {
+function applyCivilianPenalty(x, y, kind) {
   const penalty = CIVILIAN_PENALTY;
   Game.score = Math.max(0, Game.score - penalty);
   // break combo
@@ -1890,7 +1904,10 @@ function applyCivilianPenalty(x, y) {
   Game.comboT = 0;
   SFX.hit();
   Game.flash = Math.max(Game.flash, 0.6);
-  addPopup('⚠ CIVILIAN! -' + penalty, x, y - 22, '#4aa8e8', 16);
+  const label = (kind === 'kid' || kind === 'bigwheel')
+    ? '⚠ KID! -'
+    : '⚠ CIVILIAN! -';
+  addPopup(label + penalty, x, y - 22, '#4aa8e8', 16);
   shockwave(x, y, 'rgba(74,168,232,0.5)', 80);
 }
 
@@ -2596,6 +2613,29 @@ function startDynamicEvent(id) {
       });
     }
     announceEvent('⚠ CIVILIANS ON ROAD', '#4aa8e8');
+  } else if (id === 'kids_crossing') {
+    Game.activeEvent = { id, name:'KIDS CROSSING', t: 9, max: 9 };
+    const { x0, x1 } = roadBounds();
+    const margin = 24;
+    const kidColors = ['#ffe07a', '#ff8a3d', '#7af07a', '#ff5a8a', '#8ec5ff'];
+    const wheelColors = ['#ff5050', '#ffd000', '#3aa0ff', '#7af07a'];
+    for (let i = 0; i < 5; i++) {
+      const isWheel = i % 2 === 1;
+      const startX = rand(x0 + margin, x1 - margin);
+      const palette = isWheel ? wheelColors : kidColors;
+      Game.obstacles.push({
+        kind: isWheel ? 'bigwheel' : 'kid',
+        x: startX, y: -60 - i * 60,
+        w: isWheel ? 28 : 16, h: isWheel ? 24 : 22,
+        vy: isWheel ? rand(0, 20) : rand(-10, 10),
+        color: palette[Math.floor(Math.random() * palette.length)],
+        baseX: startX,
+        wanderAmp: isWheel ? rand(8, 18) : rand(10, 24),
+        wanderSpeed: isWheel ? rand(0.8, 1.8) : rand(1.0, 2.2),
+        wanderT: rand(0, Math.PI * 2),
+      });
+    }
+    announceEvent('⚠ KIDS CROSSING', '#ffe07a');
   }
 }
 
@@ -2606,6 +2646,12 @@ function maybeTriggerDynamicEvent() {
   if (dist > 1500) pool.push('drone_strike');
   if (dist > 4000) pool.push('tank_column');
   if (Game.mode === 'classic' && dist > 1000) pool.push('civilian_convoy');
+  // Late-campaign locations get civilian + kid hazard events too
+  const _campLocIdx = currentCampaignLocIdx();
+  if (_campLocIdx >= LATE_CAMPAIGN_LOC_IDX) {
+    pool.push('civilian_convoy');
+    pool.push('kids_crossing');
+  }
   const pick = pool[Math.floor(Math.random() * pool.length)];
   startDynamicEvent(pick);
 }
@@ -2697,12 +2743,23 @@ function spawnEnemy(forceKind, forceElite) {
   // pick spawn type — probabilities shift with distance phase
   let pick = forceKind || null;
   if (!pick) {
-    // Civilians only appear in classic/endless mode after a short distance
-    const isCivMode = Game.mode === 'classic';
-    // Civilian spawn chance scales gradually from 2% at 1km to 10% cap at ~6km
-    const civChance = isCivMode ? Math.min(0.10, 0.02 + dist / 60000) : 0;
-    if (isCivMode && dist > 1000 && r < civChance) {
+    // Innocents: civilian cars appear in classic mode and in any campaign level
+    // after a short distance. "Later in the campaign" (Amarillo onward) also
+    // adds children on foot and on Big Wheel toy cars — they're slower and
+    // smaller and must be missed at all costs.
+    const campLocIdx = currentCampaignLocIdx();
+    const isClassic = Game.mode === 'classic';
+    const isCampaign = Game.mode === 'campaign';
+    const allowCivs = isClassic || isCampaign;
+    // base civilian chance scales gradually from 2% at 1km to 10% cap at ~6km
+    let civChance = allowCivs ? Math.min(0.10, 0.02 + dist / 60000) : 0;
+    // late-campaign: children + Big Wheels also in the mix
+    const allowKids = isCampaign && campLocIdx >= LATE_CAMPAIGN_LOC_IDX;
+    const kidChance = allowKids ? Math.min(0.07, 0.02 + (campLocIdx - LATE_CAMPAIGN_LOC_IDX) * 0.01) : 0;
+    if (allowCivs && dist > 800 && r < civChance) {
       pick = 'civilian';
+    } else if (allowKids && dist > 600 && r < civChance + kidChance) {
+      pick = Math.random() < 0.55 ? 'kid' : 'bigwheel';
     } else if (unlockTank   && r < 0.07) pick = 'tank';
     else if (unlockMortar   && r < 0.14) pick = 'mortar';
     else if (unlockDrone    && r < 0.26) pick = 'drone';
@@ -2779,6 +2836,34 @@ function spawnEnemy(forceKind, forceElite) {
       y: -60, w: 36, h: 54,
       vy: rand(30, 70),   // their own slower drift speed on top of road scroll
       color: colors[Math.floor(Math.random() * colors.length)],
+    });
+  } else if (pick === 'kid') {
+    // small child crossing the road — slow, wanders side-to-side. Do NOT hit!
+    const colors = ['#ffe07a', '#ff8a3d', '#7af07a', '#ff5a8a', '#8ec5ff'];
+    const startX = rand(x0 + margin, x1 - margin);
+    Game.obstacles.push({
+      kind: 'kid',
+      x: startX, y: -50, w: 16, h: 22,
+      vy: rand(-10, 10),               // nearly road-relative; effectively stationary in lane
+      color: colors[Math.floor(Math.random() * colors.length)],
+      baseX: startX,
+      wanderAmp: rand(8, 22),
+      wanderSpeed: rand(1.0, 2.2),
+      wanderT: rand(0, Math.PI * 2),
+    });
+  } else if (pick === 'bigwheel') {
+    // child on a Big Wheel toy car — wider than a kid, brightly colored, slow. Do NOT hit!
+    const colors = ['#ff5050', '#ffd000', '#3aa0ff', '#7af07a', '#ff8a3d'];
+    const startX = rand(x0 + margin, x1 - margin);
+    Game.obstacles.push({
+      kind: 'bigwheel',
+      x: startX, y: -50, w: 28, h: 24,
+      vy: rand(0, 25),
+      color: colors[Math.floor(Math.random() * colors.length)],
+      baseX: startX,
+      wanderAmp: rand(6, 16),
+      wanderSpeed: rand(0.8, 1.8),
+      wanderT: rand(0, Math.PI * 2),
     });
   } else if (pick === 'wreck') {
     Game.obstacles.push({
@@ -3405,21 +3490,28 @@ function update(dt) {
   // ---- obstacles ----
   for (let i = Game.obstacles.length - 1; i >= 0; i--) {
     const o = Game.obstacles[i];
-    // civilians drift at their own speed, others scroll with road
-    if (o.kind === 'civilian') {
+    // civilians/innocents drift at their own speed, others scroll with road
+    if (isInnocentObstacle(o)) {
       o.y += (Game.speed + (o.vy || 0)) * dt;
+      // kids on foot wander a little side-to-side
+      if ((o.kind === 'kid' || o.kind === 'bigwheel') && o.wanderAmp) {
+        o.wanderT = (o.wanderT || 0) + dt;
+        o.x = clamp((o.baseX || o.x) + Math.sin(o.wanderT * (o.wanderSpeed || 1.5)) * o.wanderAmp,
+                    o.w/2 + 4, W - o.w/2 - 4);
+      }
     } else {
       o.y += Game.speed * dt;
     }
     if (o.y > H + 80) { Game.obstacles.splice(i,1); continue; }
 
-    if (o.kind === 'civilian') {
-      // bullets hitting a civilian = penalty
+    if (isInnocentObstacle(o)) {
+      const kind = o.kind;
+      // bullets hitting an innocent = penalty
       for (let j = Game.bullets.length - 1; j >= 0; j--) {
         const b = Game.bullets[j];
         if (aabb(o, b)) {
           Game.bullets.splice(j,1);
-          applyCivilianPenalty(o.x, o.y);
+          applyCivilianPenalty(o.x, o.y, kind);
           emit(o.x, o.y, 10, { color: o.color || '#4aa8e8', speed:180, life:0.5, size:3 });
           Game.obstacles.splice(i,1);
           break;
@@ -3428,7 +3520,7 @@ function update(dt) {
       if (!Game.obstacles[i]) continue;
       // player collision = penalty + slight damage
       if (aabb(o, Game.player)) {
-        applyCivilianPenalty(o.x, o.y);
+        applyCivilianPenalty(o.x, o.y, kind);
         damagePlayer(20);
         emit(o.x, o.y, 16, { color: o.color || '#4aa8e8', speed:220, life:0.5, size:3 });
         Game.obstacles.splice(i,1);
@@ -3922,8 +4014,8 @@ function splashDamage(x, y, r, dmg) {
   for (let i = Game.obstacles.length - 1; i >= 0; i--) {
     const o = Game.obstacles[i];
     if (!o) continue;
-    if (o.kind === 'civilian' && Math.hypot(o.x - x, o.y - y) < r) {
-      applyCivilianPenalty(o.x, o.y);
+    if (isInnocentObstacle(o) && Math.hypot(o.x - x, o.y - y) < r) {
+      applyCivilianPenalty(o.x, o.y, o.kind);
       emit(o.x, o.y, 10, { color: o.color || '#4aa8e8', speed:180, life:0.5, size:3 });
       Game.obstacles.splice(i,1);
     } else if (o.kind === 'barrel' && Math.hypot(o.x - x, o.y - y) < r) {
@@ -4315,6 +4407,14 @@ function drawObstacle(o) {
     // rust streak
     ctx.fillStyle = 'rgba(180,80,40,0.3)';
     ctx.fillRect(-o.w/2 + 2, -o.h/2 + 14, 2, 18);
+    // bright hazard banding (visual clarity) — yellow/black diagonal stripes
+    // along the bumper so the silhouette reads instantly against the road
+    ctx.fillStyle = '#ffd000';
+    ctx.fillRect(-o.w/2,  o.h/2 - 6, o.w, 4);
+    ctx.fillStyle = '#1a0f08';
+    for (let sx = -o.w/2; sx < o.w/2; sx += 8) {
+      ctx.fillRect(sx + 2, o.h/2 - 6, 4, 4);
+    }
     ctx.restore();
   } else if (o.kind === 'barrel') {
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
@@ -4327,8 +4427,11 @@ function drawObstacle(o) {
     ctx.fillStyle = '#1a0f08';
     ctx.fillRect(o.x - o.w/2, o.y - 4, o.w, 2);
     ctx.fillRect(o.x - o.w/2, o.y + 4, o.w, 2);
-    ctx.fillStyle = '#ffd86b';
-    ctx.font = 'bold 10px monospace';
+    // bright yellow hazard band around middle for visibility against road
+    ctx.fillStyle = '#ffd000';
+    ctx.fillRect(o.x - o.w/2, o.y - 2, o.w, 6);
+    ctx.fillStyle = '#1a0f08';
+    ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', o.x, o.y);
@@ -4370,7 +4473,120 @@ function drawObstacle(o) {
     ctx.lineWidth = 2;
     ctx.strokeRect(-o.w/2 - 3, -o.h/2 - 3, o.w + 6, o.h + 6);
     ctx.restore();
+  } else if (o.kind === 'kid') {
+    // Small child crossing on foot — bright top, tiny legs, pulsing yellow halo.
+    const col = o.color || '#ffe07a';
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(2, o.h/2 - 2, o.w/2, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // pulsing warning halo (high-contrast — kids must be missed)
+    const pulse = 0.5 + 0.5 * Math.sin(Game.t * 6);
+    ctx.strokeStyle = `rgba(255,255,80,${0.55 + 0.4 * pulse})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-o.w/2 - 3, -o.h/2 - 3, o.w + 6, o.h + 6);
+    // legs
+    ctx.fillStyle = '#3a2a18';
+    ctx.fillRect(-4, 2, 3, o.h/2 - 2);
+    ctx.fillRect( 1, 2, 3, o.h/2 - 2);
+    // body / shirt
+    ctx.fillStyle = col;
+    ctx.fillRect(-o.w/2 + 1, -o.h/2 + 6, o.w - 2, o.h/2);
+    // shirt highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(-o.w/2 + 2, -o.h/2 + 6, o.w - 4, 3);
+    // head
+    ctx.fillStyle = '#f0c08a';
+    ctx.beginPath();
+    ctx.arc(0, -o.h/2 + 4, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    // hair cap (matches shirt for visibility cluster)
+    ctx.fillStyle = '#3a2a18';
+    ctx.beginPath();
+    ctx.arc(0, -o.h/2 + 2, 4.5, Math.PI, 0);
+    ctx.fill();
+    // arrow above (pointing up — they're walking, not racing toward player)
+    ctx.fillStyle = `rgba(255,255,80,${0.7 + 0.3 * pulse})`;
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('KID', 0, -o.h/2 - 5);
+    ctx.restore();
+  } else if (o.kind === 'bigwheel') {
+    // Child on a Big Wheel toy car — low, wide, bright plastic colors.
+    const col = o.color || '#ff5050';
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h);
+    // pulsing warning halo
+    const pulse = 0.5 + 0.5 * Math.sin(Game.t * 6);
+    ctx.strokeStyle = `rgba(255,255,80,${0.55 + 0.4 * pulse})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-o.w/2 - 3, -o.h/2 - 3, o.w + 6, o.h + 6);
+    // chassis (bright plastic)
+    ctx.fillStyle = col;
+    ctx.fillRect(-o.w/2, -o.h/2 + 4, o.w, o.h - 8);
+    // chassis highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(-o.w/2 + 2, -o.h/2 + 4, o.w - 4, 3);
+    // big front wheel
+    ctx.fillStyle = '#1a0f08';
+    ctx.beginPath();
+    ctx.arc(0, o.h/2 - 3, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5a4030';
+    ctx.beginPath();
+    ctx.arc(0, o.h/2 - 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+    // small rear wheels
+    ctx.fillStyle = '#1a0f08';
+    ctx.beginPath();
+    ctx.arc(-o.w/2 + 2, -o.h/2 + 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc( o.w/2 - 2, -o.h/2 + 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // child rider (head) sitting on top
+    ctx.fillStyle = '#f0c08a';
+    ctx.beginPath();
+    ctx.arc(0, -1, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    // helmet
+    ctx.fillStyle = '#ffd000';
+    ctx.beginPath();
+    ctx.arc(0, -2, 3.8, Math.PI, 0);
+    ctx.fill();
+    // label
+    ctx.fillStyle = `rgba(255,255,80,${0.7 + 0.3 * pulse})`;
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('KID', 0, -o.h/2 - 5);
+    ctx.restore();
   }
+}
+
+function drawEnemyThreatHalos() {
+  if (!Game.enemies.length) return;
+  ctx.save();
+  for (const e of Game.enemies) {
+    if (e.kind === 'zombie' || e.kind === 'drone') continue; // these have their own clear silhouettes
+    const r = Math.max(e.w, e.h) * 0.65;
+    const g = ctx.createRadialGradient(e.x, e.y + e.h * 0.25, r * 0.2, e.x, e.y + e.h * 0.25, r);
+    g.addColorStop(0, 'rgba(255,40,40,0.45)');
+    g.addColorStop(0.55, 'rgba(255,40,40,0.18)');
+    g.addColorStop(1,   'rgba(255,40,40,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(e.x, e.y + e.h * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawEnemy(e) {
@@ -5379,6 +5595,11 @@ function render() {
     drawDustDevils();
 
     for (const o of Game.obstacles) drawObstacle(o);
+    // Threat indicator: a soft red halo under every enemy makes them visually
+    // distinct from civilians/innocents (which have a yellow warning halo)
+    // and from inert wreck/barrel obstacles. Drawn before the enemy sprite so
+    // it sits as a ground-level glow.
+    drawEnemyThreatHalos();
     for (const e of Game.enemies) drawEnemy(e);
     for (const pk of Game.pickups) drawPickup(pk);
     if (Game.boss) drawBoss();
