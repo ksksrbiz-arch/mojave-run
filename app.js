@@ -1271,7 +1271,10 @@ const SALVAGE_MAGNET_BONUS = 40;
 const BOSS_RUSH_REWARD_BASE = 1200;
 const BOSS_RUSH_REWARD_PER_STAGE = 250;
 const BASE_RAM_DAMAGE = 10;
+const PULSE_DAMAGE = { normal: 1.5, elite: 2 };
 const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250 };
+const ELITE_SCORE_MULTIPLIER = 1.8;
+const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -1364,7 +1367,8 @@ function updatePowerups(dt) {
 
 // Magnet: pull pickups toward player when active
 function applyMagnet(dt) {
-  if (!isPowerupActive('magnet') && !(Game.branchState && Game.branchState.pickupRadius > 0)) return;
+  const hasMagnetEffect = isPowerupActive('magnet') || !!(Game.branchState && Game.branchState.pickupRadius > 0);
+  if (!hasMagnetEffect) return;
   const p = Game.player;
   const bonus = (Game.branchState && Game.branchState.pickupRadius) || 0;
   const range = 240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0);
@@ -1393,11 +1397,11 @@ function firePulseBurst() {
   for (let i = Game.enemies.length - 1; i >= 0; i--) {
     const e = Game.enemies[i];
     if (Math.hypot(e.x - px, e.y - py) < 140) {
-      const pulseDmg = e.elite ? 2 : 1.5;
+      const pulseDmg = e.elite ? PULSE_DAMAGE.elite : PULSE_DAMAGE.normal;
       e.hp -= pulseDmg;
       if (Settings.damageNumbers) addPopup('-' + pulseDmg, e.x, e.y - 10, '#8ec5ff', 12);
       if (e.hp <= 0) {
-        applyKill(e.x, e.y, e.kind === 'mortar' ? 250 : e.kind === 'bike' ? 200 : 150);
+        applyKill(e.x, e.y, e.kind === 'mortar' ? ENEMY_SCORE.mortar : e.kind === 'bike' ? ENEMY_SCORE.bike : ENEMY_SCORE.buggy);
         emit(e.x, e.y, 18, { color:'#8ec5ff', speed:300, life:0.55, size:3 });
         Game.enemies.splice(i, 1);
       }
@@ -2712,7 +2716,7 @@ function update(dt) {
           SFX.explode();
           const isBike = e.kind === 'bike';
           const isMortar = e.kind === 'mortar';
-          const baseScore = (isBike ? ENEMY_SCORE.bike : isMortar ? ENEMY_SCORE.mortar : ENEMY_SCORE.buggy) * (e.elite ? 1.8 : 1);
+          const baseScore = (isBike ? ENEMY_SCORE.bike : isMortar ? ENEMY_SCORE.mortar : ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
           emit(e.x, e.y, isMortar ? 36 : 28, { color:'#ff6a2b', speed:360, life:0.8, size:4 });
           emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
           shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', isMortar ? 110 : 70);
@@ -2735,7 +2739,7 @@ function update(dt) {
     if (!Game.enemies[i]) continue;
 
     if (aabb(e, Game.player)) {
-      const ramDmg = Game.contactDamageMul > 1 ? BASE_RAM_DAMAGE * (Game.contactDamageMul - 1) : 0;
+      const ramDmg = BASE_RAM_DAMAGE * Game.contactDamageMul;
       if (ramDmg > 0) e.hp -= ramDmg;
       // shield blocks contact damage but breaks the enemy
       if (isPowerupActive('shield')) {
@@ -2869,7 +2873,7 @@ function update(dt) {
   if (!Game.boss && Game.mode !== 'bossrush') {
     Game.spawnTimer -= dt;
     if (Game.spawnTimer <= 0) {
-      const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? 0.72 : 1;
+      const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? AMBUSH_SPAWN_MULTIPLIER : 1;
       const baseInterval = Game.mode === 'timeattack' ? 0.35 :
         clamp(1.4 - (Game.levelData ? Game.levelData.diff : 1) * 0.18, 0.45, 1.4);
       // also factor score-based difficulty in classic
