@@ -224,18 +224,22 @@ const COSMETICS = {
     { id:'paint-blacktop', name:'BLACKTOP MATTE', desc:'Charcoal bodywork for night road hunters.', cost:600, color:{ body:'#2d3032', hood:'#181b1f', cab:'#0a0c10', windshield:'#86d6ff', glow:'#90f0ff' } },
     { id:'paint-rift', name:'MIDNIGHT RIFT', desc:'Neon violet panels unlocked by Inferno badge.', unlock:{ kind:'achievement', id:'inferno' }, color:{ body:'#37205f', hood:'#251047', cab:'#120820', windshield:'#c99cff', glow:'#f070ff' } },
     { id:'paint-warlord', name:'WARLORD RED', desc:'Boss-slayer crimson with brutal amber lamps.', unlock:{ kind:'achievement', id:'boss_slayer' }, color:{ body:'#7f1d1d', hood:'#4f1010', cab:'#1a0707', windshield:'#ffb38a', glow:'#ff8a3d' } },
+    { id:'paint-goldrush', name:'GOLD RUSH', desc:'Prizefighter gold for mutator conquerors.', unlock:{ kind:'achievement', id:'golden_sector' }, color:{ body:'#8f6e14', hood:'#6d520e', cab:'#241907', windshield:'#ffe9b0', glow:'#ffd24d' } },
+    { id:'paint-stormchaser', name:'STORMCHASER BLUE', desc:'Cold electric plating for frontier survivors.', unlock:{ kind:'achievement', id:'stormfront_clear' }, color:{ body:'#1c4f78', hood:'#123452', cab:'#071623', windshield:'#bce7ff', glow:'#79c8ff' } },
   ],
   trail: [
     { id:'trail-dust', name:'DUST PLUME', desc:'Classic brown exhaust smoke.', cost:0, colors:['rgba(120,90,60,0.5)'], flameColors:[[255,220,80],[255,115,25]], size:5, speed:50, life:0.45 },
     { id:'trail-neon', name:'NEON WAKE', desc:'Blue reactor vapor that pops in night runs.', cost:350, colors:['rgba(80,220,255,0.62)','rgba(160,120,255,0.5)'], flameColors:[[80,220,255],[160,120,255]], size:4, speed:70, life:0.5 },
     { id:'trail-sparks', name:'SPARK SHOWER', desc:'Hot chrome fragments from overloaded pipes.', cost:650, colors:['rgba(255,210,80,0.85)','rgba(255,120,40,0.7)'], flameColors:[[255,210,80],[255,120,40]], size:3, speed:95, life:0.38 },
     { id:'trail-ghost', name:'GHOST LINE', desc:'Spectral exhaust for proven pathfinders.', unlock:{ kind:'achievement', id:'pathfinder' }, colors:['rgba(170,240,255,0.45)','rgba(210,255,240,0.35)'], flameColors:[[170,240,255],[210,255,240]], size:6, speed:55, life:0.62 },
+    { id:'trail-crown', name:'CROWN SPARK', desc:'Golden shrapnel wake for scrap barons.', unlock:{ kind:'achievement', id:'scrap_baron' }, colors:['rgba(255,220,90,0.72)','rgba(255,160,40,0.58)'], flameColors:[[255,220,90],[255,160,40]], size:4, speed:82, life:0.44 },
   ],
   horn: [
     { id:'horn-classic', name:'RUST HORN', desc:'The original busted relay chirp.', cost:0, sfx:'click' },
     { id:'horn-warcry', name:'WAR CRY', desc:'A harsher launch bark for arena show-offs.', cost:300, sfx:'combo' },
     { id:'horn-raider', name:'RAIDER SIREN', desc:'Boss Rush clears unlock this intimidation blast.', unlock:{ kind:'achievement', id:'boss_slayer' }, sfx:'boss' },
     { id:'horn-ghost', name:'PIRATE RADIO', desc:'Hidden station static for campaign pathfinders.', unlock:{ kind:'achievement', id:'pathfinder' }, sfx:'pickup' },
+    { id:'horn-thunder', name:'THUNDER CALL', desc:'Storm-season crackle for lightning runners.', unlock:{ kind:'achievement', id:'thunder_road' }, sfx:'lightning' },
   ],
 };
 const COSMETIC_CATEGORIES = ['paint', 'trail', 'horn'];
@@ -4172,6 +4176,7 @@ const Game = {
   // run stats
   score: 0,
   scrapEarned: 0,
+  scrapBonusEarned: 0,
   distance: 0,
   kills: 0,
   civiliansHit: 0,
@@ -4272,6 +4277,8 @@ const Game = {
   // badges earned at the end of this run (populated by endRun)
   _pendingBadges: [],
   _pendingCosmetics: [],
+  latestReplayDate: null,
+  replayReturnScreen: null,
   cosmetics: defaultCosmetics(),
   // spinout: set when the player hits a hitchhiker; car loses control temporarily
   spinout: null,   // { t, dur, rot, rotV, kickDir } | null
@@ -4466,9 +4473,11 @@ function startRun(mode, level) {
   Game.t = 0;
   Game.score = 0;
   Game.scrapEarned = 0;
+  Game.scrapBonusEarned = 0;
   Game.distance = 0;
   Game.kills = 0;
   Game.civiliansHit = 0;
+  Game.latestReplayDate = null;
   const speedModeMul = mode === 'winding' ? 1.35 : 1;
   const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1) * speedModeMul;
   Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
@@ -4715,13 +4724,19 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   pauseBtn.classList.remove('show');
   fsBtn.classList.remove('hidden');
   // award scrap (10% of score)
+  const activeProfile = Profile.active();
+  const previousRuns = activeProfile ? (activeProfile.runs || 0) : 0;
   const baseScrap = Math.floor((Game.score / 10) * Game.scrapMul);
   let bonus = 0;
   if (reason === 'victory' && Game.levelData) bonus = Game.levelData.reward;
   if (reason === 'victory' && Game.mode === 'bossrush') {
     bonus += BOSS_RUSH_REWARD_BASE + Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) * BOSS_RUSH_REWARD_PER_STAGE;
   }
-  Game.scrapEarned = baseScrap + bonus;
+  let bonusScrap = 0;
+  if (previousRuns < EARLY_RUN_SCRAP_BONUS.length) bonusScrap += EARLY_RUN_SCRAP_BONUS[previousRuns];
+  if (Game.mode === 'daily') bonusScrap += reason === 'victory' ? DAILY_VICTORY_SCRAP_BONUS : DAILY_SCRAP_BONUS;
+  Game.scrapBonusEarned = bonusScrap;
+  Game.scrapEarned = baseScrap + bonus + bonusScrap;
   // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
   if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
   Profile.earn(Game.scrapEarned);
@@ -9504,6 +9519,55 @@ function drawPopups() {
 // Public URL appended to Daily Challenge share text. Single point of change
 // if the canonical deploy URL ever moves.
 const SHARE_BASE_URL = 'https://mojave-run.netlify.app';
+const BIOME_DISPLAY_NAMES = {
+  wastes: 'WASTES',
+  saltflats: 'SALT FLATS',
+  ash: 'ASHLANDS',
+  midnight: 'MIDNIGHT',
+  neon: 'NEON STRIP',
+  neonruins: 'NEON RUINS',
+  irradiated: 'IRRADIATED',
+  scraparch: 'SCRAP ARCHIPELAGO',
+  thunderplains: 'THUNDER PLAINS',
+  frostwaste: 'FROSTWASTE',
+};
+const EARLY_RUN_SCRAP_BONUS = [280, 240, 200, 160, 120];
+const DAILY_SCRAP_BONUS = 150;
+const DAILY_VICTORY_SCRAP_BONUS = 300;
+
+function getBiomeDisplayName(id) {
+  return BIOME_DISPLAY_NAMES[id] || String(id || 'wastes').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toUpperCase();
+}
+
+function buildDailyChallengeRoomCode(seedKey) {
+  const compact = String(seedKey || todaySeedString()).replace(/[^0-9A-Z]/gi, '').slice(-6);
+  return ('DLY' + compact).toUpperCase().slice(0, 10);
+}
+
+function buildDailyChallengeShareMeta() {
+  const seed = Game.dailySeedKey || todaySeedString();
+  const roomCode = buildDailyChallengeRoomCode(seed);
+  const vehicle = (Game.vehicle && Game.vehicle.name) || 'RUST BUCKET';
+  const biome = getBiomeDisplayName(Game.biome);
+  const mutator = (Game.runMutators && Game.runMutators[0] && Game.runMutators[0].name) || 'OPEN ROAD';
+  const url = SHARE_BASE_URL + '/?mode=daily';
+  const score = Math.floor(Game.score || 0).toLocaleString();
+  return {
+    title: 'Mojave Run — Daily Challenge',
+    roomCode,
+    vehicle,
+    biome,
+    mutator,
+    url,
+    text:
+      `I scored ${score} in Mojave Run's Daily Challenge (${seed}).\n` +
+      `Vehicle: ${vehicle}\n` +
+      `Biome: ${biome}\n` +
+      `Mutator: ${mutator}\n` +
+      `Beat my ghost on today's Daily.\n` +
+      `Challenge room: ${roomCode}`,
+  };
+}
 
 // Tips shown during the loading screen — small UX touch that gives the
 // loading sequence purpose. New tip per loading screen, pulled by the
@@ -10559,6 +10623,7 @@ const UI = {
       return Game.distance >= RUN_MOMENT_LONG_HAUL_DISTANCE ? 'LONG HAUL SURVIVAL' : 'ANOTHER RUN IN THE BOOKS';
     })();
     rows.push(['BEST MOMENT', bestMoment, false]);
+    if (Game.scrapBonusEarned > 0) rows.push(['BONUS SALVAGE', '+' + Game.scrapBonusEarned, false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
 
     document.getElementById('res-rows').innerHTML = rows.map(([l,v,big]) =>
@@ -10612,11 +10677,24 @@ const UI = {
     const shareBtn = document.getElementById('res-share');
     if (shareBtn) {
       if (Game.mode === 'daily' && Game.dailySeedKey) {
+        const shareMeta = buildDailyChallengeShareMeta();
         shareBtn.style.display = '';
+        shareBtn.textContent = '📣 SHARE DAILY';
         shareBtn.dataset.score = String(Math.floor(Game.score));
         shareBtn.dataset.seed = Game.dailySeedKey;
+        shareBtn.dataset.room = shareMeta.roomCode;
       } else {
         shareBtn.style.display = 'none';
+      }
+    }
+
+    const replayBtn = document.getElementById('res-replay');
+    if (replayBtn) {
+      if (Game.latestReplayDate) {
+        replayBtn.style.display = '';
+        replayBtn.dataset.replay = String(Game.latestReplayDate);
+      } else {
+        replayBtn.style.display = 'none';
       }
     }
 
@@ -10991,28 +11069,72 @@ const UI = {
       }
       case 'res-share': {
         const btn = document.getElementById('res-share');
-        const score = btn.dataset.score || '0';
         const seed = btn.dataset.seed || '';
-        const text = `MOJAVE RUN — DAILY ${seed}\nSCORE: ${score}\n${SHARE_BASE_URL}`;
+        const shareMeta = buildDailyChallengeShareMeta();
+        const posterDataURL = (typeof Cinematic !== 'undefined' && Cinematic.buildPosterDataURL)
+          ? Cinematic.buildPosterDataURL({
+              title: 'DAILY CHALLENGE',
+              subtitle: `${seed} · ${shareMeta.vehicle} · ${shareMeta.biome}`,
+              score: 'SCORE ' + (btn.dataset.score || '0'),
+            })
+          : null;
         let shared = false;
         try {
-          if (navigator.share) {
-            navigator.share({ title: 'Mojave Run — Daily', text }).catch(() => {});
+          if (posterDataURL && navigator.canShare && window.fetch) {
+            fetch(posterDataURL).then(r => r.blob()).then(blob => {
+              const file = new File([blob], `mojave-daily-${seed}.png`, { type: 'image/png' });
+              if (navigator.canShare({ files: [file] })) {
+                navigator.share({ files: [file], title: shareMeta.title, text: shareMeta.text, url: shareMeta.url })
+                  .then(() => UI.toast('DAILY SHARED'))
+                  .catch(() => fallbackShare());
+              } else {
+                fallbackShare();
+              }
+            }).catch(() => fallbackShare());
+            shared = true;
+          } else if (navigator.share) {
+            navigator.share({ title: shareMeta.title, text: shareMeta.text, url: shareMeta.url }).catch(() => {});
             shared = true;
           }
         } catch (_) {}
-        if (!shared) {
+        if (!shared) fallbackShare();
+
+        function fallbackShare() {
           try {
             if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(
-                () => UI.toast('SCORE COPIED'),
+              navigator.clipboard.writeText(shareMeta.text + '\n' + shareMeta.url).then(
+                () => {
+                  if (posterDataURL) downloadPoster();
+                  UI.toast('DAILY COPIED');
+                },
                 () => UI.toast('COULD NOT COPY')
               );
             } else {
-              UI.toast(text.split('\n')[1]);
+              if (posterDataURL) downloadPoster();
+              UI.toast('ROOM ' + (btn.dataset.room || 'LOBBY'));
             }
           } catch (_) { UI.toast('COULD NOT SHARE'); }
         }
+
+        function downloadPoster() {
+          try {
+            const a = document.createElement('a');
+            a.href = posterDataURL;
+            a.download = `mojave-daily-${seed || 'challenge'}.png`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => a.remove(), 0);
+          } catch (_) {}
+        }
+        break;
+      }
+      case 'res-replay': {
+        const btn = document.getElementById('res-replay');
+        const rdate = parseInt((btn && btn.dataset.replay) || '0', 10);
+        const entry = Replay.list().find(r => r.date === rdate);
+        const rp = entry && Replay.parseReplay(entry.code);
+        if (rp) startReplayPlayback(rp, 'menu');
+        else UI.toast('REPLAY NOT FOUND');
         break;
       }
       case 'res-photo': {
@@ -12505,9 +12627,10 @@ const Replay = {
     const code = this.exportReplay({ name: label || ('RUN ' + new Date().toLocaleDateString()) });
     if (!code) return false;
     if (this._list.length >= MAX_REPLAYS) this._list.shift();
-    this._list.push({ label: label || 'RUN', date: Date.now(), code });
+    const entry = { label: label || 'RUN', date: Date.now(), code };
+    this._list.push(entry);
     this.save();
-    return true;
+    return entry;
   },
   parseReplay(code) {
     if (!code || typeof code !== 'string') return null;
@@ -13115,7 +13238,8 @@ UI.act = function(action, data) {
       Replay.stopRecording();
       if (Replay._frames.length >= REPLAY_FPS * 5) {
         const p = Profile.active();
-        Replay.saveReplay(p ? p.name + ' ' + new Date().toLocaleDateString() : 'RUN');
+        const savedReplay = Replay.saveReplay(p ? p.name + ' ' + new Date().toLocaleDateString() : 'RUN');
+        Game.latestReplayDate = savedReplay && savedReplay.date ? savedReplay.date : null;
       }
     }
     // Weekly challenge completion notification
@@ -14542,13 +14666,14 @@ function buildCraftingScreen() {
   `;
 }
 
-function startReplayPlayback(rp) {
+function startReplayPlayback(rp, returnScreen) {
   if (!rp || !Array.isArray(rp.frames) || !rp.frames.length) return;
   restoreRng();
   const meta = rp.meta || {};
   Game.mode = meta.mode || 'classic';
   Game.state = 'replay';
   Game.replay = { data: rp, t: 0, idx: 0 };
+  Game.replayReturnScreen = returnScreen || 'platform';
   Game.vehicle = VEHICLE_BY_ID[meta.vehicle] || VEHICLES[0];
   Game.vehicleStats = Profile.effectiveStats(Game.vehicle.id) || Object.assign({}, Game.vehicle.base);
   Game.player = { x: W * 0.5, y: H - 110, w:42, h:64, vx:0 };
@@ -14578,7 +14703,10 @@ function updateReplayPlayback(dt) {
       interrupted: !!keys['escape'],
     });
     Game.state = 'menu';
-    UI.showPlatform();
+    const replayReturnScreen = Game.replayReturnScreen || 'platform';
+    Game.replayReturnScreen = null;
+    if (replayReturnScreen === 'menu') UI.showMenu();
+    else UI.showPlatform();
   }
 }
 function drawReplayOverlay() {
