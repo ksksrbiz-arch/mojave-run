@@ -3048,8 +3048,8 @@ const ambientState = {
   gain: null,
 };
 const MUSIC_LOOKAHEAD_SECONDS = 0.24;
-const MUSIC_MIN_NOTE = 35;
-const MUSIC_MAX_NOTE = 3200;
+const MUSIC_MIN_FREQ = 35;
+const MUSIC_MAX_FREQ = 3200;
 const MUSIC_BEAT_RESET_THRESHOLD = 1;
 const MUSIC_BEAT_INITIAL_DELAY = 0.02;
 const MUSIC_STATE_PRESETS = {
@@ -3189,7 +3189,7 @@ function tone(freq, dur, type='square', vol=0.08, slide=0, when=0, destination=a
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   o.type = type;
-  o.frequency.setValueAtTime(Math.max(MUSIC_MIN_NOTE, Math.min(MUSIC_MAX_NOTE, freq)), t);
+  o.frequency.setValueAtTime(Math.max(MUSIC_MIN_FREQ, Math.min(MUSIC_MAX_FREQ, freq)), t);
   if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(Math.max(q, 0.0001), t + dur);
@@ -3320,7 +3320,7 @@ const AudioEngine = {
 const SFX = {
   shoot: () => gunShot(136, 0.08, 0.1, 0.52),
   bigShot: () => { gunShot(96, 0.13, 0.16, 0.7); filteredNoise(0.24, 0.08, 1000); tone(72, 0.2, 'sawtooth', 0.06, -36); },
-  hit:   () => { filteredNoise(0.16, 0.14, 1400); tone(170, 0.16, 'sawtooth', 0.055, -90); tone(300, 0.07, 'triangle', 0.026, -120, audioCtx ? audioCtx.currentTime + 0.008 : 0); },
+  hit:   () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.16, 0.14, 1400, t); tone(170, 0.16, 'sawtooth', 0.055, -90, t); tone(300, 0.07, 'triangle', 0.026, -120, t + 0.008); },
   pickup:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(720, 0.07, 'triangle', 0.07, 120, t); tone(1040, 0.1, 'triangle', 0.06, 160, t + 0.04); },
   scrap: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(920, 0.04, 'triangle', 0.055, 80, t); tone(1380, 0.055, 'triangle', 0.045, 120, t + 0.03); },
   explode:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.5, 0.25, 700, t); tone(74, 0.5, 'sawtooth', 0.11, -48, t); tone(145, 0.2, 'triangle', 0.03, -40, t + 0.02); },
