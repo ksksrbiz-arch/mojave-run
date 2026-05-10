@@ -2407,12 +2407,13 @@ function getWindingRoadShift(y = H * 0.5) {
   if (!Game || Game.mode !== 'winding' || !Game.windingRoad) return 0;
   const wr = Game.windingRoad;
   const yNorm = clamp(y / Math.max(1, H), 0, 1);
+  // Curves "speed up" as the run progresses: up to +135% animation pace by ~4.5 km.
   const pace = 1 + Math.min(1.35, (Game.distance || 0) / 4500);
   const ampScale = 0.35 + 0.65 * (1 - yNorm);
   const amp = wr.amp * ampScale * (1 + Math.min(0.4, (Game.distance || 0) / 14000));
   const t = (Game.t || 0) * wr.curveSpeed * pace + (Game.distance || 0) * wr.distanceFreq + wr.seed;
   const swayA = Math.sin(t + yNorm * wr.waveA);
-  const swayB = Math.sin(t * wr.waveMul + yNorm * wr.waveB + wr.seed2);
+  const swayB = Math.sin(t * wr.secondaryWaveMul + yNorm * wr.waveB + wr.seed2);
   const drift = Math.sin((Game.t || 0) * wr.driftFreq + wr.seed3) * wr.driftAmp;
   return (swayA * 0.68 + swayB * 0.32) * amp + drift;
 }
@@ -3213,12 +3214,13 @@ function startRun(mode, level) {
   if (mode === 'winding') {
     const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
     Game.windingRoad = {
+      // Maximum lateral bend amplitude as a fraction of road width.
       amp: Math.max(24, roadW * 0.22),
       curveSpeed: 0.95 + rand(-0.12, 0.16),
       distanceFreq: 0.0018 + rand(0, 0.0012),
       waveA: 4.8 + rand(-0.8, 1.2),
       waveB: 9.2 + rand(-1.4, 1.4),
-      waveMul: 1.7 + rand(-0.2, 0.35),
+      secondaryWaveMul: 1.7 + rand(-0.2, 0.35),
       driftFreq: 0.32 + rand(0, 0.25),
       driftAmp: Math.min(54, roadW * 0.16),
       seed: rand(0, Math.PI * 2),
@@ -4543,6 +4545,7 @@ function update(dt) {
     const lvl = 1 + Math.floor(Game.distance / 1500);
     Game.targetSpeed = 280 + Math.min(420, lvl * 28);
   } else if (Game.mode === 'winding') {
+    // Winding mode ramps faster than classic (shorter level span + higher base and cap).
     const lvl = 1 + Math.floor(Game.distance / 1200);
     Game.targetSpeed = 360 + Math.min(460, lvl * 30);
   } else if (Game.mode === 'timeattack') {
