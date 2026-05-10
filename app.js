@@ -8173,6 +8173,39 @@ const UI = {
     this.show('sidekick');
   },
 
+  // ---- CINEMATIC HELPERS ----
+  // Duration (ms) for each fullscreen cinematic before auto-dismiss.
+  _LOCATION_INTRO_DURATION: 6500,
+  _ZOMBIE_CUTSCENE_DURATION: 6000,
+
+  // Force CSS animations to replay by removing them, triggering a reflow, then
+  // restoring them. Used before showing any animated cinematic overlay.
+  _resetAnimations(screenId, selectors) {
+    const el = document.getElementById('screen-' + screenId);
+    if (!el) return;
+    el.querySelectorAll(selectors).forEach(child => {
+      child.style.animation = 'none';
+      void child.offsetWidth; // force reflow so the browser acknowledges the reset
+      child.style.animation = '';
+    });
+  },
+
+  // Show a fullscreen cinematic overlay (screenId without 'screen-' prefix),
+  // then call cb when dismissed (tap or auto-dismiss after durationMs).
+  _showCinematic(screenId, durationMs, cb) {
+    this.show(screenId);
+    const overlay = document.getElementById('screen-' + screenId);
+    const dismiss = () => {
+      if (overlay) overlay.removeEventListener('pointerdown', once);
+      clearTimeout(timer);
+      UI.hideAllScreens();
+      cb();
+    };
+    const timer = setTimeout(dismiss, durationMs);
+    const once = () => dismiss();
+    if (overlay) overlay.addEventListener('pointerdown', once);
+  },
+
   // ---- LOCATION INTRO CINEMATIC ----
   // Shown before the first level of a new campaign location — animates in the
   // region name, state, and backstory intro text. Auto-dismisses or tap-to-skip.
@@ -8183,23 +8216,8 @@ const UI = {
     if (nameEl)  nameEl.textContent  = loc.name.toUpperCase();
     if (stateEl) stateEl.textContent = loc.state.toUpperCase();
     if (textEl)  textEl.textContent  = loc.intro;
-    // Force animation replay by toggling the screen off then on
-    const overlay = document.getElementById('screen-loc-intro');
-    if (overlay) {
-      overlay.querySelectorAll('.loc-intro-eyebrow,.loc-intro-name,.loc-intro-state,.loc-intro-divider,.loc-intro-text').forEach(el => {
-        el.style.animation = 'none';
-        void el.offsetWidth; // reflow
-        el.style.animation = '';
-      });
-    }
-    this.show('loc-intro');
-    const dismiss = () => {
-      UI.hideAllScreens();
-      cb();
-    };
-    const timer = setTimeout(dismiss, 6500);
-    const once = () => { overlay && overlay.removeEventListener('pointerdown', once); clearTimeout(timer); dismiss(); };
-    if (overlay) overlay.addEventListener('pointerdown', once);
+    this._resetAnimations('loc-intro', '.loc-intro-eyebrow,.loc-intro-name,.loc-intro-state,.loc-intro-divider,.loc-intro-text');
+    this._showCinematic('loc-intro', this._LOCATION_INTRO_DURATION, cb);
   },
 
   // ---- ZOMBIE PORT EMOTIONAL CUTSCENE ----
@@ -8220,23 +8238,8 @@ const UI = {
         ? 'Every car you crushed. Every body you left in the dust. Every civilian you clipped and didn\'t look back at. They didn\'t stay down. The Mojave doesn\'t forget. The dead are rising — and they know your engine noise. They\'re coming for you. The zombie horde begins here.'
         : 'You didn\'t pull the trigger on them yourself. But the violence you drove through left a wake. The dead rise from every battlefield you passed through. They\'re coming. The zombie horde begins here.';
     }
-    // Force animation replay
-    const overlay = document.getElementById('screen-zombie-cut');
-    if (overlay) {
-      overlay.querySelectorAll('.zombie-cut-icon,.zombie-cut-title,.zombie-cut-count,.zombie-cut-text').forEach(el => {
-        el.style.animation = 'none';
-        void el.offsetWidth;
-        el.style.animation = '';
-      });
-    }
-    this.show('zombie-cut');
-    const dismiss = () => {
-      UI.hideAllScreens();
-      cb();
-    };
-    const timer = setTimeout(dismiss, 6000);
-    const once = () => { overlay && overlay.removeEventListener('pointerdown', once); clearTimeout(timer); dismiss(); };
-    if (overlay) overlay.addEventListener('pointerdown', once);
+    this._resetAnimations('zombie-cut', '.zombie-cut-icon,.zombie-cut-title,.zombie-cut-count,.zombie-cut-text');
+    this._showCinematic('zombie-cut', this._ZOMBIE_CUTSCENE_DURATION, cb);
   },
 
   // ---- CAMPAIGN STORY OVERLAY ----
