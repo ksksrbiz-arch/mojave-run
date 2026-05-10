@@ -1130,7 +1130,7 @@ const ACHIEVEMENTS = [
   { id:'old_world_blues',icon:'\u{1F9E0}',     name:'OLD WORLD BLUES',   desc:'Score 15,000 in Zombie Horde', hidden:true, hint:'The apocalypse can always get sillier.' },
   { id:'desert_survivalist', icon:'\u{1F343}', name:'DESERT SURVIVALIST', desc:'Finish a run without hitting a single innocent', hidden:true, hint:'Try acting like somebody raised you right.' },
   { id:'ncr_poster_child', icon:'\u{1F396}\uFE0F', name:'NCR POSTER CHILD', desc:'Finish 5 runs without hitting a single innocent', hidden:true, hint:'Keep your fenders clean long enough and the NCR notices.' },
-  { id:'goodsprings_butcher', icon:'\u{1F62C}', name:'GOODSPRINGS BUTCHER', desc:'Hit 5 innocents in a single run. Even the raiders think that was low.', hidden:true, hint:'Some reputations are earned the hard way.' },
+  { id:'goodsprings_butcher', icon:'\u{1F62C}', name:'GOODSPRINGS BUTCHER', desc:'Hit 5 innocents in a single run', hidden:true, hint:'Even the raiders think that was low.' },
 ];
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
@@ -2077,6 +2077,7 @@ const RUN_MOMENT_STRONG_COMBO = 15;
 const RUN_MOMENT_BIG_SCRAP = 1000;
 const RUN_MOMENT_SWEEP_KILLS = 50;
 const RUN_MOMENT_LONG_HAUL_DISTANCE = 2000;
+const KILL_STREAK_LABEL = ' KILL STREAK';
 
 function getWastelandReputation() {
   if ((Game.civiliansHit || 0) >= 5) return 'GOODSPRINGS BUTCHER';
@@ -2084,7 +2085,7 @@ function getWastelandReputation() {
   if ((Game.civiliansHit || 0) === 0 && Game.kills >= 30) return 'DESERT SURVIVALIST';
   if ((Game.comboBest || 0) >= 15) return 'WILD WASTELAND';
   if (Game.mode === 'zombie' && Game.score >= 15000) return 'OLD WORLD BLUES';
-  if (Game.scrapEarned >= 1500) return 'JUNK JET BARON';
+  if (Game.scrapEarned >= 1500) return 'JUNK JET';
   if (Game.distance >= 8000) return 'LONESOME ROAD';
   if (Game.kills >= 30) return 'BIG IRON';
   return 'MOJAVE DRIFTER';
@@ -6955,7 +6956,7 @@ const UI = {
       ['BEST HORDE', p.bestZombie || 0],
       ['LONGEST RUN', p.bestDistance + ' M'],
       ['BEST KILL RUN', p.bestKills || 0],
-      ['BEST COMBO', (p.bestCombo || 0) + ' KILL STREAK'],
+      ['BEST COMBO', (p.bestCombo || 0) + KILL_STREAK_LABEL],
       ['BEST SCRAP RUN', p.bestScrapRun || 0],
       ['INNOCENTS HIT', p.totalCivilianHits || 0],
       ['CLEAN RUNS', p.cleanRuns || 0],
@@ -7050,7 +7051,7 @@ const UI = {
     }
     rows.push(['KILLS', Game.kills, false]);
     rows.push(['INNOCENTS HIT', Game.civiliansHit || 0, false]);
-    rows.push(['TOP COMBO', (Game.comboBest || 0) + ' KILL STREAK', false]);
+    rows.push(['TOP COMBO', (Game.comboBest || 0) + KILL_STREAK_LABEL, false]);
     rows.push(['MOJAVE REP', getWastelandReputation(), false]);
     const bestMoment = (() => {
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
