@@ -7524,6 +7524,17 @@ function pathRoundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+const FIRE_ANIM_WINDOW = 0.12;
+const RECOIL_DISTANCE = 4;
+const BRAKE_BASE_ALPHA = 0.25;
+const BRAKE_IDLE_BOOST = 0.4;
+const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
+const BRAKE_PULSE_AMPLITUDE = 0.2;
+const BRAKE_PULSE_RATE = 8;
+const BIGWHEEL_TIRE = '#171717';
+const BIGWHEEL_RIM = '#969daa';
+const BIGWHEEL_SPOKE = '#f6fbff';
+
 function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   let paintId = null;
   if (!opts.noCosmetic) {
@@ -7539,13 +7550,6 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const speedN = clamp(speed / 420, 0, 1);
   const wheelSpin = t * (6 + speedN * 26);
   const suspensionBob = Math.sin(t * (5 + speedN * 9) + x * 0.012) * (0.5 + speedN * 1.3);
-  const FIRE_ANIM_WINDOW = 0.12;
-  const RECOIL_DISTANCE = 4;
-  const BRAKE_BASE_ALPHA = 0.25;
-  const BRAKE_IDLE_BOOST = 0.4;
-  const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
-  const BRAKE_PULSE_AMPLITUDE = 0.2;
-  const BRAKE_PULSE_RATE = 8;
 
   // ---- CEMETERY TANK special render ----
   if (vehicle.shape === 'tank') {
@@ -7868,7 +7872,7 @@ function drawObstacle(o) {
     ctx.moveTo(-o.w * 0.42, -o.h * 0.5);
     ctx.quadraticCurveTo(0, -o.h * 0.58, o.w * 0.42, -o.h * 0.5);
     ctx.lineTo(o.w * 0.5, o.h * 0.36);
-    ctx.quadraticCurveTo(0, o.h * 0.5, -o.w * 0.5, o.h * 0.36);
+    ctx.quadraticCurveTo(0, o.h * 0.52, -o.w * 0.5, o.h * 0.36);
     ctx.closePath();
     ctx.fill();
 
@@ -7979,10 +7983,10 @@ function drawObstacle(o) {
     pathRoundRect(-o.w/2 + 2, -o.h/2 + 4, o.w - 4, 3, 1.5);
     ctx.fill();
     // big front wheel
-    drawWheelTopdown(0, o.h/2 - 3, 6, spin, '#171717', '#969daa', '#f6fbff');
+    drawWheelTopdown(0, o.h/2 - 3, 6, spin, BIGWHEEL_TIRE, BIGWHEEL_RIM, BIGWHEEL_SPOKE);
     // small rear wheels
-    drawWheelTopdown(-o.w/2 + 2, -o.h/2 + 3, 3, spin * 1.2, '#171717', '#969daa', '#f6fbff');
-    drawWheelTopdown(o.w/2 - 2, -o.h/2 + 3, 3, spin * 1.2, '#171717', '#969daa', '#f6fbff');
+    drawWheelTopdown(-o.w/2 + 2, -o.h/2 + 3, 3, spin * 1.2, BIGWHEEL_TIRE, BIGWHEEL_RIM, BIGWHEEL_SPOKE);
+    drawWheelTopdown(o.w/2 - 2, -o.h/2 + 3, 3, spin * 1.2, BIGWHEEL_TIRE, BIGWHEEL_RIM, BIGWHEEL_SPOKE);
     // child rider (head) sitting on top
     ctx.fillStyle = '#f0c08a';
     ctx.beginPath();
