@@ -12230,7 +12230,7 @@ function buildPlatformScreen() {
         <button class="btn set-toggle" data-act="iap-restore">RESTORE</button>
       </div>
       ${products.length ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">' + products.map(prod => {
-        const owned = prod.type === 'non_consumable' && IAPService.hasEntitlement(prod.id);
+        const owned = iapAvailable && prod.type === 'non_consumable' && IAPService.hasEntitlement(prod.id);
         return `<div class="set-head" style="gap:8px"><div><div class="set-name" style="font-size:11px">${escapeHtml(prod.name)} · ${escapeHtml(prod.price || '')}</div><div class="set-sub">${escapeHtml(prod.desc || '')}</div></div>${owned ? '<span class="set-val" style="color:var(--good)">OWNED</span>' : `<button class="btn set-toggle ${iapAvailable ? 'on' : ''}" data-act="iap-purchase" data-data="${escapeHtml(prod.id)}" style="font-size:9px">BUY</button>`}</div>`;
       }).join('') + '</div>' : ''}
     </div>
