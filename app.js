@@ -7793,6 +7793,11 @@ function drawEnemy(e) {
 
 function drawBike(e) {
   ctx.save();
+  ctx.translate(e.x, e.y);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(-e.w/2 + 2, -e.h/2 + 4, e.w, e.h);
+  // frame
   ctx.fillStyle = '#3a0a0a';
   ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
   // rider torso
@@ -9023,7 +9028,6 @@ function drawLoadingOverlay() {
 
 function drawBossWarning() {
   if (Game.bossWarning <= 0 || !Game.boss) return;
-  const t = activeBiomeTheme();
   const pulse = 0.5 + Math.sin(Game.animT * 14) * 0.5;
   // Biome-accent color for the warning bands instead of always red
   const biome = Game.biome || 'wastes';
