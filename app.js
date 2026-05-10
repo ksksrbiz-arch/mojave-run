@@ -8334,7 +8334,7 @@ function drawEnemyThreatHalos() {
   if (!Game.enemies.length) return;
   // At low quality skip per-enemy radial gradients (expensive on mobile) and
   // use a single flat semi-transparent fill instead.
-  const q = (typeof PerfMon !== 'undefined') ? PerfMon.quality : 1;
+  const q = PerfMon.quality;
   ctx.save();
   if (q < 0.5) {
     // Simple flat halo — no gradient objects, much cheaper on mobile GPUs.
