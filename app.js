@@ -68,6 +68,15 @@ const VEHICLES = [
     base: { maxHp: 260, accel: 1250, maxV: 340, fireRate: 0.34, dmg: 4, guns: 2, bigShot: true },
     color: { body:'#4c5358', hood:'#31373c', cab:'#181d22', windshield:'#88a8b8', glow:'#ff9d66' },
   },
+  {
+    id: 'cemeterytank', name: 'CEMETERY TANK',
+    desc: 'Death incarnate on treads. Rolls out of the grave and into your enemies. Nothing survives.',
+    cost: 100000,
+    master: true,
+    shape: 'tank',
+    base: { maxHp: 650, accel: 900, maxV: 290, fireRate: 0.08, dmg: 9, guns: 2, bigShot: true },
+    color: { body:'#1a1a12', hood:'#0d0d08', cab:'#23231a', windshield:'#3a6a3a', glow:'#7aff5a' },
+  },
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
@@ -320,6 +329,24 @@ const VEHICLE_BRANCHES = {
       unlockTotal: 8,
       statMods: { fireRate: 0.92, dmg: 1.14 },
       effects: { bossDamageMul: 1.18, critChance: 0.08, critMul: 1.7 },
+    },
+  ],
+  cemeterytank: [
+    {
+      id: 'gravedigger',
+      name: 'GRAVEDIGGER',
+      desc: 'Digs deeper graves. Boosted hull and crushing contact damage.',
+      unlockTotal: 10,
+      statMods: { maxHp: 1.30, dmg: 1.12 },
+      effects: { damageTakenMul: 0.75, contactDamageMul: 1.60 },
+    },
+    {
+      id: 'reaper',
+      name: 'REAPER',
+      desc: 'Death cannon overclocked. Obliterates bosses and crits harder.',
+      unlockTotal: 10,
+      statMods: { fireRate: 0.88, dmg: 1.20 },
+      effects: { bossDamageMul: 1.35, critChance: 0.20, critMul: 2.2 },
     },
   ],
 };
@@ -5006,6 +5033,116 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
     }
   }
   const c = getVehiclePaint(vehicle, paintId);
+
+  // ---- CEMETERY TANK special render ----
+  if (vehicle.shape === 'tank') {
+    ctx.save();
+    ctx.translate(x, y);
+    const tilt = clamp(vx / 460, -1, 1) * 0.08;
+    ctx.rotate(tilt);
+    const tw = w + 12, th = h;
+
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(-tw/2 + 5, -th/2 + 8, tw + 2, th);
+
+    // tracks (wide sides)
+    ctx.fillStyle = '#0a0a06';
+    ctx.fillRect(-tw/2 - 7, -th/2, 12, th);
+    ctx.fillRect( tw/2 - 5, -th/2, 12, th);
+    // track links
+    ctx.fillStyle = '#1c1c10';
+    for (let i = 0; i < 8; i++) {
+      const ty = -th/2 + 2 + i * (th / 8);
+      ctx.fillRect(-tw/2 - 7, ty, 12, 2);
+      ctx.fillRect( tw/2 - 5, ty, 12, 2);
+    }
+    // track drive wheels
+    ctx.fillStyle = '#2a2a16';
+    [-th/2 + 6, th/2 - 6].forEach(ty => {
+      ctx.beginPath(); ctx.arc(-tw/2 - 1, ty, 6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( tw/2 + 1, ty, 6, 0, Math.PI*2); ctx.fill();
+    });
+
+    // hull body
+    const hg = ctx.createLinearGradient(-tw/2, 0, tw/2, 0);
+    hg.addColorStop(0, c.body); hg.addColorStop(0.4, '#252520'); hg.addColorStop(1, c.body);
+    ctx.fillStyle = hg;
+    ctx.fillRect(-tw/2, -th/2, tw, th);
+
+    // front / rear armor slabs
+    ctx.fillStyle = c.hood;
+    ctx.fillRect(-tw/2, -th/2, tw, 10);
+    ctx.fillRect(-tw/2,  th/2 - 8, tw, 8);
+
+    // armor bolt rivets
+    ctx.fillStyle = '#3a3828';
+    [-tw/2 + 3, tw/2 - 7].forEach(bx => {
+      for (let i = 0; i < 4; i++) ctx.fillRect(bx, -th/2 + 14 + i * 13, 4, 4);
+    });
+
+    // turret base plate
+    ctx.fillStyle = c.cab;
+    ctx.fillRect(-tw/4, -th/4, tw/2, th/2.4);
+    // turret top gradient
+    const tg = ctx.createLinearGradient(-tw/4, 0, tw/4, 0);
+    tg.addColorStop(0, '#14140e'); tg.addColorStop(0.5, '#23231a'); tg.addColorStop(1, '#14140e');
+    ctx.fillStyle = tg;
+    ctx.fillRect(-tw/4 + 2, -th/4, tw/2 - 4, th/5);
+
+    // cannon barrel
+    ctx.fillStyle = '#0a0a06';
+    ctx.fillRect(-4, th/4 - 6, 8, 20);
+    // muzzle brake
+    ctx.fillRect(-6, th/4 + 13, 12, 5);
+
+    // skull emblem on turret top
+    ctx.fillStyle = c.glow;
+    ctx.globalAlpha = 0.75;
+    ctx.fillRect(-7, -th/4 + 2, 14, 9); // skull dome
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = c.cab;
+    ctx.fillRect(-6, -th/4 + 4, 4, 4); // left eye socket
+    ctx.fillRect( 2, -th/4 + 4, 4, 4); // right eye socket
+    ctx.fillRect(-5, -th/4 + 8, 2, 3); // left tooth
+    ctx.fillRect(-1, -th/4 + 8, 2, 3); // mid tooth
+    ctx.fillRect( 3, -th/4 + 8, 2, 3); // right tooth
+
+    // toxic green glow aura (ambient)
+    ctx.fillStyle = c.glow;
+    ctx.globalAlpha = 0.07;
+    ctx.fillRect(-tw/2 - 8, -th/2 - 8, tw + 16, th + 16);
+    ctx.globalAlpha = 1;
+
+    // headlights (toxic green)
+    ctx.fillStyle = c.glow;
+    ctx.fillRect(-tw/2 + 3, -th/2 - 5, 8, 4);
+    ctx.fillRect( tw/2 - 11, -th/2 - 5, 8, 4);
+
+    // muzzle flash on recent shot
+    const ft = Game.player ? (Game.player.fireT || 1) : 1;
+    if (ft < 0.12) {
+      ctx.fillStyle = `rgba(122,255,90,${0.9 * (1 - ft / 0.12)})`;
+      ctx.beginPath(); ctx.arc(0, th/4 + 18, 9, 0, Math.PI*2); ctx.fill();
+    }
+
+    // exhaust (reuse trail system)
+    const exFlicker = 0.5 + 0.5 * Math.sin((Game.t || 0) * 28);
+    const exLen = 5 + exFlicker * 10;
+    const trail = getTrailDef(!opts.noCosmetic && Game.cosmetics ? Game.cosmetics.equippedTrail : null);
+    const [hot, warm] = trail.flameColors || [[255, 220, 80], [255, 115, 25]];
+    const exGl = ctx.createLinearGradient(0, th/2 - 2, 0, th/2 + exLen);
+    exGl.addColorStop(0, `rgba(${hot[0]},${hot[1]},${hot[2]},${0.9 * exFlicker + 0.35})`);
+    exGl.addColorStop(0.45, `rgba(${warm[0]},${warm[1]},${warm[2]},${0.75 * exFlicker + 0.1})`);
+    exGl.addColorStop(1, 'rgba(255,35,0,0)');
+    ctx.fillStyle = exGl;
+    ctx.fillRect(-tw/2 + 4, th/2 - 2, 6, exLen);
+    ctx.fillRect( tw/2 - 10, th/2 - 2, 6, exLen);
+
+    ctx.restore();
+    return;
+  }
+
   ctx.save();
   ctx.translate(x, y);
   const tilt = clamp(vx / 460, -1, 1) * 0.18;
@@ -6515,6 +6652,56 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null) {
   const cx = cw/2, cy = ch/2;
   const w = 38, h = 60;
   const col = getVehiclePaint(v, cosmetics && cosmetics.equippedPaint);
+
+  // ---- Cemetery Tank preview ----
+  if (v.shape === 'tank') {
+    const tw = w + 10, th = h;
+    // shadow
+    c.fillStyle = 'rgba(0,0,0,0.6)';
+    c.fillRect(cx - tw/2 + 4, cy - th/2 + 7, tw + 2, th);
+    // tracks
+    c.fillStyle = '#0a0a06';
+    c.fillRect(cx - tw/2 - 6, cy - th/2, 11, th);
+    c.fillRect(cx + tw/2 - 5, cy - th/2, 11, th);
+    // track links
+    c.fillStyle = '#1c1c10';
+    for (let i = 0; i < 7; i++) {
+      const ty = cy - th/2 + 2 + i * (th / 7);
+      c.fillRect(cx - tw/2 - 6, ty, 11, 2);
+      c.fillRect(cx + tw/2 - 5, ty, 11, 2);
+    }
+    // hull body
+    c.fillStyle = col.body;
+    c.fillRect(cx - tw/2, cy - th/2, tw, th);
+    // front/rear armor
+    c.fillStyle = col.hood;
+    c.fillRect(cx - tw/2, cy - th/2, tw, 9);
+    c.fillRect(cx - tw/2, cy + th/2 - 7, tw, 7);
+    // turret base
+    c.fillStyle = col.cab;
+    c.fillRect(cx - tw/4, cy - th/4, tw/2, th/2.4);
+    // turret top
+    c.fillStyle = '#23231a';
+    c.fillRect(cx - tw/4 + 2, cy - th/4, tw/2 - 4, th/5);
+    // skull (simplified)
+    c.fillStyle = col.glow;
+    c.globalAlpha = 0.75;
+    c.fillRect(cx - 6, cy - th/4 + 2, 12, 8);
+    c.globalAlpha = 1;
+    c.fillStyle = col.cab;
+    c.fillRect(cx - 5, cy - th/4 + 4, 3, 3);
+    c.fillRect(cx + 2, cy - th/4 + 4, 3, 3);
+    // cannon
+    c.fillStyle = '#0a0a06';
+    c.fillRect(cx - 3, cy + th/4 - 4, 6, 18);
+    c.fillRect(cx - 5, cy + th/4 + 13, 10, 4);
+    // headlights
+    c.fillStyle = col.glow;
+    c.fillRect(cx - tw/2 + 2, cy - th/2 - 4, 7, 3);
+    c.fillRect(cx + tw/2 - 9, cy - th/2 - 4, 7, 3);
+    return;
+  }
+
   if (cosmetics && cosmetics.equippedTrail) {
     const trail = getTrailDef(cosmetics.equippedTrail);
     const colors = trail.colors || ['rgba(120,90,60,0.5)'];
@@ -6737,25 +6924,33 @@ const UI = {
     }
     list.innerHTML = '';
     cosmeticList.innerHTML = '';
+    // Compute stat-bar scale maxes from all vehicle base stats so bars stay proportional
+    const statMax = VEHICLES.reduce((m, vv) => ({
+      maxV:     Math.max(m.maxV,     vv.base.maxV),
+      accel:    Math.max(m.accel,    vv.base.accel),
+      maxHp:    Math.max(m.maxHp,    vv.base.maxHp),
+      fireRate: Math.min(m.fireRate, vv.base.fireRate),
+      dmgGuns:  Math.max(m.dmgGuns,  vv.base.dmg * vv.base.guns),
+    }), { maxV: 1, accel: 1, maxHp: 1, fireRate: 1, dmgGuns: 1 });
     VEHICLES.forEach(v => {
       const owned = !!p.ownedVehicles[v.id];
       const selected = p.activeVehicle === v.id;
       const stats = owned ? Profile.effectiveStats(v.id) : v.base;
       const tile = document.createElement('div');
-      tile.className = 'vehicle-tile' + (selected ? ' selected' : '') + (!owned ? ' locked' : '');
+      tile.className = 'vehicle-tile' + (selected ? ' selected' : '') + (!owned ? ' locked' : '') + (v.master ? ' master-vehicle' : '');
 
       // stat values normalized for bar display
       const norm = (val, max) => clamp(val / max, 0, 1) * 100;
-      const speedN = norm(stats.maxV, 600);
-      const accelN = norm(stats.accel, 2500);
-      const armorN = norm(stats.maxHp, 220);
-      const fireN  = norm(1 / stats.fireRate, 11);
-      const dmgN   = norm(stats.dmg * stats.guns, 4);
+      const speedN = norm(stats.maxV, statMax.maxV);
+      const accelN = norm(stats.accel, statMax.accel);
+      const armorN = norm(stats.maxHp, statMax.maxHp);
+      const fireN  = norm(1 / stats.fireRate, 1 / statMax.fireRate);
+      const dmgN   = norm(stats.dmg * stats.guns, statMax.dmgGuns);
 
       tile.innerHTML = `
         <div class="vt-head">
           <div>
-            <div class="vt-name">${v.name}${selected ? ' ◀' : ''}</div>
+            <div class="vt-name">${v.name}${selected ? ' ◀' : ''}${v.master ? ' <span class="master-badge">MASTER</span>' : ''}</div>
             <div class="vt-cost">${owned ? (selected ? 'EQUIPPED' : 'OWNED') : 'COST <b>' + v.cost + '</b> SCRAP'}</div>
           </div>
         </div>
