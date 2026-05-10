@@ -4249,26 +4249,30 @@ function spawnIronThroneBoss(stageNum) {
   };
 }
 
+function forEachBossBody(b, fn) {
+  if (!b) return;
+  fn(b.x, b.y);
+  if (b.twin) fn(b.twinX, b.y);
+}
+
 function getBossBodyHit(b, x, y, w = 0, h = 0) {
-  if (!b) return null;
-  if (Math.abs(x - b.x) * 2 < b.w + w && Math.abs(y - b.y) * 2 < b.h + h) return { x: b.x, y: b.y };
-  if (b.twin && Math.abs(x - b.twinX) * 2 < b.w + w && Math.abs(y - b.y) * 2 < b.h + h) return { x: b.twinX, y: b.y };
-  return null;
+  let hit = null;
+  forEachBossBody(b, (bx, by) => {
+    if (!hit && Math.abs(x - bx) * 2 < b.w + w && Math.abs(y - by) * 2 < b.h + h) hit = { x: bx, y: by };
+  });
+  return hit;
 }
 
 function getBossBodyInRadius(b, x, y, r) {
-  if (!b) return null;
   let hit = null;
-  let bestDist = Infinity;
-  const leftDist = Math.hypot(b.x - x, b.y - y);
-  if (leftDist < r) {
-    hit = { x: b.x, y: b.y };
-    bestDist = leftDist;
-  }
-  if (b.twin) {
-    const rightDist = Math.hypot(b.twinX - x, b.y - y);
-    if (rightDist < r && rightDist < bestDist) hit = { x: b.twinX, y: b.y };
-  }
+  let bestDist = r;
+  forEachBossBody(b, (bx, by) => {
+    const dist = Math.hypot(bx - x, by - y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      hit = { x: bx, y: by };
+    }
+  });
   return hit;
 }
 
