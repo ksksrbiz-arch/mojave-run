@@ -1190,7 +1190,7 @@ function checkAchievementCondition(id, p) {
     case 'old_world_blues': return (p.bestZombie || 0) >= 15000;
     case 'desert_survivalist': return (p.cleanRuns || 0) >= 1;
     case 'ncr_poster_child': return (p.cleanRuns || 0) >= 5;
-    case 'goodsprings_butcher': return (p.maxCivilianHits || 0) >= 5;
+    case 'goodsprings_butcher': return (p.maxCivilianHits || 0) >= CIVILIAN_INFAMY_HITS;
     default: return false;
   }
 }
@@ -2051,6 +2051,9 @@ const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350,
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
+const CIVILIAN_WARNING_HITS = 1;
+const CIVILIAN_MANHUNT_HITS = 3;
+const CIVILIAN_INFAMY_HITS = 5;
 // Obstacle kinds that represent innocents (must be missed). Kids and big-wheel
 // riders share the civilian penalty/collision behavior — they're just
 // pedestrians/toy cars rather than full civilian vehicles.
@@ -2080,8 +2083,10 @@ const RUN_MOMENT_LONG_HAUL_DISTANCE = 2000;
 const KILL_STREAK_LABEL = ' KILL STREAK';
 
 function getWastelandReputation() {
-  if ((Game.civiliansHit || 0) >= 5) return 'GOODSPRINGS BUTCHER';
-  if ((Game.civiliansHit || 0) >= 3) return 'NCR PUBLIC ENEMY';
+  // Priority order is intentional: monstrous civilian casualty runs should
+  // override the cooler "style" reputations players can also qualify for.
+  if ((Game.civiliansHit || 0) >= CIVILIAN_INFAMY_HITS) return 'GOODSPRINGS BUTCHER';
+  if ((Game.civiliansHit || 0) >= CIVILIAN_MANHUNT_HITS) return 'NCR PUBLIC ENEMY';
   if ((Game.civiliansHit || 0) === 0 && Game.kills >= 30) return 'DESERT SURVIVALIST';
   if ((Game.comboBest || 0) >= 15) return 'WILD WASTELAND';
   if (Game.mode === 'zombie' && Game.score >= 15000) return 'OLD WORLD BLUES';
@@ -2135,9 +2140,9 @@ function applyCivilianPenalty(x, y, kind) {
     : '⚠ CIVILIAN! -';
   addPopup(label + penalty, x, y - 22, '#4aa8e8', 16);
   shockwave(x, y, 'rgba(74,168,232,0.5)', 80);
-  if (Game.civiliansHit === 1) UI.toast('RADIO: THOSE WERE CIVILIANS', 2200);
-  else if (Game.civiliansHit === 3) UI.toast('NCR DISPATCH: YOU ARE NOW THE STORY', 2500);
-  else if (Game.civiliansHit === 5) UI.toast('EVEN THE RAIDERS THINK THIS IS MESSED UP', 2800);
+  if (Game.civiliansHit === CIVILIAN_WARNING_HITS) UI.toast('RADIO: THOSE WERE CIVILIANS', 2200);
+  else if (Game.civiliansHit === CIVILIAN_MANHUNT_HITS) UI.toast('NCR DISPATCH: YOU ARE NOW THE STORY', 2500);
+  else if (Game.civiliansHit === CIVILIAN_INFAMY_HITS) UI.toast('EVEN THE RAIDERS THINK THIS IS MESSED UP', 2800);
 }
 
 function isPowerupActive(id) {
@@ -7057,7 +7062,7 @@ const UI = {
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'horde') return 'HORDE BROKEN';
-      if ((Game.civiliansHit || 0) >= 5) return 'THE RADIO HOSTS ARE GOING TO COOK YOU';
+      if ((Game.civiliansHit || 0) >= CIVILIAN_INFAMY_HITS) return 'THE RADIO HOSTS ARE GOING TO COOK YOU';
       if ((Game.comboBest || 0) >= RUN_MOMENT_LEGENDARY_COMBO) return 'LEGENDARY ×10 MULTIPLIER';
       if ((Game.comboBest || 0) >= RUN_MOMENT_STRONG_COMBO) return 'HIGH-OCTANE COMBO';
       if (Game.scrapEarned >= RUN_MOMENT_BIG_SCRAP) return 'BIG SCRAP HAUL';
