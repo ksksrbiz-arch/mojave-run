@@ -26,6 +26,7 @@ const GAMEPAD_BUTTON_A = 0;
 const GAMEPAD_BUTTON_B = 1;
 const GAMEPAD_BUTTON_DPAD_LEFT = 14;
 const GAMEPAD_BUTTON_DPAD_RIGHT = 15;
+const GRAVEYARD_SHIFT_WAVE_INTERVAL = 55;
 const MAX_ACTIVE_CRAFTING_MODS = 3;
 const BOSS_PART_TIERS = [
   { max: 2, parts: ['engine_coil'] },
@@ -12932,14 +12933,14 @@ const ACHIEVEMENTS_V23 = [
 
 // === ACHIEVEMENTS — v2.4 STORM FRONTIER PASS ===
 const ACHIEVEMENTS_V24 = [
-  { id:'v24_start',             name:'STORM FRONTIER',        desc:'Start a run with any v2.4 vehicle.',                         secret:false },
-  { id:'v24_fleet',             name:'FRONTIER FLEET',        desc:'Own all 3 v2.4 vehicles.',                                   secret:true },
-  { id:'thunder_road',          name:'THUNDER ROAD',          desc:'Drive in the Thunder Plains biome.',                         secret:false },
-  { id:'frost_runner',          name:'FROST RUNNER',          desc:'Drive in the Frostwaste biome.',                             secret:false },
-  { id:'stormfront_clear',      name:'EYE OF THE STORM',      desc:'Win a run with Storm Frontier mutator active.',              secret:true },
-  { id:'overclocked_clear',     name:'REDLINE SURVIVOR',      desc:'Win a run with Overclocked mutator active.',                 secret:true },
-  { id:'graveyardshift_clear',  name:'NIGHT SHIFT',           desc:'Win a run with Graveyard Shift mutator active.',             secret:true },
-  { id:'craft_titanreactor',    name:'TITAN CORE',            desc:'Craft the Titan Reactor permanent mod.',                     secret:false },
+  { id:'v24_start', name:'STORM FRONTIER', desc:'Start a run with any v2.4 vehicle.', secret:false },
+  { id:'v24_fleet', name:'FRONTIER FLEET', desc:'Own all 3 v2.4 vehicles.', secret:true },
+  { id:'thunder_road', name:'THUNDER ROAD', desc:'Drive in the Thunder Plains biome.', secret:false },
+  { id:'frost_runner', name:'FROST RUNNER', desc:'Drive in the Frostwaste biome.', secret:false },
+  { id:'stormfront_clear', name:'EYE OF THE STORM', desc:'Win a run with Storm Frontier mutator active.', secret:true },
+  { id:'overclocked_clear', name:'REDLINE SURVIVOR', desc:'Win a run with Overclocked mutator active.', secret:true },
+  { id:'graveyardshift_clear', name:'NIGHT SHIFT', desc:'Win a run with Graveyard Shift mutator active.', secret:true },
+  { id:'craft_titanreactor', name:'TITAN CORE', desc:'Craft the Titan Reactor permanent mod.', secret:false },
 ];
 
 // Expose new achievement defs so existing checkAchievements() can pick them up.
@@ -13035,7 +13036,7 @@ function applyCraftingRunBonuses() {
 
 function applyWastelandRunStartBonuses() {
   if (Game.mode !== 'wastelandrun') return;
-  Game.weaponSpecState = Game.weaponSpecState || {};
+  const weaponSpecState = Game.weaponSpecState || (Game.weaponSpecState = {});
   if (hasMutator('ironwall')) { Game.enemyHpMul *= 1.5; Game.vehicleStats.dmg *= 1.15; }
   if (hasMutator('glassroad')) Game.scoreMul *= 2;
   if (hasMutator('nightonly')) Game.isNight = true;
@@ -13044,7 +13045,7 @@ function applyWastelandRunStartBonuses() {
   if (hasMutator('bloodmoon')) Game.enemyContactMul *= 1.40;
   if (hasMutator('goldensector')) { Game.scrapMul *= 5; Game.enemyHpMul *= 1.25; Game.enemyFireMul *= 0.85; }
   if (hasMutator('stormfrontier')) { Game.enemyFireMul *= 0.65; Game.scrapMul *= 1.45; Game.pickupRateMul = Math.max(Game.pickupRateMul || 1, 1.25); }
-  if (hasMutator('overclocked')) { Game.enemyHpMul *= 1.20; Game.weaponSpecState.fireRateMul = (Game.weaponSpecState.fireRateMul || 1) * 0.75; }
+  if (hasMutator('overclocked')) { Game.enemyHpMul *= 1.20; weaponSpecState.fireRateMul = (weaponSpecState.fireRateMul || 1) * 0.75; }
   if (hasMutator('graveyardshift')) Game.isNight = true;
   if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; }
 }
@@ -13189,9 +13190,9 @@ function updateWastelandRun(dt) {
     }
   }
   if (hasMutator('graveyardshift')) {
-    Game.wastelandGraveShiftT = (Game.wastelandGraveShiftT || 55) - dt;
+    Game.wastelandGraveShiftT = (Game.wastelandGraveShiftT || GRAVEYARD_SHIFT_WAVE_INTERVAL) - dt;
     if (Game.wastelandGraveShiftT <= 0) {
-      Game.wastelandGraveShiftT = 55;
+      Game.wastelandGraveShiftT = GRAVEYARD_SHIFT_WAVE_INTERVAL;
       for (let i = 0; i < 6; i++) spawnEnemy('zombie');
       announceEvent('GRAVEYARD SHIFT', '#b0c8ff');
     }
