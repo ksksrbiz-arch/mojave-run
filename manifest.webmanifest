@@ -1,7 +1,8 @@
 {
+  "id": "/",
   "name": "Mojave Run",
   "short_name": "Mojave Run",
-  "description": "A wasteland arcade driver. Survive the Mojave.",
+  "description": "A wasteland arcade driver. Survive the Mojave. Garage, upgrades, gauntlet, bosses, rivals, prestige, seasonal events, and co-op.",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
@@ -10,6 +11,9 @@
   "background_color": "#1a0f08",
   "theme_color": "#1a0f08",
   "categories": ["games", "entertainment"],
+  "prefer_related_applications": false,
+  "lang": "en",
+  "dir": "ltr",
   "icons": [
     {
       "src": "/icon.svg",
@@ -27,12 +31,29 @@
       "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     },
     {
+      "name": "Platform Hub",
+      "short_name": "Platform",
+      "description": "Prestige, rivals, seasons, and community features.",
+      "url": "/?continue=1",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
       "name": "Continue",
       "short_name": "Continue",
       "description": "Jump straight back to your last driver.",
       "url": "/?continue=1",
       "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "label": "Mojave Run gameplay"
+    }
+  ],
+  "related_applications": [],
+  "edge_side_panel": { "preferred_width": 400 }
 }
 
