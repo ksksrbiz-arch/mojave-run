@@ -2113,6 +2113,7 @@ const Profile = {
         // === v2.3 PROFILE NORMALIZATION — Wasteland Empire ===
         if (typeof p.bestWastelandRun !== 'number') { p.bestWastelandRun = 0; dirty = true; }
         if (!Array.isArray(p.craftingMods)) { p.craftingMods = []; dirty = true; }
+        if (!Array.isArray(p.activeCraftingMods)) { p.activeCraftingMods = []; dirty = true; }
         if (!p.craftingInventory || typeof p.craftingInventory !== 'object') { p.craftingInventory = {}; dirty = true; }
         if (typeof p.weaponSpecialization !== 'string') { p.weaponSpecialization = 'none'; dirty = true; }
         if (!Array.isArray(p.epilogueCleared)) { p.epilogueCleared = []; dirty = true; }
@@ -2184,7 +2185,8 @@ const Profile = {
       clanName: null,      // full clan name (up to 20 chars)
       // === v2.3 PROFILE FIELDS — Wasteland Empire ===
       bestWastelandRun: 0,         // best score in Wasteland Run roguelite mode
-      craftingMods: [],            // array of active crafting mod IDs applied to current rig
+      craftingMods: [],            // array of permanent crafting mod IDs applied to current rig
+      activeCraftingMods: [],      // run-based crafting mods queued for the next run only
       craftingInventory: {},       // { bossPartId: count } — crafting resource inventory
       weaponSpecialization: 'none', // active weapon spec: 'none'|'explosive'|'piercing'|'chainlightning'|'droneswarm'
       epilogueCleared: [],         // array of epilogue location IDs cleared (v2.3 campaign extension)
@@ -4112,6 +4114,7 @@ function startRun(mode, level) {
   Game.vehicle = v;
   Game.vehicleStats = stats;
   Game.activeCraftingMods = getActiveRunCraftingMods(profile);
+  consumeActiveRunCraftingMods(profile);
   Game.enemyHpMul = 1;
   Game.enemyFireMul = 1;
   Game.enemyDamageReduction = 0;
@@ -5822,6 +5825,7 @@ function update(dt) {
 
     for (let j = Game.bullets.length - 1; j >= 0; j--) {
       const b = Game.bullets[j];
+      if (bulletAlreadyHitEnemy(b, e)) continue;
       if (aabb(e, b)) {
         if (!consumePiercingHit(b, e)) Game.bullets.splice(j,1);
         const rawDmg = (b.dmg || 1) * (isPowerupActive('overdrive') ? 1.20 : 1) *
@@ -12461,10 +12465,11 @@ const CraftingWorkshop = {
     }
     p.craftingInventory = inv;
     p.craftingMods = p.craftingMods || [];
+    p.activeCraftingMods = p.activeCraftingMods || [];
     if (recipe.type === 'permanent') {
       if (!p.craftingMods.includes(recipeId)) p.craftingMods.push(recipeId);
-    } else if (!p.craftingMods.includes(recipeId)) {
-      p.craftingMods.push(recipeId);
+    } else if (!p.activeCraftingMods.includes(recipeId)) {
+      p.activeCraftingMods.push(recipeId);
     }
     Profile.save();
     return { ok: true, recipe };
@@ -12667,9 +12672,14 @@ function applyPermanentCraftingStats(st, profile) {
 }
 
 function getActiveRunCraftingMods(profile) {
-  return (profile && Array.isArray(profile.craftingMods) ? profile.craftingMods : [])
+  return (profile && Array.isArray(profile.activeCraftingMods) ? profile.activeCraftingMods : [])
     .map(id => CRAFTING_RECIPES.find(r => r.id === id && r.type === 'run'))
     .filter(Boolean);
+}
+function consumeActiveRunCraftingMods(profile) {
+  if (!profile || !Array.isArray(profile.activeCraftingMods) || !profile.activeCraftingMods.length) return;
+  profile.activeCraftingMods = [];
+  Profile.save();
 }
 
 function applyRunStatLayers(stats, profile, mode) {
@@ -12746,6 +12756,11 @@ function applyWeaponSpecHit(b, e, dmg) {
   if (Game.activeWeaponSpec && Game.activeWeaponSpec.id === 'explosive' && e.hp <= 0) incrementRunCounter('explosiveKills', 1);
 }
 
+function bulletAlreadyHitEnemy(b, e) {
+  if (!b || !b.hitIds || !e) return false;
+  const id = e._pid;
+  return !!(id && b.hitIds.includes(id));
+}
 function consumePiercingHit(b, e) {
   if (!b || !b.pierce) return false;
   b.hitIds = b.hitIds || [];
@@ -12994,7 +13009,7 @@ function sanitizeLevelEditorConfig(raw) {
   const biomes = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch'];
   const objectives = ['score','distance','kills','survive'];
   return {
-    name: String(raw && raw.name || 'CUSTOM RUN').slice(0, 20).toUpperCase(),
+    name: String(raw && raw.name || 'CUSTOM RUN').toUpperCase().replace(/[^A-Z0-9 ._\-]/g, '').slice(0, 20) || 'CUSTOM RUN',
     biome: biomes.includes(String(raw && raw.biome)) ? raw.biome : 'wastes',
     objective: objectives.includes(String(raw && raw.objective)) ? raw.objective : 'score',
     difficulty: Math.max(1, Math.min(5, Math.round(Number(raw && raw.difficulty) || 2))),
@@ -13015,7 +13030,7 @@ function buildCraftingScreen() {
   }).join('');
   return `
     <h2>🛠 CRAFTING WORKSHOP</h2>
-    <div class="set-row"><div class="set-name">INVENTORY</div><div class="set-sub">${Object.keys(inv).length ? Object.entries(inv).map(([k,v]) => escapeHtml(k.toUpperCase()) + ': ' + v).join(' · ') : 'NO BOSS PARTS YET'}</div></div>
+    <div class="set-row"><div class="set-name">INVENTORY</div><div class="set-sub">${Object.keys(inv).length ? Object.entries(inv).map(([k,v]) => escapeHtml(k.toUpperCase()) + ': ' + v).join(' · ') : 'NO BOSS PARTS YET'}</div><div class="set-sub">QUEUED RUN MODS: ${(p.activeCraftingMods || []).length ? p.activeCraftingMods.map(id => escapeHtml((CRAFTING_RECIPES.find(r=>r.id===id)||{}).name || id)).join(' · ') : 'NONE'}</div></div>
     <h2>⚡ WEAPON SPECIALIZATION</h2>
     <div class="set-row"><div class="set-q-row">${specCards}</div></div>
     <h2>🔩 RECIPES</h2>
