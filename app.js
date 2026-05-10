@@ -2076,7 +2076,7 @@ const Profile = {
         if (!Array.isArray(p.craftingMods)) { p.craftingMods = []; dirty = true; }
         if (!p.craftingInventory || typeof p.craftingInventory !== 'object') { p.craftingInventory = {}; dirty = true; }
         if (typeof p.weaponSpecialization !== 'string') { p.weaponSpecialization = 'none'; dirty = true; }
-        if (!Array.isArray(p.epiclocueCleared)) { p.epiclocueCleared = []; dirty = true; }
+        if (!Array.isArray(p.epilogueCleared)) { p.epilogueCleared = []; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2142,7 +2142,7 @@ const Profile = {
       craftingMods: [],            // array of active crafting mod IDs applied to current rig
       craftingInventory: {},       // { bossPartId: count } — crafting resource inventory
       weaponSpecialization: 'none', // active weapon spec: 'none'|'explosive'|'piercing'|'chainlightning'|'droneswarm'
-      epiclocueCleared: [],        // array of epilogue location IDs cleared (v2.3 campaign extension)
+      epilogueCleared: [],         // array of epilogue location IDs cleared (v2.3 campaign extension)
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
