@@ -12602,9 +12602,9 @@ const WASTELAND_RUN_MUTATORS = [
   { id:'bloodmoon',      name:'BLOOD MOON',         desc:'All enemies deal 40% more contact damage.',                    weight:3 },
   { id:'goldensector',   name:'GOLDEN SECTOR',      desc:'This sector has 5× scrap. Enemies are ramped accordingly.',   weight:1 },
   // === v2.4 NEW MUTATORS ===
-  { id:'stormfrontier',  name:'STORM FRONTIER',     desc:'Enemy fire rate surges, but scrap and pickups are richer.',    weight:2 },
-  { id:'overclocked',    name:'OVERCLOCKED',        desc:'Player fire rate rises sharply. Enemy durability also rises.',  weight:2 },
-  { id:'graveyardshift', name:'GRAVEYARD SHIFT',    desc:'Night never ends and zombie raids pulse in overtime waves.',    weight:2 },
+  { id:'stormfrontier',  name:'STORM FRONTIER',     desc:'Enemy shot cooldowns shorten, but scrap and pickups are richer.',weight:2 },
+  { id:'overclocked',    name:'OVERCLOCKED',        desc:'Player shot cooldowns shorten sharply. Enemy durability rises.', weight:2 },
+  { id:'graveyardshift', name:'GRAVEYARD SHIFT',    desc:'Night never ends and zombie raids pulse in extended waves.',     weight:2 },
   { id:'convoytax',      name:'CONVOY TAX',         desc:'Extra scrap income, but incoming damage is increased.',         weight:2 },
 ];
 
