@@ -10458,12 +10458,17 @@ const UI = {
           el.innerHTML = '<div class="small center" style="padding:14px">NO SCORES YET. BE THE FIRST!</div>';
           return;
         }
-        el.innerHTML = rows.map((s, i) =>
+        const modeNames = Object.create(null);
+        MODES.forEach(m => { modeNames[m.id] = m.name; });
+        el.innerHTML = rows.map((s, i) => {
+          const modeLabel = modeNames[s.mode] || (s.mode || 'CLASSIC').toUpperCase();
+          return (
           `<div class="res-row${i === 0 ? ' big' : ''}">
-            <div class="lbl">#${i+1} ${escapeHtml(s.name || '???')}${isGlobal ? ` <span style="opacity:.55">· ${(MODES.find(m => m.id === s.mode) || { name: (s.mode || 'CLASSIC').toUpperCase() }).name}</span>` : ''}</div>
+            <div class="lbl">#${i+1} ${escapeHtml(s.name || '???')}${isGlobal ? ` <span style="opacity:.55">· ${modeLabel}</span>` : ''}</div>
             <div class="val">${(s.score | 0).toLocaleString()}</div>
           </div>`
-        ).join('') +
+          );
+        }).join('') +
         `<div class="small center" style="margin-top:8px;opacity:.5">${rows.length} ENTRIES · TOP ${Math.min(rows.length, isGlobal ? 25 : 50)}</div>`;
       })
       .catch(() => {
@@ -12081,12 +12086,13 @@ const LevelEditor = {
     // Register a seasonal event definition: { name, theme, icon, bonusDesc }.
     registerSeason(def) {
       if (!def || !def.name || !def.bonusDesc) { console.warn('[MojaveMod] registerSeason: name+bonusDesc required'); return false; }
-      if (SEASON_DEFS.some(s => String(s.name || '').toUpperCase() === String(def.name).toUpperCase())) {
+      const seasonName = String(def.name).slice(0, 40);
+      if (SEASON_DEFS.some(s => String(s.name || '').toUpperCase() === seasonName.toUpperCase())) {
         console.warn('[MojaveMod] Season name already exists:', def.name);
         return false;
       }
       const row = {
-        name: String(def.name).slice(0, 40),
+        name: seasonName,
         theme: String(def.theme || '#c0c0c0').slice(0, 24),
         icon: String(def.icon || '✦').slice(0, 4),
         bonusDesc: String(def.bonusDesc).slice(0, 120),

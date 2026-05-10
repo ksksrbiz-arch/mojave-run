@@ -248,7 +248,7 @@ async function validateAppleReceipt(productId, transactionId, receipt) {
   const receiptData = parseAppleReceiptData(receipt);
   if (!receiptData) return { ok: false, reason: 'missing apple receipt data' };
   const password = process.env.APPLE_IAP_SHARED_SECRET || process.env.APPLE_SHARED_SECRET || '';
-  const body = { 'receipt-data': receiptData, 'exclude-old-transactions': true };
+  const body = { 'receipt-data': receiptData };
   if (password) body.password = password;
   const callApple = async (url) => {
     const resp = await fetch(url, {
@@ -262,9 +262,7 @@ async function validateAppleReceipt(productId, transactionId, receipt) {
   let data = await callApple('https://buy.itunes.apple.com/verifyReceipt');
   if (data && data.status === 21007) data = await callApple('https://sandbox.itunes.apple.com/verifyReceipt');
   if (!data || data.status !== 0) return { ok: false, reason: 'apple status ' + (data ? data.status : 'unknown') };
-  const rows = []
-    .concat((data.receipt && data.receipt.in_app) || [])
-    .concat(data.latest_receipt_info || []);
+  const rows = ((data.receipt && data.receipt.in_app) || []).concat(data.latest_receipt_info || []);
   const match = rows.find(r =>
     String(r.transaction_id || r.original_transaction_id || '') === String(transactionId) &&
     String(r.product_id || '') === String(productId)
@@ -295,8 +293,12 @@ async function getGoogleAccessToken() {
   const h = toBase64Url(JSON.stringify(header));
   const p = toBase64Url(JSON.stringify(payload));
   const signerInput = h + '.' + p;
-  const signature = crypto.sign('RSA-SHA256', Buffer.from(signerInput), privateKey).toString('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  let signature;
+  try {
+    signature = toBase64Url(crypto.sign('RSA-SHA256', Buffer.from(signerInput), privateKey));
+  } catch (e) {
+    throw new Error('google private key signing failed: ' + (e && e.message ? e.message : 'unknown error'));
+  }
   const assertion = signerInput + '.' + signature;
   const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -329,7 +331,8 @@ async function validateGooglePurchase(productId, transactionId, receipt) {
   if (!resp.ok) return { ok: false, reason: 'google api HTTP ' + resp.status };
   const data = await resp.json();
   if (!data) return { ok: false, reason: 'google api empty response' };
-  if (String(data.purchaseState || '1') !== '0') return { ok: false, reason: 'google purchaseState not purchased' };
+  const purchaseState = Number(data.purchaseState);
+  if (!Number.isFinite(purchaseState) || purchaseState !== 0) return { ok: false, reason: 'google purchaseState not purchased' };
   if (transactionId && data.orderId && String(transactionId) !== String(data.orderId) && String(transactionId) !== String(purchaseToken)) {
     return { ok: false, reason: 'google transaction mismatch' };
   }
@@ -538,8 +541,8 @@ const server = http.createServer((req, res) => {
       if (body.length + chunk.length > 8192) { req.destroy(); return; }
       body += chunk;
     });
-    req.on('end', async () => {
-      try {
+    req.on('end', () => {
+      (async () => {
         const { productId, transactionId, receipt, platform } = JSON.parse(body);
         if (!productId || !transactionId || !receipt) throw new Error('missing fields');
         const normTx = String(transactionId).slice(0, 256);
@@ -576,10 +579,10 @@ const server = http.createServer((req, res) => {
         console.log('[iap] validated:', { productId: normProduct, transactionId: normTx, store, ts: Date.now() });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, productId: normProduct, transactionId: normTx, platform: store }));
-      } catch (e) {
+      })().catch(() => {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'bad request' }));
-      }
+      });
     });
     req.on('error', () => {});
     return;
