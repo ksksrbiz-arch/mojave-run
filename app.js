@@ -2020,7 +2020,7 @@ const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
 // Obstacle kinds that represent innocents (must be missed). Kids and big-wheel
 // riders share the civilian penalty/collision behavior — they're just
 // pedestrians/toy cars rather than full civilian vehicles.
-const INNOCENT_OBSTACLE_KINDS = { civilian: true, kid: true, bigwheel: true };
+const INNOCENT_OBSTACLE_KINDS = { civilian: true, kid: true, bigwheel: true, hitchhiker: true };
 function isInnocentObstacle(o) { return !!(o && INNOCENT_OBSTACLE_KINDS[o.kind]); }
 // Campaign location index at which child pedestrians and Big Wheel toy cars
 // start appearing. Index 6 = Amarillo (TX) — i.e. once the campaign reaches
@@ -2084,9 +2084,37 @@ function applyCivilianPenalty(x, y, kind) {
   Game.flash = Math.max(Game.flash, 0.6);
   const label = (kind === 'kid' || kind === 'bigwheel')
     ? '⚠ KID! -'
+    : kind === 'hitchhiker'
+    ? '⚠ HITCHHIKER! -'
     : '⚠ CIVILIAN! -';
   addPopup(label + penalty, x, y - 22, '#4aa8e8', 16);
   shockwave(x, y, 'rgba(74,168,232,0.5)', 80);
+}
+
+// Spinout sequence — triggered when the player car hits a hitchhiker on the
+// road shoulder. The car loses control for ~2.2 seconds: it spins, drifts
+// side-to-side and may slam into obstacles before the driver regains control.
+function startSpinout(hitX, hitY) {
+  if (Game.spinout) return; // already in a spinout — don't stack
+  // Kick direction: spin toward the side the hitchhiker was on
+  const dir = (Game.player && hitX < Game.player.x) ? -1 : 1;
+  Game.spinout = {
+    t:       0,
+    dur:     2.2,
+    rot:     0,
+    rotV:    (7 + Math.random() * 6) * dir,  // radians/s initial spin
+    kickDir: dir,
+  };
+  if (Game.player) Game.player.vx = dir * 360;
+  // Cinematic effects
+  Game.shake = Math.max(Game.shake, 1.2);
+  Game.flash = Math.max(Game.flash, 0.8);
+  SFX.hit();
+  Haptics.death();
+  shockwave(hitX, hitY, 'rgba(255,200,80,0.65)', 110);
+  emit(hitX, hitY, 28, { color: '#ffb36a', speed: 300, life: 0.8, size: 5 });
+  emit(hitX, hitY, 12, { color: '#ffe07a', speed: 180, life: 0.5, size: 3 });
+  addPopup('⚠ SPINOUT!', W * 0.5, H * 0.36, '#ff8a3d', 20);
 }
 
 function isPowerupActive(id) {
@@ -2530,6 +2558,8 @@ const Game = {
   _pendingBadges: [],
   _pendingCosmetics: [],
   cosmetics: defaultCosmetics(),
+  // spinout: set when the player hits a hitchhiker; car loses control temporarily
+  spinout: null,   // { t, dur, rot, rotV, kickDir } | null
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -2702,6 +2732,7 @@ function startRun(mode, level) {
   Game.boss = null;
   Game.bossWarning = 0;
   Game.wreck = null;
+  Game.spinout = null;
   Game.deathSeq = null;
   Game.bossDeathSeq = null;
   Game.victorySeq = null;
@@ -2957,6 +2988,33 @@ function startDynamicEvent(id) {
       });
     }
     announceEvent('⚠ KIDS CROSSING', '#ffe07a');
+  } else if (id === 'hitchhiker_crossing') {
+    // 3-4 hitchhikers appear near the road shoulders — they drift inward, making them
+    // an escalating hazard. Hitting any one triggers a spinout.
+    Game.activeEvent = { id, name:'HITCHHIKERS', t: 11, max: 11 };
+    const { x0, x1 } = roadBounds();
+    const colors = ['#e8c84a', '#ff8a3d', '#7af07a', '#8ec5ff', '#e88a4a'];
+    const n = irand(3, 4);
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 === 0 ? 'L' : 'R';
+      const col = colors[Math.floor(Math.random() * colors.length)];
+      const edgeX = side === 'L'
+        ? rand(x0 + 4, x0 + 26)
+        : rand(x1 - 26, x1 - 4);
+      Game.obstacles.push({
+        kind: 'hitchhiker',
+        x: edgeX, y: -60 - i * 80,
+        w: 14, h: 30,
+        vy: rand(-5, 8),
+        color: col,
+        baseX: edgeX,
+        wanderAmp: rand(12, 26),
+        wanderSpeed: rand(0.5, 1.1),
+        wanderT: rand(0, Math.PI * 2),
+        driftDir: side === 'L' ? 1 : -1,
+      });
+    }
+    announceEvent('⚠ HITCHHIKERS ON ROAD', '#e8c84a');
   }
 }
 
@@ -2967,11 +3025,16 @@ function maybeTriggerDynamicEvent() {
   if (dist > 1500) pool.push('drone_strike');
   if (dist > 4000) pool.push('tank_column');
   if (Game.mode === 'classic' && dist > 1000) pool.push('civilian_convoy');
+  // Hitchhikers appear in classic/campaign from 500 m onward
+  if ((Game.mode === 'classic' || Game.mode === 'campaign') && dist > 500) {
+    pool.push('hitchhiker_crossing');
+  }
   // Late-campaign locations get civilian + kid hazard events too
   const _campLocIdx = currentCampaignLocIdx();
   if (_campLocIdx >= LATE_CAMPAIGN_LOC_IDX) {
     pool.push('civilian_convoy');
     pool.push('kids_crossing');
+    pool.push('hitchhiker_crossing');
   }
   const pick = pool[Math.floor(Math.random() * pool.length)];
   startDynamicEvent(pick);
@@ -3079,10 +3142,14 @@ function spawnEnemy(forceKind, forceElite) {
     // late-campaign: children + Big Wheels also in the mix
     const allowKids = isCampaign && campLocIdx >= LATE_CAMPAIGN_LOC_IDX;
     const kidChance = allowKids ? Math.min(0.07, 0.02 + (campLocIdx - LATE_CAMPAIGN_LOC_IDX) * 0.01) : 0;
+    // Hitchhikers appear from 500 m onward in classic/campaign — 3-7% chance, earlier than civs
+    const hitchChance = allowCivs ? Math.min(0.07, 0.01 + dist / 80000) : 0;
     if (allowCivs && dist > 800 && r < civChance) {
       pick = 'civilian';
     } else if (allowKids && dist > 600 && r < civChance + kidChance) {
       pick = Math.random() < 0.55 ? 'kid' : 'bigwheel';
+    } else if (allowCivs && dist > 500 && r < civChance + kidChance + hitchChance) {
+      pick = 'hitchhiker';
     } else if (unlockTank   && r < 0.07) pick = 'tank';
     else if (unlockMortar   && r < 0.14) pick = 'mortar';
     else if (unlockDrone    && r < 0.26) pick = 'drone';
@@ -3173,6 +3240,30 @@ function spawnEnemy(forceKind, forceElite) {
       wanderAmp: rand(8, 22),
       wanderSpeed: rand(1.0, 2.2),
       wanderT: rand(0, Math.PI * 2),
+    });
+  } else if (pick === 'hitchhiker') {
+    // lone pedestrian on the road shoulder with thumb out — DO NOT HIT!
+    // They spawn near the road edges but slowly wander toward the center lane,
+    // making them an increasingly real hazard. Hitting one triggers a spinout.
+    const colors = ['#e8c84a', '#ff8a3d', '#7af07a', '#8ec5ff', '#e88a4a', '#c87af0'];
+    const col = colors[Math.floor(Math.random() * colors.length)];
+    const side = Math.random() < 0.5 ? 'L' : 'R';
+    // Start near the road shoulder — just far enough to be reachable by the player
+    const edgeX = side === 'L'
+      ? rand(x0 + 4, x0 + 28)
+      : rand(x1 - 28, x1 - 4);
+    // Hitchhikers drift slightly inward over time using wander
+    const inwardDir = side === 'L' ? 1 : -1;
+    Game.obstacles.push({
+      kind: 'hitchhiker',
+      x: edgeX, y: -60, w: 14, h: 30,
+      vy: rand(-5, 8),       // nearly stationary relative to road scroll
+      color: col,
+      baseX: edgeX,
+      wanderAmp: rand(10, 22),
+      wanderSpeed: rand(0.5, 1.2),
+      wanderT: rand(0, Math.PI * 2),
+      driftDir: inwardDir,   // which direction they gradually wander toward road
     });
   } else if (pick === 'bigwheel') {
     // child on a Big Wheel toy car — wider than a kid, brightly colored, slow. Do NOT hit!
@@ -3788,32 +3879,68 @@ function update(dt) {
   // ---- player movement ----
   const p = Game.player;
   const stats = Game.vehicleStats;
-  const accel = stats.accel;
-  const maxV = stats.maxV;
-  const drag = 6.5;
-  if (input.left)  p.vx -= accel * dt;
-  if (input.right) p.vx += accel * dt;
-  if (!input.left && !input.right) {
-    if (input.touchTargetX !== null) {
-      const target = clamp(input.touchTargetX, 0, W);
-      const dx = target - p.x;
-      const desiredV = clamp(dx * 14, -maxV, maxV);
-      p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
-    } else {
-      p.vx -= p.vx * Math.min(1, drag * dt);
+  if (Game.spinout) {
+    // ---- spinout physics: player loses control, car spins and drifts ----
+    const sp = Game.spinout;
+    sp.t += dt;
+    const phase = Math.min(1, sp.t / sp.dur);
+    // Angular velocity decays exponentially; car slows its spin over time
+    sp.rotV *= Math.pow(0.18, dt);
+    sp.rot  += sp.rotV * dt;
+    // Side-to-side oscillating drift — amplitude fades as control returns
+    const driftAmp = 300 * (1 - phase * phase);
+    p.vx = Math.sin(sp.t * 4.8) * driftAmp * sp.kickDir;
+    p.x += p.vx * dt;
+    const { x0: sx0, x1: sx1 } = roadBounds();
+    if (p.x - p.w/2 < sx0 + 4) { p.x = sx0 + 4 + p.w/2; p.vx *= -0.55; Game.shake = Math.max(Game.shake, 0.6); }
+    if (p.x + p.w/2 > sx1 - 4) { p.x = sx1 - 4 - p.w/2; p.vx *= -0.55; Game.shake = Math.max(Game.shake, 0.6); }
+    p.y = H - 110;
+    // Screen shake — strong at first, fades out
+    if (phase < 0.5) Game.shake = Math.max(Game.shake, 0.65 * (1 - phase / 0.5));
+    // Smoke billows from the tires during the spinout
+    if (Math.random() < 0.65) {
+      emit(p.x + rand(-14, 14), p.y + p.h / 2 + rand(-4, 6), 1,
+        { color: 'rgba(70,50,35,0.55)', speed: 50, life: 1.0, size: 8, spread: Math.PI * 2 });
     }
+    // Skid marks fly off during violent early phase
+    if (phase < 0.5 && Math.random() < 0.9) {
+      Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.6, max: 1.6 });
+      Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.6, max: 1.6 });
+    }
+    // End the spinout — show "BACK IN CONTROL" briefly
+    if (sp.t >= sp.dur) {
+      Game.spinout = null;
+      addPopup('BACK IN CONTROL', W * 0.5, H * 0.4, '#7af07a', 13);
+    }
+  } else {
+    // ---- normal steering ----
+    const accel = stats.accel;
+    const maxV = stats.maxV;
+    const drag = 6.5;
+    if (input.left)  p.vx -= accel * dt;
+    if (input.right) p.vx += accel * dt;
+    if (!input.left && !input.right) {
+      if (input.touchTargetX !== null) {
+        const target = clamp(input.touchTargetX, 0, W);
+        const dx = target - p.x;
+        const desiredV = clamp(dx * 14, -maxV, maxV);
+        p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
+      } else {
+        p.vx -= p.vx * Math.min(1, drag * dt);
+      }
+    }
+    p.vx = clamp(p.vx, -maxV, maxV);
+    p.x += p.vx * dt;
+    const { x0, x1 } = roadBounds();
+    if (p.x - p.w/2 < x0 + 4) { p.x = x0 + 4 + p.w/2; p.vx *= -0.4; }
+    if (p.x + p.w/2 > x1 - 4) { p.x = x1 - 4 - p.w/2; p.vx *= -0.4; }
+    p.y = H - 110;
   }
-  p.vx = clamp(p.vx, -maxV, maxV);
-  p.x += p.vx * dt;
-  const { x0, x1 } = roadBounds();
-  if (p.x - p.w/2 < x0 + 4) { p.x = x0 + 4 + p.w/2; p.vx *= -0.4; }
-  if (p.x + p.w/2 > x1 - 4) { p.x = x1 - 4 - p.w/2; p.vx *= -0.4; }
-  p.y = H - 110;
 
   // ---- fire ----
   Game.fireCooldown -= dt;
   const wantsFire = input.fire || Settings.autoFire;
-  if (wantsFire && Game.fireCooldown <= 0) {
+  if (!Game.spinout && wantsFire && Game.fireCooldown <= 0) {
     fireGuns();
     const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
     const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
@@ -3848,6 +3975,13 @@ function update(dt) {
         o.x = clamp((o.baseX || o.x) + Math.sin(o.wanderT * (o.wanderSpeed || 1.5)) * o.wanderAmp,
                     o.w/2 + 4, W - o.w/2 - 4);
       }
+      // hitchhikers wander side-to-side AND drift slowly toward the road center
+      if (o.kind === 'hitchhiker' && o.wanderAmp) {
+        o.wanderT = (o.wanderT || 0) + dt;
+        const drift = (o.driftDir || 1) * o.wanderT * 5; // slow inward drift
+        o.x = clamp((o.baseX || o.x) + Math.sin(o.wanderT * (o.wanderSpeed || 0.9)) * o.wanderAmp + drift,
+                    o.w/2 + 4, W - o.w/2 - 4);
+      }
     } else {
       o.y += Game.speed * dt;
     }
@@ -3867,10 +4001,16 @@ function update(dt) {
         }
       }
       if (!Game.obstacles[i]) continue;
-      // player collision = penalty + slight damage
+      // player collision = penalty + damage (hitchhikers also trigger spinout)
       if (aabb(o, Game.player)) {
         applyCivilianPenalty(o.x, o.y, kind);
-        damagePlayer(20);
+        if (kind === 'hitchhiker') {
+          // hitting a hitchhiker sends the car into an out-of-control spinout
+          startSpinout(o.x, o.y);
+          damagePlayer(15);
+        } else {
+          damagePlayer(20);
+        }
         emit(o.x, o.y, 16, { color: o.color || '#4aa8e8', speed:220, life:0.5, size:3 });
         Game.obstacles.splice(i,1);
         Game.shake = Math.max(Game.shake, 0.5);
@@ -4945,7 +5085,9 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const c = getVehiclePaint(vehicle, paintId);
   ctx.save();
   ctx.translate(x, y);
-  const tilt = clamp(vx / 460, -1, 1) * 0.18;
+  const tilt = opts.forcedRot !== undefined
+    ? opts.forcedRot
+    : clamp(vx / 460, -1, 1) * 0.18;
   ctx.rotate(tilt);
 
   // shadow
@@ -5190,6 +5332,63 @@ function drawObstacle(o) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText('KID', 0, -o.h/2 - 5);
+    ctx.restore();
+  } else if (o.kind === 'hitchhiker') {
+    // Adult pedestrian on the road shoulder with thumb out — classic hitchhiker pose.
+    // Pulsing yellow halo signals danger: do NOT run them over.
+    const col = o.color || '#e8c84a';
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    // ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.beginPath();
+    ctx.ellipse(2, o.h/2, o.w/2 + 2, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // pulsing warning halo
+    const pulse = 0.5 + 0.5 * Math.sin(Game.t * 6);
+    ctx.strokeStyle = `rgba(255,255,80,${0.45 + 0.45 * pulse})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-o.w/2 - 4, -o.h/2 - 4, o.w + 8, o.h + 8);
+    // legs — slightly apart for standing pose
+    ctx.fillStyle = '#3a2818';
+    ctx.fillRect(-4, o.h/2 - 11, 3, 11);
+    ctx.fillRect( 1, o.h/2 - 11, 3, 11);
+    // body / jacket
+    ctx.fillStyle = col;
+    ctx.fillRect(-o.w/2 + 1, -o.h/2 + 8, o.w - 2, o.h/2 + 2);
+    // jacket highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(-o.w/2 + 2, -o.h/2 + 8, o.w - 4, 3);
+    // collar / shirt strip
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(-2, -o.h/2 + 9, 4, o.h/2);
+    // hitchhiking arm — outstretched to the side with thumb up
+    ctx.fillStyle = '#f0c08a';
+    ctx.fillRect(o.w/2 - 1, -o.h/2 + 12, 9, 4);   // forearm
+    ctx.beginPath(); ctx.arc(o.w/2 + 8, -o.h/2 + 10, 4, 0, Math.PI * 2); ctx.fill(); // fist/thumb
+    // thumb point (small upward nub)
+    ctx.fillRect(o.w/2 + 6, -o.h/2 + 5, 3, 5);
+    // head
+    ctx.fillStyle = '#f0c08a';
+    ctx.beginPath();
+    ctx.arc(0, -o.h/2 + 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // hair
+    ctx.fillStyle = '#3a2818';
+    ctx.beginPath();
+    ctx.arc(0, -o.h/2 + 3, 5, Math.PI, 0);
+    ctx.fill();
+    // duffel bag on other shoulder (small rectangle)
+    ctx.fillStyle = '#7a5c38';
+    ctx.fillRect(-o.w/2 - 5, -o.h/2 + 10, 5, 9);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(-o.w/2 - 4, -o.h/2 + 11, 2, 3);
+    // "HITCH" label above
+    ctx.fillStyle = `rgba(255,255,80,${0.75 + 0.25 * pulse})`;
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('HITCH', 0, -o.h/2 - 5);
     ctx.restore();
   }
 }
@@ -6124,6 +6323,9 @@ const LOADING_TIPS = [
   'ZOMBIE HORDE: THE HORDE DOUBLES IN DENSITY PAST 10 KILOMETERS',
   'ZOMBIE HORDE: NITRO + CONTACT IS YOUR BEST CROWD CLEAR',
   'ZOMBIE HORDE: RUNNERS CHASE. BRUISERS WAIT. NEVER STOP MOVING.',
+  // Hitchhiker tips
+  'HITCHHIKERS WANDER INTO YOUR LANE — HIT ONE AND YOU LOSE CONTROL',
+  'SPINOUT AHEAD: HITCHHIKERS NEAR THE SHOULDER CAN SEND YOU CRASHING',
 ];
 let _loadingTipIdx = -1;
 function pickLoadingTip() {
@@ -6377,7 +6579,8 @@ function render() {
       // drawn while at least one entry exists.
       drawPlayerNitroTrail();
       // hit flash overlay on the vehicle: tint white briefly
-      drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx);
+      drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx, 42, 64,
+        Game.spinout ? { forcedRot: Game.spinout.rot } : {});
       if (Game.hitFlash > 0) {
         ctx.save();
         ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
