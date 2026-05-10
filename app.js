@@ -746,6 +746,7 @@ const MODES = [
   { id: 'wastelandrun', name: 'WASTELAND RUN',   desc: 'Roguelite endless mode. Procedural runs with random mutators, escalating difficulty, and high-score leaderboards per seed. Unlocked after full campaign.' },
   { id: 'extraction',  name: 'EXTRACTION',      desc: 'Escort a convoy through zombie and raider waves. Keep the rig alive until the evac marker.' },
   { id: 'custom',      name: 'CUSTOM RUN',      desc: 'Play a share-code level from the in-browser editor.' },
+  { id: 'versus',      name: 'VERSUS',          desc: 'Authoritative 1v1 — server-simulated shared road. First to top score or last driver standing wins.' },
 ];
 
 // Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
@@ -4017,6 +4018,16 @@ window.addEventListener('keydown', e => {
     setControlHintMode('keyboard');
   }
   ensureAudio();
+  // Versus end: any key returns to menu
+  if (Game.state === 'versus-end' && Versus.endData) {
+    Versus.active = false;
+    Versus.ended = false;
+    Versus.endData = null;
+    Versus.state = null;
+    Game.state = 'title';
+    UI.showMode();
+    return;
+  }
   if (key === 'f') toggleFullscreen();
   if (key === 'p' && Game.state === 'playing') togglePause();
   if (key === 'escape') {
@@ -10954,6 +10965,7 @@ const UI = {
         else if (m === 'gauntlet') UI.showGauntlet();
         else if (m === 'campaign') UI.showCampaign();
         else if (m === 'ironthrone') UI.showIronThrone();
+        else if (m === 'versus') startVersusMode();
         else startRun(m);
         break;
       }
@@ -11330,6 +11342,16 @@ function updateCampaignDetail(locId) {
 // ============================================================
 document.addEventListener('click', e => {
   ensureAudio();
+  // Versus end: tap to return to menu
+  if (Game.state === 'versus-end' && Versus.endData) {
+    Versus.active = false;
+    Versus.ended = false;
+    Versus.endData = null;
+    Versus.state = null;
+    Game.state = 'title';
+    UI.showMode();
+    return;
+  }
   const t = e.target.closest('[data-act]');
   if (t) {
     UI.act(t.dataset.act, t.dataset.data);
@@ -11670,6 +11692,30 @@ function frame(now) {
   last = now;
   const frameStart = now;
   try {
+    // === VERSUS MODE FRAME ===
+    if (Game.state === 'versus' || Game.state === 'versus-lobby' || Game.state === 'versus-end') {
+      if (Versus.countdownActive) {
+        Versus.countdown -= dt;
+        if (Versus.countdown < 0) Versus.countdown = 0;
+      }
+      versusUpdateInput(dt);
+      // Decay screen effects
+      if (Game.shake > 0) Game.shake = Math.max(0, (Game.shake || 0) - dt * 2.4);
+      if (Game.hitFlash > 0) Game.hitFlash = Math.max(0, (Game.hitFlash || 0) - dt * 3);
+      renderVersus();
+      // Handle "return to menu" from versus-end
+      if (Game.state === 'versus-end' && Versus.endData) {
+        // Listen for any input to return
+        if (input.fire || input.left || input.right) {
+          Versus.active = false;
+          Versus.ended = false;
+          Versus.endData = null;
+          Versus.state = null;
+          Game.state = 'title';
+          UI.showMode();
+        }
+      }
+    } else {
     if (Game.state !== 'playing') GamepadInput.poll();
     if (Game.state === 'playing' || Game.state === 'loading'
         || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
@@ -11685,6 +11731,7 @@ function frame(now) {
     if (window.MP && MP.connected) drawMpGhosts();
     updateHint();
     if (DEBUG_HUD) drawDebugHud();
+    } // end else (non-versus)
   } catch (err) {
     // Never let one bad frame kill the loop. Log + continue.
     console.error('[frame]', err);
@@ -13351,6 +13398,350 @@ function boot() {
     document.addEventListener(ev, ensureAudio, { once:false, passive:true })
   );
 }
+// ============================================================
+// VERSUS MODE — client-side rendering of authoritative server state
+// ============================================================
+// The server runs the simulation; the client sends input and renders
+// the authoritative state it receives.  This keeps both players in
+// perfect sync and prevents cheating.
+
+const VS_ROAD_W = 400;
+const VS_ROAD_H = 800;
+
+const Versus = {
+  active: false,
+  state: null,    // latest vs-state from server
+  slot: -1,       // our slot (0 or 1)
+  opponent: '',
+  countdown: 0,
+  countdownActive: false,
+  ended: false,
+  endData: null,
+  inputSendTimer: 0,
+};
+
+function startVersusMode() {
+  if (!window.MP) {
+    UI.toast('MULTIPLAYER NOT AVAILABLE — START THE SERVER');
+    return;
+  }
+  // Ensure we're connected to the relay server first
+  if (!MP.connected) {
+    const profile = Profile.active();
+    const name = profile ? profile.name : 'DRIVER';
+    MP.connect({ room: 'VS', name });
+    UI.toast('CONNECTING TO SERVER…');
+    // Wait for connection then join versus
+    const _vsWaitConn = setInterval(() => {
+      if (MP.connected) {
+        clearInterval(_vsWaitConn);
+        _doVersusJoin();
+      }
+    }, 200);
+    setTimeout(() => clearInterval(_vsWaitConn), 10000);
+    return;
+  }
+  _doVersusJoin();
+}
+
+function _doVersusJoin() {
+  const profile = Profile.active();
+  const name = profile ? profile.name : 'DRIVER';
+  Versus.active = false;
+  Versus.ended = false;
+  Versus.endData = null;
+  Versus.state = null;
+  Versus.countdown = 0;
+  Versus.countdownActive = false;
+  UI.prompt('ENTER VERSUS ROOM CODE', function(room) {
+    const code = (room || 'ARENA').toUpperCase().slice(0, 12);
+    MP.vsJoin(code, name);
+    UI.toast('WAITING FOR OPPONENT…');
+    UI.hideAllScreens();
+    Game.state = 'versus-lobby';
+  });
+}
+
+// Wire up MP versus events
+(function initVersusEvents() {
+  if (!window.MP) return;
+
+  MP.on('vs-waiting', function(msg) {
+    Versus.slot = msg.slot;
+    Game.state = 'versus-lobby';
+    UI.toast('SLOT ' + (msg.slot + 1) + ' — WAITING FOR OPPONENT IN ' + msg.room);
+  });
+
+  MP.on('vs-full', function() {
+    UI.toast('ROOM IS FULL — TRY ANOTHER CODE');
+    UI.showMode();
+  });
+
+  MP.on('vs-countdown', function(msg) {
+    Versus.slot = msg.slot;
+    Versus.opponent = msg.opponent || 'OPPONENT';
+    Versus.countdown = msg.t;
+    Versus.countdownActive = true;
+    Versus.active = true;
+    Versus.ended = false;
+    Versus.endData = null;
+    Game.state = 'versus';
+    Game.mode = 'versus';
+    UI.hideAllScreens();
+  });
+
+  MP.on('vs-start', function() {
+    Versus.countdownActive = false;
+    Versus.countdown = 0;
+    Game.state = 'versus';
+  });
+
+  MP.on('vs-state', function(msg) {
+    Versus.state = msg;
+  });
+
+  MP.on('vs-hit', function(msg) {
+    if (msg.slot === Versus.slot) {
+      Game.shake = Math.max(Game.shake || 0, 0.6);
+      Game.hitFlash = 0.3;
+    }
+  });
+
+  MP.on('vs-kill', function(msg) {
+    if (msg.slot === Versus.slot) {
+      SFX.hit && SFX.hit();
+    }
+  });
+
+  MP.on('vs-end', function(msg) {
+    Versus.ended = true;
+    Versus.endData = msg;
+    Game.state = 'versus-end';
+    if (msg.winner === Versus.slot) {
+      SFX.victory && SFX.victory();
+      UI.toast('🏆 VICTORY!');
+    } else if (msg.winner === -1) {
+      UI.toast('DRAW!');
+    } else {
+      UI.toast('DEFEATED');
+    }
+  });
+})();
+
+// Versus input loop — sends inputs at ~30Hz
+function versusUpdateInput(dt) {
+  if (!Versus.active || Versus.ended || Versus.countdownActive) return;
+  if (!window.MP) return;
+  readKbd();
+  Versus.inputSendTimer -= dt;
+  if (Versus.inputSendTimer <= 0) {
+    Versus.inputSendTimer = 1 / 30;
+    MP.vsSendInput({
+      l: input.left,
+      r: input.right,
+      f: input.fire || Settings.autoFire,
+    });
+  }
+}
+
+// Render versus mode
+function renderVersus() {
+  if (!Versus.active && Game.state !== 'versus-lobby' && Game.state !== 'versus-end') return;
+
+  ctx.save();
+  // Black background
+  ctx.fillStyle = '#1a1408';
+  ctx.fillRect(0, 0, W, H);
+
+  if (Game.state === 'versus-lobby') {
+    // Waiting screen
+    ctx.fillStyle = '#f5d76e';
+    ctx.font = 'bold 28px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('VERSUS MODE', W / 2, H * 0.35);
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('WAITING FOR OPPONENT…', W / 2, H * 0.45);
+    ctx.font = '13px "Courier New", monospace';
+    ctx.fillStyle = '#888';
+    ctx.fillText('SHARE YOUR ROOM CODE', W / 2, H * 0.55);
+    ctx.restore();
+    return;
+  }
+
+  const st = Versus.state;
+  const scaleX = W / VS_ROAD_W;
+  const scaleY = H / VS_ROAD_H;
+
+  // Draw split road
+  ctx.fillStyle = '#2a2012';
+  ctx.fillRect(0, 0, W, H);
+
+  // Road surface — two lanes
+  const halfW = W / 2;
+  ctx.fillStyle = '#3a3020';
+  ctx.fillRect(halfW * 0.08, 0, halfW * 0.84, H); // left lane
+  ctx.fillRect(halfW + halfW * 0.08, 0, halfW * 0.84, H); // right lane
+
+  // Center divider
+  ctx.strokeStyle = '#f5d76e';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([20, 15]);
+  ctx.beginPath();
+  ctx.moveTo(halfW, 0);
+  ctx.lineTo(halfW, H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Lane markings
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([16, 12]);
+  ctx.beginPath();
+  ctx.moveTo(halfW * 0.5, 0); ctx.lineTo(halfW * 0.5, H);
+  ctx.moveTo(halfW + halfW * 0.5, 0); ctx.lineTo(halfW + halfW * 0.5, H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (st) {
+    // Draw enemies
+    ctx.fillStyle = '#a04020';
+    for (const e of st.e) {
+      const ex = e.x * scaleX;
+      const ey = e.y * scaleY;
+      const ew = e.w * scaleX;
+      const eh = e.h * scaleY;
+      ctx.fillRect(ex - ew / 2, ey - eh / 2, ew, eh);
+      // Windshield
+      ctx.fillStyle = '#ff8a3d';
+      ctx.fillRect(ex - ew * 0.3, ey - eh * 0.15, ew * 0.6, eh * 0.25);
+      ctx.fillStyle = '#a04020';
+    }
+
+    // Draw bullets
+    for (const b of st.b) {
+      ctx.fillStyle = b.o === Versus.slot ? '#7af07a' : '#ff5050';
+      ctx.fillRect(b.x * scaleX - 2, b.y * scaleY - 5, 4, 10);
+    }
+
+    // Draw players
+    for (let i = 0; i < st.p.length; i++) {
+      const p = st.p[i];
+      const px = p.x * scaleX;
+      const py = p.y * scaleY;
+      const pw = 42 * scaleX * 0.7;
+      const ph = 64 * scaleY * 0.6;
+      const isMe = i === Versus.slot;
+
+      ctx.save();
+      ctx.translate(px, py);
+      // Vehicle body
+      ctx.fillStyle = isMe ? '#f5d76e' : '#e05050';
+      ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+      // Windshield
+      ctx.fillStyle = isMe ? '#7ad0ff' : '#ff9090';
+      ctx.fillRect(-pw * 0.35, -ph * 0.3, pw * 0.7, ph * 0.25);
+      // Wheels
+      ctx.fillStyle = '#222';
+      ctx.fillRect(-pw / 2 - 3, -ph * 0.35, 5, ph * 0.2);
+      ctx.fillRect(pw / 2 - 2, -ph * 0.35, 5, ph * 0.2);
+      ctx.fillRect(-pw / 2 - 3, ph * 0.15, 5, ph * 0.2);
+      ctx.fillRect(pw / 2 - 2, ph * 0.15, 5, ph * 0.2);
+      ctx.restore();
+
+      // Name tag
+      const name = isMe ? 'YOU' : (Versus.opponent || 'OPP').toUpperCase();
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      const tw = ctx.measureText(name).width + 8;
+      ctx.fillRect(px - tw / 2, py - ph / 2 - 24, tw, 16);
+      ctx.fillStyle = isMe ? '#f5d76e' : '#e05050';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(name, px, py - ph / 2 - 16);
+
+      // HP bar
+      const barW = 44, barH = 5;
+      const barY = py - ph / 2 - 6;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(px - barW / 2, barY, barW, barH);
+      const hpRatio = Math.max(0, p.hp / 100);
+      ctx.fillStyle = hpRatio > 0.3 ? '#7af07a' : '#ff5050';
+      ctx.fillRect(px - barW / 2, barY, barW * hpRatio, barH);
+    }
+
+    // HUD — scores + timer
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = 'bold 14px "Courier New", monospace';
+    const myP = st.p[Versus.slot] || st.p[0];
+    const oppP = st.p[Versus.slot === 0 ? 1 : 0] || st.p[1];
+    // My score
+    ctx.fillStyle = '#f5d76e';
+    ctx.fillText('YOU: ' + (myP ? myP.score : 0) + ' · K:' + (myP ? myP.kills : 0), 10, 10);
+    // Opponent score
+    ctx.fillStyle = '#e05050';
+    ctx.textAlign = 'right';
+    ctx.fillText((Versus.opponent || 'OPP') + ': ' + (oppP ? oppP.score : 0) + ' · K:' + (oppP ? oppP.kills : 0), W - 10, 10);
+    // Timer
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px "Courier New", monospace';
+    const timeLeft = Math.max(0, (st.dur || 60) - (st.t || 0));
+    ctx.fillText(Math.ceil(timeLeft) + 's', W / 2, 10);
+  }
+
+  // Countdown overlay
+  if (Versus.countdownActive && Versus.countdown > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#f5d76e';
+    ctx.font = 'bold 72px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(Math.ceil(Versus.countdown), W / 2, H * 0.4);
+    ctx.font = 'bold 20px "Courier New", monospace';
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('VS ' + (Versus.opponent || 'OPPONENT'), W / 2, H * 0.55);
+  }
+
+  // Results overlay
+  if (Game.state === 'versus-end' && Versus.endData) {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, W, H);
+    const ed = Versus.endData;
+    const won = ed.winner === Versus.slot;
+    const draw = ed.winner === -1;
+    ctx.fillStyle = won ? '#f5d76e' : draw ? '#aaa' : '#ff5050';
+    ctx.font = 'bold 36px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(won ? '🏆 VICTORY' : draw ? 'DRAW' : 'DEFEATED', W / 2, H * 0.25);
+
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.fillStyle = '#ddd';
+    const s = ed.scores || [];
+    for (let i = 0; i < s.length; i++) {
+      const isMe = i === Versus.slot;
+      const label = isMe ? 'YOU' : (s[i].name || 'OPP');
+      const y = H * 0.4 + i * 50;
+      ctx.fillStyle = isMe ? '#f5d76e' : '#e05050';
+      ctx.fillText(label + ': ' + s[i].score + ' PTS · ' + s[i].kills + ' KILLS · ' + s[i].hp + ' HP', W / 2, y);
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = '13px "Courier New", monospace';
+    ctx.fillText('TAP OR PRESS ANY KEY TO RETURN', W / 2, H * 0.75);
+  }
+
+  ctx.restore();
+}
+
+// Hook versus into the main frame loop — we patch it into the existing frame() flow
+// by checking if we're in versus state during update() and render().
+// Cannot reassign `update` since it's declared with function; versus hooks directly into frame().
+
 // ============================================================
 // CINEMATIC POST-FX — "Wasteland Cinematic" v2.1
 // ============================================================
