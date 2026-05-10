@@ -2848,21 +2848,79 @@ function rollPowerup() {
 const keys = Object.create(null);
 const input = { left:false, right:false, fire:false, touchTargetX: null, touchFire: false };
 const activePointers = new Map();
+const SCREEN_ESCAPE_ACTION = {
+  profiles: 'back-title',
+  character: 'character-cancel',
+  menu: 'back-title',
+  garage: 'back-menu',
+  upgrade: 'back-garage',
+  mode: 'back-menu',
+  gauntlet: 'back-mode',
+  campaign: 'back-mode',
+  ironthrone: 'back-mode',
+  settings: 'back-settings-origin',
+  pause: 'pause-resume',
+  stats: 'back-menu',
+  achievements: 'back-menu',
+  mp: 'back-menu',
+  scoreboard: 'back-scoreboard',
+  results: 'back-menu',
+  sidekick: 'back-menu',
+};
+
+function isTypingField(el) {
+  if (!el) return false;
+  const tag = (el.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA';
+}
 
 window.addEventListener('keydown', e => {
-  keys[e.key.toLowerCase()] = true;
-  if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(e.key.toLowerCase())) e.preventDefault();
+  const key = e.key.toLowerCase();
+  keys[key] = true;
+  if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(key)) e.preventDefault();
+  if (key === 'arrowleft' || key === 'arrowright' || key === 'a' || key === 'd' || key === ' ' || key === 'z' || key === 'x') {
+    setControlHintMode('keyboard');
+  }
   ensureAudio();
-  if (e.key.toLowerCase() === 'f') toggleFullscreen();
-  if (e.key.toLowerCase() === 'p' && Game.state === 'playing') togglePause();
+  if (key === 'f') toggleFullscreen();
+  if (key === 'p' && Game.state === 'playing') togglePause();
+  if (key === 'escape') {
+    const modal = document.getElementById('modal');
+    const cloudModal = document.getElementById('cloud-modal');
+    const modalOpen = !!(modal && modal.classList.contains('show'));
+    const cloudOpen = !!(cloudModal && cloudModal.style.display !== 'none');
+    if (modalOpen) {
+      UI.act('modal-cancel');
+      e.preventDefault();
+      return;
+    }
+    if (cloudOpen) {
+      const cancel = document.getElementById('cloud-modal-cancel');
+      if (cancel) cancel.click();
+      e.preventDefault();
+      return;
+    }
+    if (isTypingField(document.activeElement)) return;
+    if (Game.state === 'playing') {
+      togglePause();
+      e.preventDefault();
+      return;
+    }
+    const backAction = SCREEN_ESCAPE_ACTION[UI.current];
+    if (backAction) {
+      UI.act(backAction);
+      e.preventDefault();
+      return;
+    }
+  }
   // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
   // persists the choice in localStorage. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
-  if (e.key.toLowerCase() === 'q' && document.activeElement !== document.getElementById('modal-input')) {
+  if (key === 'q' && !isTypingField(document.activeElement)) {
     cycleQualityMode();
   }
   if (Game.state === 'gameover') {
-    if (e.key.toLowerCase() === 'r' || e.key === 'Enter') UI.act('res-again');
+    if (key === 'r' || key === 'enter') UI.act('res-again');
   }
 }, { passive:false });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
@@ -2874,6 +2932,7 @@ function onPointerDown(e) {
   ensureAudio();
   if (Game.state !== 'playing') return; // canvas only handles input during gameplay
   if (Game.paused) { togglePause(false); return; }
+  setControlHintMode('touch');
   e.preventDefault();
   try { cvs.setPointerCapture(e.pointerId); } catch(_){}
   activePointers.set(e.pointerId, e.clientX);
@@ -3227,7 +3286,7 @@ function startRun(mode, level) {
   Game.shakeOX = Game.shakeOY = Game.shakeTX = Game.shakeTY = 0;
   Game.shakeRetargetT = 0;
   Game.playerTrail.length = 0;
-  Game.hintTime = IS_TOUCH ? 4.5 : 0;
+  Game.hintTime = 4.5;
   Game.bullets.length = 0; Game.enemies.length = 0; Game.obstacles.length = 0;
   Game.pickups.length = 0; Game.enemyBullets.length = 0;
   Game.particles.length = 0; Game.shockwaves.length = 0;
@@ -9166,8 +9225,19 @@ document.getElementById('modal-input').addEventListener('keydown', e => {
 // ============================================================
 const hintEl = document.getElementById('hint');
 let hintShown = false;
+let controlHintMode = IS_TOUCH ? 'touch' : 'keyboard';
+const CONTROL_HINT_TEXT = {
+  touch: 'DRAG TO STEER · HOLD TO FIRE',
+  keyboard: 'A / D OR ← / → TO STEER · SPACE TO FIRE',
+};
+function setControlHintMode(mode) {
+  if (mode !== 'touch' && mode !== 'keyboard') return;
+  controlHintMode = mode;
+  if (hintEl) hintEl.textContent = CONTROL_HINT_TEXT[controlHintMode];
+}
+if (hintEl) hintEl.textContent = CONTROL_HINT_TEXT[controlHintMode];
 function updateHint() {
-  if (Game.state === 'playing' && Game.hintTime > 0 && IS_TOUCH) {
+  if (Game.state === 'playing' && Game.hintTime > 0) {
     if (!hintShown) { hintEl.classList.add('show'); hintShown = true; }
   } else {
     if (hintShown) { hintEl.classList.remove('show'); hintShown = false; }
