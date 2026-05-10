@@ -195,6 +195,27 @@ const VEHICLES = [
   },
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
+const VEHICLE_VISUALS = {
+  rustbucket: { silhouette:'boxy', personality:'rust', stripe:0, spoiler:0, mirrors:1, ram:0, hover:0, underglow:0, panelNoise:0.9, vents:1 },
+  junker: { silhouette:'heavy', personality:'junker', stripe:0, spoiler:0, mirrors:0, ram:0.4, hover:0, underglow:0, panelNoise:0.8, vents:1 },
+  roadrunner: { silhouette:'sleek', personality:'racer', stripe:2, spoiler:1, mirrors:1, ram:0, hover:0, underglow:0.2, panelNoise:0.2, vents:3 },
+  goliath: { silhouette:'heavy', personality:'armor', stripe:0, spoiler:0, mirrors:0, ram:1, hover:0, underglow:0, panelNoise:0.4, vents:2 },
+  phantom: { silhouette:'futuristic', personality:'phantom', stripe:1, spoiler:0.6, mirrors:0, ram:0, hover:0, underglow:0.9, panelNoise:0.2, vents:2 },
+  sandviper: { silhouette:'aggressive', personality:'viper', stripe:2, spoiler:0.8, mirrors:1, ram:0.2, hover:0, underglow:0.4, panelNoise:0.25, vents:4 },
+  ironclad: { silhouette:'heavy', personality:'armor', stripe:1, spoiler:0, mirrors:0, ram:0.9, hover:0, underglow:0, panelNoise:0.35, vents:2 },
+  warlordking: { silhouette:'aggressive', personality:'warlord', stripe:1, spoiler:1, mirrors:0, ram:1, hover:0, underglow:0.5, panelNoise:0.3, vents:3 },
+  apexwarlord: { silhouette:'futuristic', personality:'apex', stripe:2, spoiler:1, mirrors:1, ram:0.4, hover:0, underglow:0.8, panelNoise:0.15, vents:3 },
+  cemeterytank: { silhouette:'tank', personality:'tank', stripe:0, spoiler:0, mirrors:0, ram:1, hover:0, underglow:0, panelNoise:0.45, vents:1 },
+  vortexhover: { silhouette:'futuristic', personality:'hover', stripe:1, spoiler:0.3, mirrors:0, ram:0, hover:1, underglow:1, panelNoise:0.2, vents:3 },
+  bloodravenbomber: { silhouette:'heavy', personality:'bomber', stripe:1, spoiler:0.2, mirrors:0, ram:0.6, hover:0, underglow:0.35, panelNoise:0.35, vents:3 },
+  irontitan: { silhouette:'tank', personality:'tank', stripe:0, spoiler:0, mirrors:0, ram:1, hover:0, underglow:0, panelNoise:0.4, vents:1 },
+  spectrestealth: { silhouette:'futuristic', personality:'phantom', stripe:1, spoiler:0.4, mirrors:0, ram:0, hover:0, underglow:1, panelNoise:0.1, vents:2 },
+  doomhauler: { silhouette:'heavy', personality:'rammer', stripe:1, spoiler:0, mirrors:0, ram:1, hover:0, underglow:0.3, panelNoise:0.5, vents:2 },
+  neonphantom: { silhouette:'futuristic', personality:'neon', stripe:2, spoiler:0.7, mirrors:0, ram:0.1, hover:0.2, underglow:1, panelNoise:0.08, vents:3 },
+  stormreaver: { silhouette:'aggressive', personality:'storm', stripe:2, spoiler:0.8, mirrors:1, ram:0.4, hover:0, underglow:0.7, panelNoise:0.2, vents:4 },
+  gravewarden: { silhouette:'heavy', personality:'warden', stripe:0, spoiler:0, mirrors:0, ram:0.9, hover:0, underglow:0.1, panelNoise:0.45, vents:1 },
+  sunlancer: { silhouette:'sleek', personality:'lancer', stripe:2, spoiler:1, mirrors:1, ram:0.2, hover:0, underglow:0.6, panelNoise:0.15, vents:4 },
+};
 
 const COSMETICS = {
   paint: [
@@ -2716,6 +2737,8 @@ const Settings = {
   cinematic: true,
   // color-blind simulation filter applied to the game canvas ('none'|'protanopia'|'deuteranopia'|'tritanopia')
   colorBlind: 'none',
+  // vehicle/element render detail budget ('low'|'medium'|'high')
+  visualQuality: 'high',
   // skip non-essential animations for users sensitive to motion
   reducedMotion: false,
   // === v2.3 SETTINGS — Wasteland Empire ===
@@ -2738,8 +2761,9 @@ const Settings = {
        if (typeof o.hudContrast === 'boolean') this.hudContrast = o.hudContrast;
        if (typeof o.cinematic === 'boolean') this.cinematic = o.cinematic;
        if (typeof o.colorBlind === 'string') this.colorBlind = o.colorBlind;
-       if (typeof o.reducedMotion === 'boolean') this.reducedMotion = o.reducedMotion;
-       if (typeof o.empireExpansion === 'boolean') this.empireExpansion = o.empireExpansion;
+        if (typeof o.reducedMotion === 'boolean') this.reducedMotion = o.reducedMotion;
+        if (o.visualQuality === 'low' || o.visualQuality === 'medium' || o.visualQuality === 'high') this.visualQuality = o.visualQuality;
+        if (typeof o.empireExpansion === 'boolean') this.empireExpansion = o.empireExpansion;
     } catch (_) {}
   },
   save() {
@@ -2748,7 +2772,7 @@ const Settings = {
         master: this.master, music: this.music, sfx: this.sfx, shake: this.shake,
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
-        cinematic: this.cinematic, colorBlind: this.colorBlind, reducedMotion: this.reducedMotion,
+        cinematic: this.cinematic, colorBlind: this.colorBlind, visualQuality: this.visualQuality, reducedMotion: this.reducedMotion,
         empireExpansion: this.empireExpansion,
       }));
     } catch (_) {}
@@ -7544,206 +7568,158 @@ const BIGWHEEL_TIRE = '#171717';
 const BIGWHEEL_RIM = '#969daa';
 const BIGWHEEL_SPOKE = '#f6fbff';
 
-function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
-  let paintId = null;
-  if (!opts.noCosmetic) {
-    paintId = opts.paintId || null;
-    if (!paintId && vehicle === Game.vehicle && Game.cosmetics) {
-      paintId = Game.cosmetics.equippedPaint;
+function visualQualityLevel() {
+  const q = (Settings.visualQuality || 'high');
+  let base = q === 'low' ? 0 : q === 'medium' ? 1 : 2;
+  if (typeof PerfMon !== 'undefined' && PerfMon.quality < 0.22) base = 0;
+  else if (typeof PerfMon !== 'undefined' && PerfMon.quality < 0.5) base = Math.min(base, 1);
+  return base;
+}
+
+function getVehicleVisualProfile(vehicle) {
+  const base = VEHICLE_VISUALS[vehicle && vehicle.id] || {};
+  const st = (vehicle && vehicle.base) || {};
+  const fast = (st.maxV || 0) >= 560;
+  const heavy = (st.maxHp || 0) >= 240;
+  return Object.assign({
+    silhouette: heavy ? 'heavy' : fast ? 'sleek' : 'boxy',
+    personality: 'default',
+    stripe: fast ? 1 : 0,
+    spoiler: fast ? 0.6 : 0,
+    mirrors: 1,
+    ram: heavy ? 0.65 : 0,
+    hover: vehicle && vehicle.special === 'terrainIgnore' ? 1 : 0,
+    underglow: vehicle && vehicle.special === 'cloak' ? 0.7 : 0.1,
+    panelNoise: 0.3,
+    vents: fast ? 2 : 1,
+  }, base);
+}
+
+function getVehicleUpgradeLevelsForRender(vehicle, opts = {}) {
+  if (opts.upgrades) return opts.upgrades;
+  try {
+    if (opts.upgradeVehicleId && opts.profile) {
+      return (opts.profile.vehicleUpgrades && opts.profile.vehicleUpgrades[opts.upgradeVehicleId]) || UPGRADE_TRACK_DEFAULTS;
     }
-  }
-  const c = getVehiclePaint(vehicle, paintId);
+    const p = Profile.active && Profile.active();
+    if (vehicle && p && p.vehicleUpgrades && p.vehicleUpgrades[vehicle.id]) return p.vehicleUpgrades[vehicle.id];
+  } catch (_) {}
+  return UPGRADE_TRACK_DEFAULTS;
+}
 
-  const t = Game.t || 0;
-  const speed = Math.abs(vx || 0);
-  const speedN = clamp(speed / 420, 0, 1);
-  const wheelSpin = t * (6 + speedN * 26);
-  const suspensionBob = Math.sin(t * (5 + speedN * 9) + x * 0.012) * (0.5 + speedN * 1.3);
+function getVehicleDamageRatio(vehicle, opts = {}) {
+  if (typeof opts.damageRatio === 'number') return clamp(opts.damageRatio, 0, 1);
+  if (opts.enemy && opts.enemy.maxHp) return 1 - clamp((opts.enemy.hp || 0) / Math.max(1, opts.enemy.maxHp), 0, 1);
+  if (vehicle === Game.vehicle) return 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1);
+  return 0;
+}
 
-  // ---- CEMETERY TANK special render ----
-  if (vehicle.shape === 'tank') {
-    ctx.save();
-    ctx.translate(x, y + suspensionBob * 0.35);
-    const tilt = clamp(vx / 460, -1, 1) * 0.08;
-    ctx.rotate(tilt);
-    const tw = w + 12, th = h;
-
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(-tw/2 + 5, -th/2 + 8, tw + 2, th);
-
-    // tracks (wide sides)
-    ctx.fillStyle = '#0a0a06';
-    ctx.fillRect(-tw/2 - 7, -th/2, 12, th);
-    ctx.fillRect( tw/2 - 5, -th/2, 12, th);
-    // track links
-    const trackScroll = (t * (40 + speedN * 100)) % (th / 8);
-    ctx.fillStyle = '#1c1c10';
-    for (let i = 0; i < 8; i++) {
-      const ty = -th/2 + 2 + ((i * (th / 8) + trackScroll) % th);
-      ctx.fillRect(-tw/2 - 7, ty, 12, 2);
-      ctx.fillRect( tw/2 - 5, ty, 12, 2);
-    }
-    // track drive wheels
-    ctx.fillStyle = '#2a2a16';
-    [-th/2 + 6, th/2 - 6].forEach(ty => {
-      ctx.beginPath(); ctx.arc(-tw/2 - 1, ty, 6, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc( tw/2 + 1, ty, 6, 0, Math.PI*2); ctx.fill();
-    });
-
-    // hull body
-    const hg = ctx.createLinearGradient(-tw/2, 0, tw/2, 0);
-    hg.addColorStop(0, c.body); hg.addColorStop(0.4, '#252520'); hg.addColorStop(1, c.body);
-    ctx.fillStyle = hg;
-    ctx.fillRect(-tw/2, -th/2, tw, th);
-
-    // front / rear armor slabs
-    ctx.fillStyle = c.hood;
-    ctx.fillRect(-tw/2, -th/2, tw, 10);
-    ctx.fillRect(-tw/2,  th/2 - 8, tw, 8);
-
-    // armor bolt rivets
-    ctx.fillStyle = '#3a3828';
-    [-tw/2 + 3, tw/2 - 7].forEach(bx => {
-      for (let i = 0; i < 4; i++) ctx.fillRect(bx, -th/2 + 14 + i * 13, 4, 4);
-    });
-
-    // turret base plate
-    ctx.fillStyle = c.cab;
-    ctx.fillRect(-tw/4, -th/4, tw/2, th/2.4);
-    // turret top gradient
-    const tg = ctx.createLinearGradient(-tw/4, 0, tw/4, 0);
-    tg.addColorStop(0, '#14140e'); tg.addColorStop(0.5, '#23231a'); tg.addColorStop(1, '#14140e');
-    ctx.fillStyle = tg;
-    ctx.fillRect(-tw/4 + 2, -th/4, tw/2 - 4, th/5);
-
-    // cannon barrel
-    const recoil = Math.max(0, 1 - ((Game.player ? Game.player.fireT || 1 : 1) / FIRE_ANIM_WINDOW)) * RECOIL_DISTANCE;
-    ctx.fillStyle = '#0a0a06';
-    ctx.fillRect(-4, th/4 - 6 + recoil, 8, 20 - recoil);
-    // muzzle brake
-    ctx.fillRect(-6, th/4 + 13, 12, 5 - recoil * 0.2);
-
-    // skull emblem on turret top
-    ctx.fillStyle = c.glow;
-    ctx.globalAlpha = 0.75;
-    ctx.fillRect(-7, -th/4 + 2, 14, 9); // skull dome
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = c.cab;
-    ctx.fillRect(-6, -th/4 + 4, 4, 4); // left eye socket
-    ctx.fillRect( 2, -th/4 + 4, 4, 4); // right eye socket
-    ctx.fillRect(-5, -th/4 + 8, 2, 3); // left tooth
-    ctx.fillRect(-1, -th/4 + 8, 2, 3); // mid tooth
-    ctx.fillRect( 3, -th/4 + 8, 2, 3); // right tooth
-
-    // toxic green glow aura (ambient)
-    ctx.fillStyle = c.glow;
-    ctx.globalAlpha = 0.07;
-    ctx.fillRect(-tw/2 - 8, -th/2 - 8, tw + 16, th + 16);
-    ctx.globalAlpha = 1;
-
-    // headlights (toxic green)
-    ctx.fillStyle = c.glow;
-    ctx.fillRect(-tw/2 + 3, -th/2 - 5, 8, 4);
-    ctx.fillRect( tw/2 - 11, -th/2 - 5, 8, 4);
-
-    // muzzle flash on recent shot
-    const ft = Game.player ? (Game.player.fireT || 1) : 1;
-    if (ft < 0.12) {
-      ctx.fillStyle = `rgba(122,255,90,${0.9 * (1 - ft / 0.12)})`;
-      ctx.beginPath(); ctx.arc(0, th/4 + 18, 9, 0, Math.PI*2); ctx.fill();
-    }
-
-    // exhaust (reuse trail system)
-    const exFlicker = 0.5 + 0.5 * Math.sin(t * 28);
-    const exLen = 5 + exFlicker * 10;
-    const trail = getTrailDef(!opts.noCosmetic && Game.cosmetics ? Game.cosmetics.equippedTrail : null);
-    const [hot, warm] = trail.flameColors || [[255, 220, 80], [255, 115, 25]];
-    const exGl = ctx.createLinearGradient(0, th/2 - 2, 0, th/2 + exLen);
-    exGl.addColorStop(0, `rgba(${hot[0]},${hot[1]},${hot[2]},${0.9 * exFlicker + 0.35})`);
-    exGl.addColorStop(0.45, `rgba(${warm[0]},${warm[1]},${warm[2]},${0.75 * exFlicker + 0.1})`);
-    exGl.addColorStop(1, 'rgba(255,35,0,0)');
-    ctx.fillStyle = exGl;
-    ctx.fillRect(-tw/2 + 4, th/2 - 2, 6, exLen);
-    ctx.fillRect( tw/2 - 10, th/2 - 2, 6, exLen);
-
-    ctx.restore();
-    return;
-  }
-
-  ctx.save();
-  ctx.translate(x, y + suspensionBob);
-  const tilt = opts.forcedRot !== undefined
-    ? opts.forcedRot
-    : clamp(vx / 460, -1, 1) * 0.18;
-  ctx.rotate(tilt);
-
-  // shadow
-  const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.86);
-  sh.addColorStop(0, 'rgba(0,0,0,0.48)');
-  sh.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sh;
+function pathVehicleSilhouette(w, h, profile) {
   ctx.beginPath();
-  ctx.ellipse(0, h * 0.18, w * 0.62, h * 0.34, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (profile === 'sleek' || profile === 'aggressive') {
+    ctx.moveTo(-w * 0.36, -h * 0.5);
+    ctx.quadraticCurveTo(0, -h * 0.64, w * 0.36, -h * 0.5);
+    ctx.lineTo(w * 0.49, h * 0.28);
+    ctx.quadraticCurveTo(0, h * 0.57, -w * 0.49, h * 0.28);
+  } else if (profile === 'heavy' || profile === 'tank') {
+    ctx.moveTo(-w * 0.48, -h * 0.5);
+    ctx.lineTo(w * 0.48, -h * 0.5);
+    ctx.lineTo(w * 0.54, h * 0.34);
+    ctx.quadraticCurveTo(0, h * 0.54, -w * 0.54, h * 0.34);
+  } else if (profile === 'futuristic') {
+    ctx.moveTo(-w * 0.34, -h * 0.53);
+    ctx.lineTo(w * 0.34, -h * 0.53);
+    ctx.lineTo(w * 0.53, -h * 0.1);
+    ctx.lineTo(w * 0.47, h * 0.32);
+    ctx.quadraticCurveTo(0, h * 0.58, -w * 0.47, h * 0.32);
+    ctx.lineTo(-w * 0.53, -h * 0.1);
+  } else {
+    ctx.moveTo(-w * 0.42, -h * 0.5);
+    ctx.quadraticCurveTo(0, -h * 0.58, w * 0.42, -h * 0.5);
+    ctx.lineTo(w * 0.5, h * 0.36);
+    ctx.quadraticCurveTo(0, h * 0.52, -w * 0.5, h * 0.36);
+  }
+  ctx.closePath();
+}
 
-  // tires (top-down wheels with spinning spokes)
+function drawVehicleWheelSet(w, h, wheelSpin, turnLean, detail, treadBoost = 1) {
   const tireYFront = -h * 0.25;
   const tireYRear = h * 0.28;
   const tireX = w * 0.5 + 2;
   const tireR = Math.max(4, Math.min(6.8, w * 0.14));
-  drawWheelTopdown(-tireX, tireYFront, tireR, wheelSpin);
-  drawWheelTopdown( tireX, tireYFront, tireR, wheelSpin);
-  drawWheelTopdown(-tireX, tireYRear, tireR, wheelSpin);
-  drawWheelTopdown( tireX, tireYRear, tireR, wheelSpin);
+  const wob = Math.sin(Game.t * (8 + Math.abs(turnLean) * 2)) * 0.08 * (1 + Math.abs(turnLean) * 2);
+  drawWheelTopdown(-tireX, tireYFront + wob, tireR, wheelSpin * (1 + wob), '#121212', '#8f96a2', '#dce6ff');
+  drawWheelTopdown( tireX, tireYFront - wob, tireR, wheelSpin * (1 - wob), '#121212', '#8f96a2', '#dce6ff');
+  drawWheelTopdown(-tireX, tireYRear - wob, tireR, wheelSpin * 0.94, '#101010', '#8f96a2', '#dce6ff');
+  drawWheelTopdown( tireX, tireYRear + wob, tireR, wheelSpin * 0.94, '#101010', '#8f96a2', '#dce6ff');
+  if (detail < 2) return;
+  ctx.strokeStyle = 'rgba(50,50,50,0.65)';
+  ctx.lineWidth = 1;
+  for (const sy of [tireYFront, tireYRear]) {
+    for (const sx of [-tireX, tireX]) {
+      for (let i = -2; i <= 2; i++) {
+        const ty = sy + i * (tireR * 0.22);
+        ctx.beginPath();
+        ctx.moveTo(sx - tireR * 0.72, ty);
+        ctx.lineTo(sx + tireR * 0.72, ty + Math.sin(wheelSpin + i) * 0.2 * treadBoost);
+        ctx.stroke();
+      }
+    }
+  }
+}
 
-  // body shell
-  const shellGrad = ctx.createLinearGradient(-w/2, 0, w/2, 0);
+function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades) {
+  const shellGrad = ctx.createLinearGradient(-w/2, -h*0.2, w/2, h*0.3);
   shellGrad.addColorStop(0, c.body);
-  shellGrad.addColorStop(0.5, shade(c.body, -14));
-  shellGrad.addColorStop(1, c.body);
+  shellGrad.addColorStop(0.45, shade(c.body, -18));
+  shellGrad.addColorStop(1, shade(c.body, 4));
   ctx.fillStyle = shellGrad;
-  ctx.beginPath();
-  ctx.moveTo(-w * 0.42, -h * 0.5);
-  ctx.quadraticCurveTo(0, -h * 0.58, w * 0.42, -h * 0.5);
-  ctx.lineTo(w * 0.5, h * 0.36);
-  ctx.quadraticCurveTo(0, h * 0.52, -w * 0.5, h * 0.36);
-  ctx.closePath();
+  pathVehicleSilhouette(w, h, visual.silhouette);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // side skirts / fender shadows
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  ctx.fillRect(-w * 0.5, -h * 0.18, 3, h * 0.55);
-  ctx.fillRect(w * 0.5 - 3, -h * 0.18, 3, h * 0.55);
-
-  // hood and rear deck
-  const hoodGrad = ctx.createLinearGradient(0, -h * 0.52, 0, -h * 0.15);
+  const hoodGrad = ctx.createLinearGradient(0, -h * 0.52, 0, -h * 0.12);
   hoodGrad.addColorStop(0, c.hood);
-  hoodGrad.addColorStop(1, shade(c.hood, -20));
+  hoodGrad.addColorStop(1, shade(c.hood, -24));
   ctx.fillStyle = hoodGrad;
-  pathRoundRect(-w * 0.37, -h * 0.48, w * 0.74, h * 0.2, 5);
+  pathRoundRect(-w * 0.37, -h * 0.49, w * 0.74, h * 0.23, 5);
   ctx.fill();
-  pathRoundRect(-w * 0.35, h * 0.29, w * 0.7, h * 0.12, 4);
+  ctx.fillStyle = shade(c.hood, -18);
+  pathRoundRect(-w * 0.33, h * 0.30, w * 0.66, h * 0.11, 3);
   ctx.fill();
 
-  // cabin
-  const cabGrad = ctx.createLinearGradient(0, -h * 0.17, 0, h * 0.23);
+  if (visual.stripe > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${0.07 + 0.04 * visual.stripe})`;
+    pathRoundRect(-w * 0.05, -h * 0.46, w * 0.1, h * 0.77, 3);
+    ctx.fill();
+    if (visual.stripe > 1) {
+      pathRoundRect(-w * 0.20, -h * 0.43, w * 0.07, h * 0.72, 2);
+      ctx.fill();
+      pathRoundRect(w * 0.13, -h * 0.43, w * 0.07, h * 0.72, 2);
+      ctx.fill();
+    }
+  }
+
+  const cabGrad = ctx.createLinearGradient(0, -h * 0.2, 0, h * 0.24);
   cabGrad.addColorStop(0, c.cab);
-  cabGrad.addColorStop(1, shade(c.cab, -16));
+  cabGrad.addColorStop(1, shade(c.cab, -20));
   ctx.fillStyle = cabGrad;
-  pathRoundRect(-w * 0.31, -h * 0.2, w * 0.62, h * 0.42, 8);
+  pathRoundRect(-w * 0.32, -h * 0.2, w * 0.64, h * 0.44, 8);
   ctx.fill();
-
-  // windshield + rear glass
-  const glassPulse = 0.9 + 0.1 * Math.sin(t * 4.2);
   ctx.fillStyle = c.windshield;
-  pathRoundRect(-w * 0.26, -h * 0.15, w * 0.52, h * 0.11, 4);
+  pathRoundRect(-w * 0.26, -h * 0.16, w * 0.52, h * 0.12, 4);
   ctx.fill();
-  ctx.fillStyle = `rgba(170,220,255,${0.25 * glassPulse})`;
-  pathRoundRect(-w * 0.2, h * 0.02, w * 0.4, h * 0.08, 3);
-  ctx.fill();
+  if (detail >= 1) {
+    const glassA = 0.24 + 0.08 * Math.sin((Game.t || 0) * 4.2 + speedN * 4);
+    ctx.fillStyle = `rgba(220,245,255,${glassA})`;
+    pathRoundRect(-w * 0.2, -h * 0.14, w * 0.15, h * 0.08, 2);
+    ctx.fill();
+    pathRoundRect(w * 0.05, h * 0.02, w * 0.18, h * 0.08, 2);
+    ctx.fill();
+  }
 
-  // panel lines / vents
   ctx.strokeStyle = 'rgba(0,0,0,0.28)';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -7753,49 +7729,278 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   ctx.moveTo( w * 0.16, -h * 0.43); ctx.lineTo( w * 0.16, -h * 0.3);
   ctx.stroke();
 
-  // chrome edge highlights
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-  ctx.beginPath();
-  ctx.moveTo(-w * 0.35, -h * 0.44);
-  ctx.lineTo(-w * 0.1, -h * 0.49);
-  ctx.lineTo(w * 0.1, -h * 0.49);
-  ctx.lineTo(w * 0.35, -h * 0.44);
-  ctx.stroke();
+  if (detail >= 2) {
+    const rivets = visual.personality === 'armor' || visual.silhouette === 'heavy' || visual.silhouette === 'tank';
+    if (rivets) {
+      ctx.fillStyle = 'rgba(28,22,18,0.55)';
+      for (let i = 0; i < 5; i++) {
+        const ry = -h * 0.45 + i * h * 0.2;
+        ctx.beginPath(); ctx.arc(-w * 0.31, ry, 1.1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(w * 0.31, ry, 1.1, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (visual.personality === 'rust' || visual.personality === 'junker') {
+      ctx.fillStyle = `rgba(120,60,26,${0.16 + visual.panelNoise * 0.18})`;
+      for (let i = 0; i < 6; i++) {
+        const px = -w * 0.3 + ((i * 17) % Math.round(w * 0.62));
+        const py = -h * 0.4 + ((i * 29) % Math.round(h * 0.75));
+        pathRoundRect(px, py, 5 + (i % 3), 3 + (i % 2), 1);
+        ctx.fill();
+      }
+    }
+  }
 
-  // front lights + brake lights
-  ctx.fillStyle = c.glow;
-  pathRoundRect(-w * 0.38, -h * 0.52, w * 0.18, h * 0.05, 2);
+  if ((upgrades.plating || 0) > 0) {
+    ctx.fillStyle = 'rgba(22,20,24,0.58)';
+    const armorW = 2 + (upgrades.plating || 0) * 0.55;
+    ctx.fillRect(-w * 0.52, -h * 0.2, armorW, h * 0.58);
+    ctx.fillRect(w * 0.52 - armorW, -h * 0.2, armorW, h * 0.58);
+    if (detail >= 1 && (upgrades.plating || 0) >= 3) {
+      ctx.fillStyle = 'rgba(160,160,160,0.45)';
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.16, -h * 0.54);
+      ctx.lineTo(0, -h * 0.62);
+      ctx.lineTo(w * 0.16, -h * 0.54);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  if ((upgrades.weapons || 0) > 0) {
+    const turretW = 2.5 + Math.min(4.5, upgrades.weapons * 0.7);
+    ctx.fillStyle = '#0f0c0b';
+    ctx.fillRect(-turretW / 2, -h * 0.56, turretW, 14 + upgrades.weapons);
+    if ((upgrades.weapons || 0) >= 3) {
+      ctx.fillRect(-w * 0.18, -h * 0.4, 3, 11);
+      ctx.fillRect(w * 0.15, -h * 0.4, 3, 11);
+    }
+  }
+  if ((upgrades.engine || 0) > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    for (let i = 0; i < Math.min(4, visual.vents + Math.floor(upgrades.engine / 2)); i++) {
+      const vx = -w * 0.22 + i * (w * 0.14);
+      ctx.fillRect(vx, -h * 0.34, 4, 10);
+    }
+  }
+
+  const damageAlpha = damageR * 0.42;
+  if (damageAlpha > 0.02) {
+    ctx.fillStyle = `rgba(40,36,34,${damageAlpha})`;
+    pathVehicleSilhouette(w, h, visual.silhouette);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(30,26,22,${0.2 + damageR * 0.35})`;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const cx = -w * 0.18 + i * w * 0.15;
+      const cy = -h * 0.05 + i * h * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(cx - 4, cy - 3);
+      ctx.lineTo(cx + 5, cy + 2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawVehicleLightsAndFx(w, h, c, detail, speedN, t, opts, visual, upgrades, damageR) {
+  const isDark = !!(Game.isNight || Game.isStorm);
+  const glowBoost = (isDark ? 1 : 0.55) + speedN * 0.5;
+  const headA = clamp(0.5 + glowBoost * 0.6, 0, 1);
+  const headColor = c.glow;
+  ctx.fillStyle = headColor;
+  pathRoundRect(-w * 0.37, -h * 0.54, w * 0.16, h * 0.055, 2);
   ctx.fill();
-  pathRoundRect(w * 0.2, -h * 0.52, w * 0.18, h * 0.05, 2);
+  pathRoundRect(w * 0.21, -h * 0.54, w * 0.16, h * 0.055, 2);
   ctx.fill();
+  if (detail >= 1 && isDark) {
+    const lg = ctx.createLinearGradient(0, -h * 0.56, 0, -h * 1.18 - speedN * 45);
+    lg.addColorStop(0, `rgba(255,255,220,${0.28 * headA})`);
+    lg.addColorStop(0.65, `rgba(255,240,180,${0.12 * headA})`);
+    lg.addColorStop(1, 'rgba(255,240,180,0)');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.38, -h * 0.52);
+    ctx.lineTo(-w * 0.16, -h * 0.52);
+    ctx.lineTo(-w * 0.05, -h * 1.2 - speedN * 45);
+    ctx.lineTo(-w * 0.48, -h * 1.2 - speedN * 45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(w * 0.16, -h * 0.52);
+    ctx.lineTo(w * 0.38, -h * 0.52);
+    ctx.lineTo(w * 0.48, -h * 1.2 - speedN * 45);
+    ctx.lineTo(w * 0.05, -h * 1.2 - speedN * 45);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const brakeForce = clamp(Math.abs(opts.brakeForce || 0), 0, 1);
   const brakeA = BRAKE_BASE_ALPHA
     + BRAKE_IDLE_BOOST * (speedN < BRAKE_IDLE_SPEED_THRESHOLD ? 1 : 0)
-    + BRAKE_PULSE_AMPLITUDE * Math.max(0, Math.sin(t * BRAKE_PULSE_RATE));
-  ctx.fillStyle = `rgba(255,70,60,${brakeA})`;
+    + BRAKE_PULSE_AMPLITUDE * Math.max(0, Math.sin(t * BRAKE_PULSE_RATE))
+    + brakeForce * 0.4;
+  ctx.fillStyle = `rgba(255,70,60,${clamp(brakeA + damageR * 0.2, 0, 0.95)})`;
   pathRoundRect(-w * 0.29, h * 0.43, w * 0.14, h * 0.04, 2);
   ctx.fill();
   pathRoundRect(w * 0.15, h * 0.43, w * 0.14, h * 0.04, 2);
   ctx.fill();
 
-  // center stripe for race styling
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  pathRoundRect(-w * 0.05, -h * 0.44, w * 0.1, h * 0.78, 3);
-  ctx.fill();
-
-  // exhaust flames — animated flicker
-  const exFlicker = 0.5 + 0.5 * Math.sin(t * 28 + speedN * 8);
-  const exLen = 6 + exFlicker * (8 + speedN * 8);
   const trail = getTrailDef(!opts.noCosmetic && Game.cosmetics ? Game.cosmetics.equippedTrail : null);
   const [hot, warm] = trail.flameColors || [[255, 220, 80], [255, 115, 25]];
+  const reactorBlue = (upgrades.reactor || 0) >= 2 || visual.underglow > 0.75;
+  const exFlicker = 0.5 + 0.5 * Math.sin(t * 28 + speedN * 8);
+  const exLen = 6 + exFlicker * (8 + speedN * 8 + ((opts.nitro || isPowerupActive('nitro')) ? 8 : 0));
   const exGl = ctx.createLinearGradient(0, h / 2 - 2, 0, h / 2 + exLen);
-  exGl.addColorStop(0, `rgba(${hot[0]},${hot[1]},${hot[2]},${0.9 * exFlicker + 0.35})`);
-  exGl.addColorStop(0.45, `rgba(${warm[0]},${warm[1]},${warm[2]},${0.75 * exFlicker + 0.1})`);
+  if (reactorBlue) {
+    exGl.addColorStop(0, `rgba(120,220,255,${0.8 * exFlicker + 0.3})`);
+    exGl.addColorStop(0.45, `rgba(80,130,255,${0.7 * exFlicker + 0.1})`);
+  } else {
+    exGl.addColorStop(0, `rgba(${hot[0]},${hot[1]},${hot[2]},${0.9 * exFlicker + 0.35})`);
+    exGl.addColorStop(0.45, `rgba(${warm[0]},${warm[1]},${warm[2]},${0.75 * exFlicker + 0.1})`);
+  }
   exGl.addColorStop(1, 'rgba(255,35,0,0)');
   ctx.fillStyle = exGl;
   ctx.fillRect(-w * 0.25 - 2, h / 2 - 2, 6, exLen);
   ctx.fillRect(w * 0.25 - 4, h / 2 - 2, 6, exLen);
 
+  if (detail >= 1 && (visual.underglow > 0.25 || reactorBlue || (opts.nitro || isPowerupActive('nitro')))) {
+    const ug = ctx.createRadialGradient(0, h * 0.18, 0, 0, h * 0.18, w * 0.9);
+    ug.addColorStop(0, reactorBlue ? 'rgba(90,190,255,0.28)' : `rgba(255,120,70,${0.12 + visual.underglow * 0.12})`);
+    ug.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = ug;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.18, w * 0.7, h * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawVehicleExtras(w, h, visual, detail) {
+  if (visual.ram > 0.2) {
+    ctx.fillStyle = 'rgba(20,18,18,0.72)';
+    const rw = w * (0.22 + visual.ram * 0.2);
+    ctx.beginPath();
+    ctx.moveTo(-rw, -h * 0.56);
+    ctx.lineTo(0, -h * (0.67 + visual.ram * 0.03));
+    ctx.lineTo(rw, -h * 0.56);
+    ctx.lineTo(rw * 0.7, -h * 0.52);
+    ctx.lineTo(-rw * 0.7, -h * 0.52);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (visual.spoiler > 0.2) {
+    ctx.fillStyle = 'rgba(16,14,14,0.78)';
+    const sy = h * 0.41;
+    const sw = w * (0.36 + visual.spoiler * 0.24);
+    pathRoundRect(-sw * 0.5, sy, sw, h * 0.05, 2);
+    ctx.fill();
+    if (detail >= 1) {
+      ctx.fillRect(-sw * 0.42, sy - 4, 2, 5);
+      ctx.fillRect(sw * 0.4, sy - 4, 2, 5);
+    }
+  }
+  if (visual.mirrors > 0 && detail >= 1) {
+    ctx.fillStyle = 'rgba(25,25,25,0.8)';
+    ctx.fillRect(-w * 0.38, -h * 0.07, 4, 2);
+    ctx.fillRect(w * 0.34, -h * 0.07, 4, 2);
+  }
+  if (visual.hover > 0.15) {
+    ctx.fillStyle = `rgba(90,200,255,${0.10 + visual.hover * 0.11})`;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.21, w * 0.62, h * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
+  if (!vehicle) return;
+  let paintId = null;
+  if (!opts.noCosmetic) {
+    paintId = opts.paintId || null;
+    if (!paintId && vehicle === Game.vehicle && Game.cosmetics) paintId = Game.cosmetics.equippedPaint;
+  }
+  const c = getVehiclePaint(vehicle, paintId);
+  const visual = getVehicleVisualProfile(vehicle);
+  const upgrades = getVehicleUpgradeLevelsForRender(vehicle, opts);
+  const damageR = getVehicleDamageRatio(vehicle, opts);
+  const t = (opts.t !== undefined ? opts.t : (Game.t || 0));
+  const speed = Math.abs(vx || 0);
+  const speedN = clamp(speed / 460, 0, 1);
+  const detail = opts.detailLevel !== undefined ? opts.detailLevel : visualQualityLevel();
+  const biomeRough = ({ redcanyon:0.35, ash:0.2, midnight:0.08, thunderplains:0.45, frostwaste:0.24, irradiated:0.26, scraparch:0.38 })[Game.biome] || 0.15;
+  const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
+  const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
+  const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
+  const lean = clamp(vx / 460, -1, 1) * (0.12 + speedN * 0.12) + idleRock;
+  const tilt = opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0);
+  const wheelSpin = t * (5.5 + speedN * 30);
+  const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
+  const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
+    ? 0.34 + 0.26 * Math.sin(t * 18)
+    : 1;
+
+  ctx.save();
+  ctx.translate(x, y + suspensionBob);
+  ctx.rotate(tilt);
+  ctx.globalAlpha *= ghostAlpha * cloakFade;
+
+  const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.92);
+  sh.addColorStop(0, 'rgba(0,0,0,0.54)');
+  sh.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sh;
+  ctx.beginPath();
+  ctx.ellipse(0, h * 0.18, w * 0.66, h * 0.36, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (visual.silhouette === 'tank' || vehicle.shape === 'tank') {
+    const tw = w + 12, th = h;
+    ctx.fillStyle = '#090906';
+    ctx.fillRect(-tw/2 - 7, -th/2, 12, th);
+    ctx.fillRect(tw/2 - 5, -th/2, 12, th);
+    const trackScroll = (t * (38 + speedN * 95)) % (th / 8);
+    ctx.fillStyle = '#1d1a12';
+    for (let i = 0; i < 8; i++) {
+      const ty = -th/2 + 2 + ((i * (th / 8) + trackScroll) % th);
+      ctx.fillRect(-tw/2 - 7, ty, 12, 2);
+      ctx.fillRect(tw/2 - 5, ty, 12, 2);
+    }
+    drawVehicleBodyCore(tw, th, c, visual, detail, speedN, damageR, upgrades);
+    ctx.fillStyle = c.cab;
+    pathRoundRect(-tw / 4, -th / 4, tw / 2, th / 2.4, 4);
+    ctx.fill();
+    const recoil = clamp((Game.muzzleT || 0) / 0.08, 0, 1) * RECOIL_DISTANCE;
+    ctx.fillStyle = '#0a0908';
+    ctx.fillRect(-4, th/4 - 6 + recoil, 8, 20 - recoil);
+    ctx.fillRect(-6, th/4 + 13, 12, 4 - recoil * 0.2);
+    if (detail >= 1) {
+      ctx.fillStyle = `rgba(122,255,90,${0.45 + 0.4 * Math.sin(t * 8)})`;
+      ctx.fillRect(-tw/2 + 3, -th/2 - 5, 8, 4);
+      ctx.fillRect(tw/2 - 11, -th/2 - 5, 8, 4);
+    }
+    drawVehicleLightsAndFx(tw, th, c, detail, speedN, t, opts, visual, upgrades, damageR);
+    ctx.restore();
+    if (damageR > 0.55 && detail >= 1 && Math.random() < 0.2) {
+      Game.particles.push({ x: x + rand(-w * 0.2, w * 0.2), y: y - h * 0.3, vx: rand(-10, 10), vy: rand(-30, -8), life: 0.45, max: 0.45, size: 4, color: 'rgba(110,90,70,0.4)' });
+    }
+    return;
+  }
+
+  drawVehicleWheelSet(w, h, wheelSpin, lean, detail, 1 + speedN * 0.35);
+  drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades);
+  drawVehicleExtras(w, h, visual, detail);
+  drawVehicleLightsAndFx(w, h, c, detail, speedN, t, opts, visual, upgrades, damageR);
+
+  if (opts.ghost && detail >= 1) {
+    ctx.fillStyle = 'rgba(170,210,255,0.22)';
+    pathVehicleSilhouette(w, h, visual.silhouette);
+    ctx.fill();
+  }
   ctx.restore();
+
+  if (damageR > 0.45 && detail >= 1 && Math.random() < 0.28) {
+    Game.particles.push({
+      x: x + rand(-w * 0.24, w * 0.24), y: y - h * 0.22,
+      vx: rand(-15, 15), vy: rand(-35, -10),
+      life: 0.55, max: 0.55, size: 5, color: `rgba(120,100,80,${0.26 + damageR * 0.35})`,
+    });
+  }
 }
 
 function drawObstacle(o) {
@@ -8097,45 +8302,35 @@ function drawEnemy(e) {
   if (e.kind === 'zombie') { drawZombie(e); return; }
   if (e.kind === 'drone')  { drawDrone(e);  return; }
   if (e.kind === 'tank')   { drawTank(e);   return; }
+  const rv = {
+    id: 'enemy_buggy',
+    color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
+    base: { maxHp: e.maxHp || 2, maxV: Math.abs(e.vy || 120) * 4 },
+  };
+  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, {
+    noCosmetic: true,
+    damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
+    enemy: e,
+    extraTilt: Math.sin((Game.t || 0) * 4 + e.x * 0.02) * 0.04,
+  });
   ctx.save();
   ctx.translate(e.x, e.y);
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.fillRect(-e.w/2 + 3, -e.h/2 + 5, e.w, e.h);
-  // body
-  const bg = ctx.createLinearGradient(-e.w/2, 0, e.w/2, 0);
-  bg.addColorStop(0, '#5a1010'); bg.addColorStop(0.5, '#7a1a1a'); bg.addColorStop(1, '#5a1010');
-  ctx.fillStyle = bg;
-  ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
-  // angled spike front (now points DOWN since enemy faces player)
-  ctx.fillStyle = '#1a0f08';
+  ctx.fillStyle = 'rgba(20,8,8,0.75)';
   ctx.beginPath();
-  ctx.moveTo(-e.w/2, e.h/2);
-  ctx.lineTo(0, e.h/2 + 10);
-  ctx.lineTo(e.w/2, e.h/2);
-  ctx.closePath(); ctx.fill();
-  // cab
-  ctx.fillStyle = '#3a0a0a';
-  ctx.fillRect(-e.w/2 + 5, -e.h/2 + 14, e.w - 10, 20);
-  // windshield (red glow eyes)
-  ctx.fillStyle = '#ff5050';
-  ctx.fillRect(-e.w/2 + 8, -e.h/2 + 18, e.w - 16, 5);
-  // gun
-  ctx.fillStyle = '#1a0f08';
-  ctx.fillRect(-3, e.h/2 - 4, 6, 10);
-  // wheels
-  ctx.fillStyle = '#0d0805';
-  ctx.fillRect(-e.w/2 - 3, -e.h/2 + 8, 5, 12);
-  ctx.fillRect( e.w/2 - 2, -e.h/2 + 8, 5, 12);
-  ctx.fillRect(-e.w/2 - 3,  e.h/2 - 18, 5, 14);
-  ctx.fillRect( e.w/2 - 2,  e.h/2 - 18, 5, 14);
-  // spikes on roof
-  ctx.fillStyle = '#aa3030';
-  ctx.fillRect(-e.w/2 + 7, -e.h/2 + 10, 2, 4);
-  ctx.fillRect(e.w/2 - 9, -e.h/2 + 10, 2, 4);
+  ctx.moveTo(-e.w * 0.34, e.h * 0.5);
+  ctx.lineTo(0, e.h * 0.62);
+  ctx.lineTo(e.w * 0.34, e.h * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  if (visualQualityLevel() >= 1) {
+    ctx.fillStyle = 'rgba(255,70,70,0.65)';
+    ctx.fillRect(-e.w * 0.18, -e.h * 0.41, e.w * 0.1, 4);
+    ctx.fillRect(e.w * 0.08, -e.h * 0.41, e.w * 0.1, 4);
+  }
   if (e.elite) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
-    ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
+    ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
   }
   ctx.restore();
   // Damage smoke — emit from badly-damaged enemies
@@ -8160,31 +8355,30 @@ function drawEnemy(e) {
 }
 
 function drawBike(e) {
+  const rv = {
+    id: 'enemy_bike',
+    color: { body:'#5b1111', hood:'#3a0b0b', cab:'#1a0909', windshield:'#ff6464', glow:'#ff5050' },
+    base: { maxHp: e.maxHp || 1, maxV: Math.abs(e.vy || 60) * 6 },
+  };
+  drawVehicle(e.x, e.y, rv, e.vx || 0, Math.max(22, e.w + 8), Math.max(34, e.h + 6), {
+    noCosmetic: true,
+    damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
+    enemy: e,
+    extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07,
+  });
   ctx.save();
   ctx.translate(e.x, e.y);
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  ctx.fillRect(-e.w/2 + 2, -e.h/2 + 4, e.w, e.h);
-  // frame
-  ctx.fillStyle = '#3a0a0a';
-  ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
-  // rider torso
   ctx.fillStyle = '#1a0f08';
-  ctx.fillRect(-e.w/2 + 4, -e.h/2 + 6, e.w - 8, 16);
-  // helmet
-  ctx.fillStyle = '#5a0a0a';
-  ctx.beginPath(); ctx.arc(0, -e.h/2 + 4, 5, 0, Math.PI * 2); ctx.fill();
-  // visor
-  ctx.fillStyle = '#ff5050';
+  ctx.beginPath();
+  ctx.arc(0, -e.h/2 + 4, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ff6a6a';
   ctx.fillRect(-3, -e.h/2 + 3, 6, 2);
-  // wheels
-  ctx.fillStyle = '#0a0a0a';
-  ctx.fillRect(-3, -e.h/2 - 3, 6, 8);
-  ctx.fillRect(-3,  e.h/2 - 5, 6, 8);
-  // exhaust spit
-  ctx.fillStyle = 'rgba(255,140,60,0.55)';
-  ctx.fillRect(-e.w/2 - 3, e.h/2 - 8, 3, 6);
-  ctx.fillRect( e.w/2,     e.h/2 - 8, 3, 6);
+  if (visualQualityLevel() >= 1) {
+    ctx.fillStyle = 'rgba(255,140,60,0.7)';
+    ctx.fillRect(-e.w/2 - 2, e.h/2 - 7, 3, 6);
+    ctx.fillRect(e.w/2 - 1, e.h/2 - 7, 3, 6);
+  }
   if (e.elite) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
@@ -8203,31 +8397,26 @@ function drawBike(e) {
 }
 
 function drawMortar(e) {
+  const rv = {
+    id: 'enemy_mortar',
+    color: { body:'#563116', hood:'#3e2512', cab:'#23150a', windshield:'#ffb36a', glow:'#ff9c4a' },
+    base: { maxHp: e.maxHp || 3, maxV: 100 },
+  };
+  drawVehicle(e.x, e.y, rv, 0, Math.max(30, e.w + 8), Math.max(34, e.h + 10), {
+    noCosmetic: true,
+    damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
+    enemy: e,
+  });
   ctx.save();
   ctx.translate(e.x, e.y);
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.beginPath(); ctx.ellipse(2, e.h/2, e.w/2 + 2, 5, 0, 0, Math.PI*2); ctx.fill();
-  // sandbags base
-  ctx.fillStyle = '#4a3018';
-  ctx.fillRect(-e.w/2, e.h/2 - 8, e.w, 8);
-  ctx.fillStyle = '#3a2410';
-  for (let i = -1; i <= 1; i++) {
-    ctx.fillRect(i * 10 - 4, e.h/2 - 7, 8, 6);
+  ctx.fillStyle = '#22140b';
+  ctx.fillRect(-4, -e.h/2, 8, e.h * 0.9);
+  if (e.fireT > 1.6 || e.fireT < 0.3) {
+    ctx.fillStyle = 'rgba(255,180,60,0.6)';
+    ctx.beginPath(); ctx.arc(0, -e.h/2 + 2, 7, 0, Math.PI*2); ctx.fill();
   }
-  // mortar tube
-  ctx.fillStyle = '#1a0f08';
-  ctx.fillRect(-5, -e.h/2, 10, e.h - 4);
-  ctx.fillStyle = '#3a2010';
-  ctx.fillRect(-5, -e.h/2, 10, 4);
-  // muzzle glow if recently fired
-  if (e.fireT > 1.6) {
-    ctx.fillStyle = 'rgba(255,180,60,0.5)';
-    ctx.beginPath(); ctx.arc(0, -e.h/2 + 2, 6, 0, Math.PI*2); ctx.fill();
-  }
-  // crew/operator
   ctx.fillStyle = '#5a0a0a';
-  ctx.beginPath(); ctx.arc(-e.w/2 + 4, e.h/2 - 12, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-e.w/2 + 4, e.h/2 - 11, 3, 0, Math.PI * 2); ctx.fill();
   if (e.elite) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
@@ -8249,9 +8438,17 @@ function drawZombie(e) {
   ctx.fillStyle = e.goreColor || '#2a3a18';
   ctx.fillRect(-e.w/2 + 2, e.h/4, e.w/2 - 3, e.h/4 + 2 + legOffset);
   ctx.fillRect(3, e.h/4, e.w/2 - 3, e.h/4 + 2 - legOffset);
-  // torso
+  // torso (ragged body + scavenged car-panel armor)
   ctx.fillStyle = e.color || '#3a4a28';
   ctx.fillRect(-e.w/2, -e.h/4, e.w, e.h/2 + 4);
+  if (visualQualityLevel() >= 1) {
+    ctx.fillStyle = 'rgba(70,50,38,0.5)';
+    pathRoundRect(-e.w/2 + 2, -e.h/4 + 2, e.w - 4, 8, 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(130,40,30,0.4)';
+    ctx.fillRect(-e.w * 0.16, -e.h * 0.02, 5, 3);
+    ctx.fillRect(e.w * 0.04, e.h * 0.03, 4, 3);
+  }
   // arms (reaching forward / swinging)
   const armSwing = Math.sin((e.wobble || 0)) * (isBruiser ? 4 : 6);
   ctx.fillStyle = e.goreColor || '#2a3a18';
@@ -8285,35 +8482,38 @@ function drawZombie(e) {
 function drawDrone(e) {
   ctx.save();
   ctx.translate(e.x, e.y);
-  // tilt in direction of horizontal travel
-  const tilt = clamp(e.vx / 160, -1, 1) * 0.3;
+  const tilt = clamp(e.vx / 160, -1, 1) * 0.3 + Math.sin((Game.t || 0) * 8 + e.x * 0.03) * 0.04;
   ctx.rotate(tilt);
-  // shadow
+  const pulse = 0.6 + 0.4 * Math.sin((Game.t || 0) * 9);
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath(); ctx.ellipse(3, e.h/2 + 2, e.w/2, 4, 0, 0, Math.PI*2); ctx.fill();
-  // wings (angled rects)
-  ctx.fillStyle = '#2a1a40';
+  ctx.beginPath(); ctx.ellipse(3, e.h/2 + 2, e.w/2 + 4, 4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#201332';
   ctx.beginPath();
-  ctx.moveTo(-e.w/2 - 8, 0);
-  ctx.lineTo(-4, -e.h/4);
-  ctx.lineTo(-4,  e.h/4);
+  ctx.moveTo(-e.w/2 - 10, 0);
+  ctx.lineTo(-3, -e.h/3);
+  ctx.lineTo(-3, e.h/3);
   ctx.closePath(); ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(e.w/2 + 8, 0);
-  ctx.lineTo(4, -e.h/4);
-  ctx.lineTo(4,  e.h/4);
+  ctx.moveTo(e.w/2 + 10, 0);
+  ctx.lineTo(3, -e.h/3);
+  ctx.lineTo(3, e.h/3);
   ctx.closePath(); ctx.fill();
-  // fuselage body
   const bg = ctx.createLinearGradient(0, -e.h/2, 0, e.h/2);
-  bg.addColorStop(0, '#4a2870'); bg.addColorStop(0.5, '#6a3a9a'); bg.addColorStop(1, '#4a2870');
+  bg.addColorStop(0, '#4a2d74'); bg.addColorStop(0.5, '#6a40a6'); bg.addColorStop(1, '#3d255f');
   ctx.fillStyle = bg;
-  ctx.fillRect(-e.w/4, -e.h/2, e.w/2, e.h);
-  // engine glow
-  ctx.fillStyle = 'rgba(200,122,240,0.7)';
-  ctx.beginPath(); ctx.arc(0, e.h/2 - 4, 4, 0, Math.PI*2); ctx.fill();
-  // sensor eye
+  pathRoundRect(-e.w/4, -e.h/2, e.w/2, e.h, 4);
+  ctx.fill();
+  ctx.fillStyle = `rgba(200,122,240,${0.45 + pulse * 0.35})`;
+  ctx.beginPath(); ctx.arc(0, e.h/2 - 4, 5, 0, Math.PI*2); ctx.fill();
   ctx.fillStyle = '#ff40ff';
   ctx.beginPath(); ctx.arc(0, -e.h/4, 3, 0, Math.PI*2); ctx.fill();
+  if (visualQualityLevel() >= 1) {
+    ctx.strokeStyle = 'rgba(255,120,255,0.45)';
+    ctx.beginPath();
+    ctx.moveTo(-4, -e.h * 0.1);
+    ctx.lineTo(4, -e.h * 0.1);
+    ctx.stroke();
+  }
   if (e.elite) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
@@ -8323,51 +8523,23 @@ function drawDrone(e) {
 }
 
 function drawTank(e) {
+  const rv = {
+    id: 'enemy_tank',
+    shape: 'tank',
+    color: { body:'#384016', hood:'#252c12', cab:'#1a2010', windshield:'#9bd66d', glow:'#d2ff6f' },
+    base: { maxHp: e.maxHp || 6, maxV: Math.abs(e.vy || 60) * 4 },
+  };
+  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, {
+    noCosmetic: true,
+    damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
+    enemy: e,
+  });
   ctx.save();
   ctx.translate(e.x, e.y);
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(-e.w/2 + 5, -e.h/2 + 8, e.w, e.h);
-  // tracks (sides)
-  ctx.fillStyle = '#0d0d08';
-  ctx.fillRect(-e.w/2 - 5, -e.h/2 + 6, 8, e.h - 12);
-  ctx.fillRect( e.w/2 - 3, -e.h/2 + 6, 8, e.h - 12);
-  // track links
-  ctx.fillStyle = '#1a1a10';
-  for (let i = 0; i < 5; i++) {
-    const ty = -e.h/2 + 10 + i * 10;
-    ctx.fillRect(-e.w/2 - 5, ty, 8, 2);
-    ctx.fillRect( e.w/2 - 3, ty, 8, 2);
-  }
-  // hull body
-  const hg = ctx.createLinearGradient(-e.w/2, 0, e.w/2, 0);
-  hg.addColorStop(0, '#2a3010'); hg.addColorStop(0.5, '#3a4018'); hg.addColorStop(1, '#2a3010');
-  ctx.fillStyle = hg;
-  ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
-  // armor plates (angled front)
-  ctx.fillStyle = '#1a2008';
-  ctx.beginPath();
-  ctx.moveTo(-e.w/2, e.h/2);
-  ctx.lineTo(0, e.h/2 + 12);
-  ctx.lineTo(e.w/2, e.h/2);
-  ctx.closePath(); ctx.fill();
-  // turret base
-  ctx.fillStyle = '#1a2010';
-  ctx.fillRect(-e.w/4, -e.h/4, e.w/2, e.h/2.2);
-  // turret top (rotated slightly toward player)
-  ctx.fillStyle = '#252c10';
-  ctx.fillRect(-e.w/4 + 2, -e.h/4, e.w/2 - 4, e.h/4);
-  // cannon barrel
-  ctx.fillStyle = '#0d0d08';
-  ctx.fillRect(-3, e.h/4, 6, 18);
-  // muzzle glow when firing
   if (e.fireT < 0.4) {
-    ctx.fillStyle = 'rgba(255,220,80,0.6)';
-    ctx.beginPath(); ctx.arc(0, e.h/4 + 18, 6, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,220,80,0.7)';
+    ctx.beginPath(); ctx.arc(0, e.h/4 + 18, 7, 0, Math.PI*2); ctx.fill();
   }
-  // hatch
-  ctx.fillStyle = '#3a4020';
-  ctx.beginPath(); ctx.arc(-e.w/4 + 8, -e.h/4 + 6, 5, 0, Math.PI*2); ctx.fill();
   if (e.elite) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
@@ -8395,23 +8567,21 @@ function drawTank(e) {
 
 function drawBoss() {
   const b = Game.boss; if (!b) return;
-
-  // Boss ground aura — pulsing radial glow anchored at boss position
   const auraT = (Game.t || 0);
+  const enr = b.enrage ? 1 : 0;
+  const hpN = clamp((b.hp || 0) / Math.max(1, b.maxHp || 1), 0, 1);
   const auraPulse = 0.55 + 0.45 * Math.sin(auraT * (b.enrage ? 9 : 4.5));
-  const auraColor = b.enrage ? '255,60,0' : '200,20,20';
-  const auraR = (b.w * 0.9 + b.h * 0.4) * (b.enrage ? 1.3 : 1.0);
+  const auraColor = b.enrage ? '255,80,20' : '200,20,20';
+  const auraR = (b.w * 0.95 + b.h * 0.45) * (b.enrage ? 1.32 : 1);
   function drawAura(bx, by) {
-    ctx.save();
     const ag = ctx.createRadialGradient(bx, by + b.h * 0.3, 0, bx, by + b.h * 0.3, auraR);
-    ag.addColorStop(0, `rgba(${auraColor},${0.18 + 0.12 * auraPulse})`);
-    ag.addColorStop(0.5, `rgba(${auraColor},${0.06 + 0.06 * auraPulse})`);
+    ag.addColorStop(0, `rgba(${auraColor},${0.2 + 0.12 * auraPulse})`);
+    ag.addColorStop(0.55, `rgba(${auraColor},${0.07 + 0.06 * auraPulse})`);
     ag.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = ag;
     ctx.beginPath();
     ctx.ellipse(bx, by + b.h * 0.3, auraR, auraR * 0.45, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Enrage: expanding pulse rings
     if (b.enrage) {
       const ringPhase = (auraT * 2.8) % 1;
       const ringR = auraR * 0.3 + ringPhase * auraR * 0.9;
@@ -8423,59 +8593,46 @@ function drawBoss() {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    ctx.restore();
   }
-
-  // big version of enemy with extras
   function drawOne(x, y) {
+    const rv = {
+      id: 'boss-frame',
+      shape: (b.name === 'WARLORD TITAN' || b.name === 'THE OVERLORD') ? 'tank' : undefined,
+      color: {
+        body: b.color || '#7a1a1a',
+        hood: shade(b.color || '#7a1a1a', -18),
+        cab: shade(b.color || '#7a1a1a', -34),
+        windshield: b.enrage ? '#ffd28a' : '#ff8080',
+        glow: b.enrage ? '#ff9a3d' : '#ff4a4a',
+      },
+      base: { maxHp: b.maxHp || 100, maxV: 240 },
+    };
+    drawVehicle(x, y, rv, b.vx || 0, b.w, b.h, {
+      noCosmetic: true,
+      damageRatio: 1 - hpN,
+      extraTilt: Math.sin(auraT * 2.6 + x * 0.01) * 0.06,
+      upgrades: { plating: 5, weapons: b.enrage ? 5 : 3, engine: 4, reactor: b.enrage ? 5 : 2 },
+      detailLevel: Math.max(1, visualQualityLevel()),
+    });
     ctx.save();
     ctx.translate(x, y);
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(-b.w/2 + 6, -b.h/2 + 8, b.w, b.h);
-    // hull
-    const bg = ctx.createLinearGradient(-b.w/2, 0, b.w/2, 0);
-    bg.addColorStop(0, b.color);
-    bg.addColorStop(0.5, '#2a0a0a');
-    bg.addColorStop(1, b.color);
-    ctx.fillStyle = bg;
-    ctx.fillRect(-b.w/2, -b.h/2, b.w, b.h);
-    // armor plates
-    ctx.fillStyle = '#1a0f08';
-    ctx.fillRect(-b.w/2 - 6, -b.h/2 + 10, 6, b.h - 30);
-    ctx.fillRect( b.w/2,     -b.h/2 + 10, 6, b.h - 30);
-    // hull highlights (battle-scarred panels)
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
-    ctx.fillRect(-b.w/2 + 4, -b.h/2 + 4, b.w - 8, 6);
-    // cab/turret
-    ctx.fillStyle = '#1a0a0a';
-    const cw = b.w * 0.5, ch = b.h * 0.4;
-    ctx.fillRect(-cw/2, -ch/2, cw, ch);
-    // glowing eyes — brighter + animated pulse on enrage
-    const eyeGlow = b.enrage ? (0.7 + 0.3 * Math.sin(auraT * 12)) : 1;
-    ctx.globalAlpha = eyeGlow;
-    ctx.fillStyle = b.enrage ? '#ffaa00' : '#ff3030';
-    ctx.fillRect(-cw/2 + 6, -ch/2 + 8, cw/2 - 8, 4);
-    ctx.fillRect(2, -ch/2 + 8, cw/2 - 8, 4);
-    ctx.globalAlpha = 1;
-    // spikes — more on enrage
-    ctx.fillStyle = b.enrage ? '#ff4020' : '#aa3030';
-    for (let i = -2; i <= 2; i++) {
-      ctx.fillRect(i * 14, b.h/2 - 4, 4, b.enrage ? 13 : 10);
+    ctx.fillStyle = b.enrage ? '#ff4422' : '#8a2a2a';
+    for (let i = -3; i <= 3; i++) {
+      const spikeH = b.enrage ? 16 : 11;
+      ctx.fillRect(i * (b.w * 0.1), b.h/2 - 6, 4, spikeH);
     }
-    // gun (double barrel when enraged)
-    ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(-6, b.h/2 - 2, 12, 18);
-    if (b.enrage) {
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillRect(-12, b.h/2 - 2, 5, 14);
-      ctx.fillRect( 7, b.h/2 - 2, 5, 14);
+    if (b.enrage || hpN < 0.4) {
+      ctx.strokeStyle = `rgba(255,${Math.round(100 + 80 * (1 - hpN))},40,${0.45 + 0.25 * enr})`;
+      ctx.lineWidth = 1.8;
+      for (let i = 0; i < 4; i++) {
+        const sx = -b.w * 0.2 + i * b.w * 0.13;
+        ctx.beginPath();
+        ctx.moveTo(sx, -b.h * 0.2);
+        ctx.lineTo(sx + 8, -b.h * 0.04 + Math.sin(auraT * 8 + i) * 3);
+        ctx.stroke();
+      }
     }
-    // glow accent
-    if (b.enrage) {
-      ctx.fillStyle = `rgba(255,80,80,${0.22 + 0.14 * auraPulse})`;
-      ctx.fillRect(-b.w/2 - 3, -b.h/2 - 3, b.w + 6, b.h + 6);
-    }
-    // damage smoke at low HP
+    ctx.restore();
     if (b.hp < b.maxHp * 0.35 && Math.random() < 0.45) {
       Game.particles.push({
         x: x + rand(-b.w * 0.3, b.w * 0.3), y: y - b.h * 0.3,
@@ -8483,14 +8640,13 @@ function drawBoss() {
         life: 0.8, max: 0.8, size: 8 + rand(0, 6) | 0,
         color: 'rgba(100,80,60,0.55)',
       });
-      if (Math.random() < 0.3) Game.particles.push({
+      if (Math.random() < 0.35) Game.particles.push({
         x: x + rand(-10, 10), y,
         vx: rand(-30, 30), vy: rand(-55, -15),
         life: 0.5, max: 0.5, size: 5, shape: 'rect', rot: rand(0, Math.PI * 2),
         color: 'rgba(255,120,20,0.85)',
       });
     }
-    ctx.restore();
   }
   drawAura(b.x, b.y);
   if (b.twin) drawAura(b.twinX, b.y);
@@ -8500,6 +8656,7 @@ function drawBoss() {
 
 function drawPickup(pk) {
   const bob = Math.sin(pk.t * 6) * 2;
+  const detail = visualQualityLevel();
   if (pk.kind === 'scrap') {
     ctx.save();
     ctx.translate(pk.x, pk.y + bob);
@@ -8521,6 +8678,12 @@ function drawPickup(pk) {
       ctx.globalAlpha = 0.55 + 0.3 * Math.sin(pk.t * 5 + oi);
       ctx.fillStyle = '#ffe07a';
       ctx.beginPath(); ctx.arc(Math.cos(oa) * or, Math.sin(oa) * or, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+    if (detail >= 1) {
+      ctx.globalAlpha = 0.5 + 0.25 * Math.sin(pk.t * 8);
+      ctx.strokeStyle = 'rgba(255,224,122,0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -8551,6 +8714,12 @@ function drawPickup(pk) {
       ctx.fillStyle = '#7af07a';
       ctx.beginPath(); ctx.arc(Math.cos(ha) * hr, Math.sin(ha) * hr, 2, 0, Math.PI * 2); ctx.fill();
     }
+    if (detail >= 1) {
+      ctx.globalAlpha = 0.45 + 0.2 * repPulse;
+      ctx.strokeStyle = '#b8ffc8';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 15 + repPulse * 2, 0, Math.PI * 2); ctx.stroke();
+    }
     ctx.globalAlpha = 1;
     ctx.restore();
   } else if (pk.kind === 'cache') {
@@ -8566,6 +8735,11 @@ function drawPickup(pk) {
     ctx.fillStyle = '#1a0f08';
     ctx.fillRect(-3, -8, 6, 16);
     ctx.fillRect(-10, -1, 20, 2);
+    if (detail >= 1) {
+      ctx.strokeStyle = 'rgba(210,255,111,0.7)';
+      ctx.lineWidth = 1.1;
+      ctx.strokeRect(-11, -9, 22, 18);
+    }
     ctx.restore();
   } else if (pk.kind === 'powerup') {
     const def = POWERUPS[pk.power] || POWERUPS.shield;
@@ -8605,6 +8779,18 @@ function drawPickup(pk) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(def.glyph, 0, 1);
+    if (detail >= 1) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3 - Math.PI / 6 + pk.t * 0.6;
+        const px = Math.cos(a) * (r + 3 + pulse * 2);
+        const py = Math.sin(a) * (r + 3 + pulse * 2);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.stroke();
+    }
     ctx.restore();
   } else if (pk.kind === 'reserve') {
     // Reserve vault — a spinning diamond with a star inside, purple-gold palette
@@ -8639,6 +8825,11 @@ function drawPickup(pk) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(rdef ? rdef.glyph : '★', 0, 1);
+    if (detail >= 1) {
+      ctx.strokeStyle = 'rgba(255,220,170,0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 17 + pulse * 2, 0, Math.PI * 2); ctx.stroke();
+    }
     ctx.restore();
     // "NEXT RUN" label below
     ctx.save();
@@ -8780,10 +8971,20 @@ function drawShockwaves() {
 }
 
 function drawSkidMarks() {
+  const detail = visualQualityLevel();
   for (const s of Game.skidMarks) {
     const a = clamp(s.life / s.max, 0, 1) * 0.5;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    const rot = Math.atan2(s.vy || 1, (s.vx || 0.001)) * 0.05;
+    ctx.rotate(rot);
     ctx.fillStyle = `rgba(20,12,6,${a})`;
-    ctx.fillRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h);
+    ctx.fillRect(-s.w/2, -s.h/2, s.w, s.h);
+    if (detail >= 1) {
+      ctx.fillStyle = `rgba(60,46,30,${a * 0.5})`;
+      ctx.fillRect(-s.w/2 + 1, -s.h/2 + 0.5, s.w - 2, Math.max(0.8, s.h * 0.4));
+    }
+    ctx.restore();
   }
 }
 
@@ -9202,26 +9403,60 @@ function drawIdleBackground() {
 function drawWreck() {
   const w = Game.wreck; if (!w) return;
   const v = Game.vehicle; if (!v) return;
+  const col = getVehiclePaint(v, Game.cosmetics && Game.cosmetics.equippedPaint);
   ctx.save();
   ctx.translate(w.x, w.y);
   ctx.rotate(w.rot);
-  // darkened body
-  ctx.globalAlpha = 0.85;
-  ctx.fillStyle = '#1a0f08';
-  ctx.fillRect(-22, -32, 44, 64);
-  // charred panels
-  ctx.fillStyle = '#3a2410';
-  ctx.fillRect(-18, -28, 36, 12);
-  ctx.fillRect(-14, -10, 28, 18);
-  // glow embers — flicker
+  ctx.globalAlpha = 0.9;
+  // collapsed shell
+  const shell = ctx.createLinearGradient(-22, -18, 22, 24);
+  shell.addColorStop(0, '#120c09');
+  shell.addColorStop(0.5, '#2a1a12');
+  shell.addColorStop(1, '#0f0907');
+  ctx.fillStyle = shell;
+  pathRoundRect(-24, -30, 48, 60, 8);
+  ctx.fill();
+  // twisted original paint peeking through
+  ctx.fillStyle = `rgba(${parseInt(col.body.slice(1,3),16)},${parseInt(col.body.slice(3,5),16)},${parseInt(col.body.slice(5,7),16)},0.25)`;
+  ctx.fillRect(-17, -24, 34, 8);
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.fillRect(-16, -4, 32, 16);
+  // broken windows / gouges
+  ctx.fillStyle = 'rgba(20,12,10,0.92)';
+  ctx.beginPath();
+  ctx.moveTo(-7, -13); ctx.lineTo(1, -18); ctx.lineTo(10, -9); ctx.lineTo(2, -4); ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,130,90,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-14, 8); ctx.lineTo(-4, 11); ctx.lineTo(8, 7); ctx.lineTo(15, 12);
+  ctx.stroke();
+  // detached parts
+  ctx.fillStyle = '#1a120c';
+  ctx.fillRect(-29, -6, 8, 4);
+  ctx.fillRect(22, 8, 7, 4);
+  ctx.fillRect(-8, 27, 12, 5);
+  // glow embers + mini flame
   const flicker = 0.6 + Math.sin(w.t * 18) * 0.2;
   ctx.fillStyle = `rgba(255,140,60,${flicker})`;
-  ctx.fillRect(-10, -4, 6, 6);
-  ctx.fillRect(4, 2, 5, 5);
+  ctx.fillRect(-10, -3, 6, 6);
+  ctx.fillRect(4, 1, 5, 6);
   ctx.fillStyle = `rgba(255,210,120,${flicker * 0.8})`;
   ctx.fillRect(-2, -6, 4, 4);
+  ctx.fillStyle = `rgba(255,90,40,${0.4 + 0.3 * flicker})`;
+  ctx.beginPath();
+  ctx.moveTo(0, 16); ctx.lineTo(-3, 24); ctx.lineTo(3, 24); ctx.closePath();
+  ctx.fill();
   ctx.globalAlpha = 1;
   ctx.restore();
+  if (visualQualityLevel() >= 1 && Math.random() < 0.35) {
+    Game.particles.push({
+      x: w.x + rand(-12, 12), y: w.y + rand(-8, 8),
+      vx: rand(-16, 16), vy: rand(-45, -15),
+      life: 0.8, max: 0.8, size: 6,
+      color: 'rgba(100,90,80,0.45)',
+    });
+  }
 }
 
 function drawPopups() {
@@ -9568,8 +9803,31 @@ function render() {
       // drawn while at least one entry exists.
       drawPlayerNitroTrail();
       // hit flash overlay on the vehicle: tint white briefly
+      const ability = Game.activeAbility || {};
+      const special = vehicleSpecialAbility(Game.vehicle && Game.vehicle.id);
+      const isCloakActive = special === 'cloak' && ability.activeT > 0;
+      const isChargeActive = special === 'chargeRam' && isPowerupActive('nitro');
       drawVehicle(Game.player.x, Game.player.y, Game.vehicle, Game.player.vx, 42, 64,
-        Game.spinout ? { forcedRot: Game.spinout.rot } : {});
+        Object.assign(
+          {},
+          Game.spinout ? { forcedRot: Game.spinout.rot } : null,
+          {
+            nitro: isPowerupActive('nitro'),
+            extraTilt: isChargeActive ? -0.06 : 0,
+            brakeForce: clamp((Game.targetSpeed - Game.speed) / 220, -1, 1),
+            damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
+            ghost: false,
+            cloak: isCloakActive,
+          }
+        ));
+      if (isChargeActive && Math.random() < 0.35 && visualQualityLevel() >= 1) {
+        Game.particles.push({
+          x: Game.player.x + rand(-14, 14), y: Game.player.y + Game.player.h * 0.4,
+          vx: rand(-35, 35), vy: rand(20, 70),
+          life: 0.45, max: 0.45, size: 4 + rand(0, 3) | 0,
+          color: 'rgba(145,108,70,0.55)',
+        });
+      }
       if (Game.hitFlash > 0) {
         ctx.save();
         ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
@@ -9643,90 +9901,39 @@ function render() {
 // ============================================================
 function renderVehiclePreview(canvas, vehicleId, cosmetics = null) {
   const v = VEHICLE_BY_ID[vehicleId];
+  if (!v) return;
   const c = canvas.getContext('2d');
   const cw = canvas.width = 80;
   const ch = canvas.height = 90;
-  c.imageSmoothingEnabled = false;
+  c.imageSmoothingEnabled = true;
   c.clearRect(0, 0, cw, ch);
-  // dummy ctx swap — do simplified inline draw
-  const cx = cw/2, cy = ch/2;
+  const cx = cw * 0.5, cy = ch * 0.53;
   const w = 38, h = 60;
-  const col = getVehiclePaint(v, cosmetics && cosmetics.equippedPaint);
-
-  // ---- Cemetery Tank preview ----
-  if (v.shape === 'tank') {
-    const tw = w + 10, th = h;
-    // shadow
-    c.fillStyle = 'rgba(0,0,0,0.6)';
-    c.fillRect(cx - tw/2 + 4, cy - th/2 + 7, tw + 2, th);
-    // tracks
-    c.fillStyle = '#0a0a06';
-    c.fillRect(cx - tw/2 - 6, cy - th/2, 11, th);
-    c.fillRect(cx + tw/2 - 5, cy - th/2, 11, th);
-    // track links
-    c.fillStyle = '#1c1c10';
-    for (let i = 0; i < 7; i++) {
-      const ty = cy - th/2 + 2 + i * (th / 7);
-      c.fillRect(cx - tw/2 - 6, ty, 11, 2);
-      c.fillRect(cx + tw/2 - 5, ty, 11, 2);
-    }
-    // hull body
-    c.fillStyle = col.body;
-    c.fillRect(cx - tw/2, cy - th/2, tw, th);
-    // front/rear armor
-    c.fillStyle = col.hood;
-    c.fillRect(cx - tw/2, cy - th/2, tw, 9);
-    c.fillRect(cx - tw/2, cy + th/2 - 7, tw, 7);
-    // turret base
-    c.fillStyle = col.cab;
-    c.fillRect(cx - tw/4, cy - th/4, tw/2, th/2.4);
-    // turret top
-    c.fillStyle = '#23231a';
-    c.fillRect(cx - tw/4 + 2, cy - th/4, tw/2 - 4, th/5);
-    // skull (simplified)
-    c.fillStyle = col.glow;
-    c.globalAlpha = 0.75;
-    c.fillRect(cx - 6, cy - th/4 + 2, 12, 8);
-    c.globalAlpha = 1;
-    c.fillStyle = col.cab;
-    c.fillRect(cx - 5, cy - th/4 + 4, 3, 3);
-    c.fillRect(cx + 2, cy - th/4 + 4, 3, 3);
-    // cannon
-    c.fillStyle = '#0a0a06';
-    c.fillRect(cx - 3, cy + th/4 - 4, 6, 18);
-    c.fillRect(cx - 5, cy + th/4 + 13, 10, 4);
-    // headlights
-    c.fillStyle = col.glow;
-    c.fillRect(cx - tw/2 + 2, cy - th/2 - 4, 7, 3);
-    c.fillRect(cx + tw/2 - 9, cy - th/2 - 4, 7, 3);
-    return;
-  }
-
-  if (cosmetics && cosmetics.equippedTrail) {
-    const trail = getTrailDef(cosmetics.equippedTrail);
+  const pt = (Game.animT || Game.t || 0) + (v.id.length * 0.31);
+  const prev = ctx;
+  ctx = c;
+  const bob = Math.sin(pt * 2.2) * 0.9;
+  const trailId = cosmetics && cosmetics.equippedTrail;
+  if (trailId) {
+    const trail = getTrailDef(trailId);
     const colors = trail.colors || ['rgba(120,90,60,0.5)'];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 6; i++) {
       c.fillStyle = colors[i % colors.length];
-      c.globalAlpha = 0.25 + (i / 7) * 0.35;
+      c.globalAlpha = 0.2 + (i / 6) * 0.28;
       c.beginPath();
-      c.arc(cx + (i % 2 ? 9 : -9), cy + h/2 + 5 + i * 4, Math.max(2, (trail.size || 5) - i * 0.35), 0, Math.PI * 2);
+      c.arc(cx + (i % 2 ? 8 : -8), cy + h/2 + 4 + i * 3.5, Math.max(1.7, (trail.size || 5) - i * 0.35), 0, Math.PI * 2);
       c.fill();
     }
     c.globalAlpha = 1;
   }
-  c.fillStyle = 'rgba(0,0,0,0.45)';
-  c.fillRect(cx - w/2 + 3, cy - h/2 + 5, w, h);
-  c.fillStyle = col.body;     c.fillRect(cx - w/2, cy - h/2, w, h);
-  c.fillStyle = col.hood;     c.fillRect(cx - w/2 + 3, cy - h/2, w - 6, 11);
-  c.fillStyle = col.cab;      c.fillRect(cx - w/2 + 5, cy - h/2 + 14, w - 10, 20);
-  c.fillStyle = col.windshield;c.fillRect(cx - w/2 + 7, cy - h/2 + 16, w - 14, 5);
-  c.fillStyle = '#1a0f08';    c.fillRect(cx - w/2 + 4, cy - h/2 - 2, w - 8, 4);
-  c.fillStyle = col.glow;     c.fillRect(cx - w/2 + 2, cy - h/2 - 4, 5, 4); c.fillRect(cx + w/2 - 7, cy - h/2 - 4, 5, 4);
-  c.fillStyle = '#0d0805';
-  c.fillRect(cx - w/2 - 4, cy - h/2 + 8, 5, 12);
-  c.fillRect(cx + w/2 - 1, cy - h/2 + 8, 5, 12);
-  c.fillRect(cx - w/2 - 4, cy + h/2 - 22, 5, 14);
-  c.fillRect(cx + w/2 - 1, cy + h/2 - 22, 5, 14);
+  drawVehicle(cx, cy + bob, v, Math.sin(pt * 1.7) * 38, w, h, {
+    noCosmetic: !cosmetics,
+    paintId: cosmetics && cosmetics.equippedPaint,
+    detailLevel: 2,
+    t: pt,
+    upgrades: getVehicleUpgradeLevelsForRender(v, { upgradeVehicleId: v.id, profile: Profile.active && Profile.active() }),
+  });
+  ctx = prev;
 }
 
 // ============================================================
@@ -10488,6 +10695,9 @@ const UI = {
     const cbOpts = ['none','protanopia','deuteranopia','tritanopia']
       .map(m => `<button class="btn set-q ${(Settings.colorBlind||'none') === m ? 'on' : ''}" data-colorblind="${m}">${m === 'none' ? 'OFF' : m.slice(0,5).toUpperCase()}</button>`)
       .join('');
+    const vqOpts = ['low','medium','high']
+      .map(m => `<button class="btn set-q ${(Settings.visualQuality||'high') === m ? 'on' : ''}" data-vquality="${m}">${m.toUpperCase()}</button>`)
+      .join('');
     // Prestige info for platform section
     const pTier = typeof getPrestigeTier === 'function' ? getPrestigeTier((Profile.active()||{}).prestigeTokens||0) : null;
     const pLabel = pTier ? pTier.label : '';
@@ -10504,6 +10714,10 @@ const UI = {
       <div class="set-row">
         <div class="set-head"><div class="set-name">QUALITY</div></div>
         <div class="set-q-row">${qopts}</div>
+      </div>
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">VEHICLE VISUAL QUALITY</div><div class="set-sub">CONTROLS PROCEDURAL DETAIL DENSITY FOR VEHICLES, ENEMIES, BOSSES, PICKUPS</div></div></div>
+        <div class="set-q-row">${vqOpts}</div>
       </div>
       ${toggle('HIGH CONTRAST HUD', 'hudContrast', 'STRONGER HUD BACKDROP + BRIGHTER LABELS')}
       ${toggle('CINEMATIC FX', 'cinematic', 'GOD RAYS · FILM GRAIN · BLOOM · SPEED LINES · CAMERA TILT')}
@@ -11239,6 +11453,14 @@ document.addEventListener('click', e => {
     UI.showSettings();
     return;
   }
+  const svq = e.target.closest('[data-vquality]');
+  if (svq) {
+    Settings.visualQuality = svq.dataset.vquality || 'high';
+    Settings.save();
+    SFX.click();
+    UI.showSettings();
+    return;
+  }
   const st = e.target.closest('[data-toggle]');
   if (st) {
     const key = st.dataset.toggle;
@@ -11586,7 +11808,7 @@ function drawMpGhosts() {
     const stale = Math.max(0, now - p.recvAt - 250);
     const alpha = Math.max(0.12, 0.45 - stale / 4000);
     ctx.globalAlpha = alpha;
-    drawVehicle(x, y, v, s.vx || 0, 42, 64, { noCosmetic: true });
+    drawVehicle(x, y, v, s.vx || 0, 42, 64, { noCosmetic: true, ghost: true, ghostAlpha: alpha });
     ctx.globalAlpha = 1;
     // name tag
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
