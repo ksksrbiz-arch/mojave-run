@@ -229,6 +229,38 @@
           MP._wantConnected = false;
           try { ws.close(); } catch (_) {}
           break;
+
+        // === VERSUS MODE MESSAGES ===
+        case 'vs-waiting':
+          MP.vsSlot = msg.slot;
+          MP.vsRoom = msg.room;
+          emit('vs-waiting', msg);
+          break;
+        case 'vs-full':
+          emit('vs-full', msg);
+          break;
+        case 'vs-countdown':
+          MP.vsSlot = msg.slot;
+          MP.vsOpponent = msg.opponent;
+          emit('vs-countdown', msg);
+          break;
+        case 'vs-start':
+          emit('vs-start', msg);
+          break;
+        case 'vs-state':
+          MP.vsState = msg;
+          emit('vs-state', msg);
+          break;
+        case 'vs-hit':
+          emit('vs-hit', msg);
+          break;
+        case 'vs-kill':
+          emit('vs-kill', msg);
+          break;
+        case 'vs-end':
+          MP.vsState = null;
+          emit('vs-end', msg);
+          break;
       }
     };
 
@@ -354,6 +386,18 @@
     try { MP.ws.send(JSON.stringify({ type: 'revive', target: target || null })); } catch (_) {}
   }
 
+  function vsJoin(room, name) {
+    if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
+    MP.vsState = null;
+    MP.vsSlot = null;
+    try { MP.ws.send(JSON.stringify({ type: 'vs-join', room: room || 'VS-LOBBY', name: name || MP.name })); } catch (_) {}
+  }
+
+  function vsSendInput(input) {
+    if (!MP.ws || MP.ws.readyState !== 1) return;
+    try { MP.ws.send(JSON.stringify({ type: 'vs-input', input })); } catch (_) {}
+  }
+
   function sendMeta(meta) {
     if (meta.name) MP.name = String(meta.name).slice(0, 14);
     if (meta.vehicleId) MP.vehicleId = String(meta.vehicleId).slice(0, 16);
@@ -398,5 +442,6 @@
   // expose
   window.MP = Object.assign(MP, {
     connect, disconnect, sendState, sendEvent, sendSharedEvent, sendRevive, sendMeta, on, defaultUrl, pruneStale,
+    vsJoin, vsSendInput,
   });
 })();
