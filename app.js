@@ -14544,9 +14544,13 @@ UI.act = function(action, data) {
   }
   if (action === 'push-enable') {
     SFX.click();
-    PushService.requestPermission().then(ok => {
-      UI.toast(ok ? 'PUSH NOTIFICATIONS ENABLED' : 'PUSH PERMISSION DENIED');
-    });
+    if (typeof PushService !== 'undefined' && PushService && typeof PushService.requestPermission === 'function') {
+      PushService.requestPermission().then(ok => {
+        UI.toast(ok ? 'PUSH NOTIFICATIONS ENABLED' : 'PUSH PERMISSION DENIED');
+      });
+    } else {
+      UI.toast('PUSH SERVICE UNAVAILABLE');
+    }
     return;
   }
   if (action === 'iap-purchase') {
