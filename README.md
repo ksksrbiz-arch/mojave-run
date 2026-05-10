@@ -136,7 +136,7 @@ manually — handy for self-hosting on LAN.)
 ## Future (not built)
 
 - **Cloud sync** via Supabase — would need a 3rd Supabase project (currently capped at 2: Cathy + PrecisionCore). Local-first profiles cover 95% of perceived value at 5% complexity.
-- **Global leaderboard** — depends on cloud sync.
+- **Global leaderboard enhancements** — add pagination, anti-cheat, and account-linked rankings.
 - **Versus / shared simulation multiplayer** — would need server-authoritative state. Current MP is cosmetic ghost overlay.
 - **More vehicles / cosmetics / weapons** — open ended.
 

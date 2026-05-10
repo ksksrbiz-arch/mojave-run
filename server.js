@@ -15,6 +15,7 @@
 // Endpoints:
 //   GET  /healthz                  — health check
 //   GET  /api/scores?mode=…        — top-10 scoreboard for a mode
+//   GET  /api/leaderboards         — global + per-mode leaderboards
 //   POST /api/scores               — submit a run score
 //   POST /api/accounts/register    — create a cloud account, returns { id, token }
 //   POST /api/accounts/save        — save profile data { id, token, data }
@@ -41,6 +42,8 @@ const MAX_SCORES_PER_MODE = 50;
 const ACCOUNTS_FILE = path.join(ROOT, 'accounts.json');
 const MAX_ACCOUNTS = 50000;
 const MAX_PROFILE_BYTES = 65536; // 64 KB per cloud save
+const IAP_TRANSACTIONS_FILE = path.join(ROOT, 'iap-transactions.json');
+const MAX_IAP_TRANSACTIONS = 200000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -107,6 +110,15 @@ function addScore(entry) {
   saveScores();
 }
 
+function getGlobalScores(limit = 10) {
+  const rows = [];
+  for (const [mode, entries] of Object.entries(scoreboards)) {
+    for (const entry of entries || []) rows.push(Object.assign({ mode }, entry));
+  }
+  rows.sort((a, b) => b.score - a.score || b.ts - a.ts);
+  return rows.slice(0, Math.max(1, Math.min(100, Math.floor(limit) || 10)));
+}
+
 loadScores();
 
 // ============================================================
@@ -114,6 +126,8 @@ loadScores();
 // ============================================================
 let accounts = {}; // id -> { token, savedAt, data }
 let accountsSavePending = false;
+let iapTransactions = {}; // txId -> { txId, productId, platform, validatedAt, rawId }
+let iapSavePending = false;
 
 // Cryptographically random cloud code component (rejection sampling avoids modulo bias).
 function genCode(len) {
@@ -162,6 +176,169 @@ function saveAccountsDebounced() {
   }, 2000);
 }
 
+function loadIapTransactions() {
+  try {
+    if (fs.existsSync(IAP_TRANSACTIONS_FILE)) {
+      iapTransactions = JSON.parse(fs.readFileSync(IAP_TRANSACTIONS_FILE, 'utf8')) || {};
+    }
+  } catch (e) {
+    console.warn('[iap] failed to load iap-transactions.json:', e.message);
+    iapTransactions = {};
+  }
+}
+
+function saveIapTransactionsDebounced() {
+  if (iapSavePending) return;
+  iapSavePending = true;
+  setTimeout(() => {
+    iapSavePending = false;
+    try {
+      fs.writeFileSync(IAP_TRANSACTIONS_FILE, JSON.stringify(iapTransactions));
+    } catch (e) {
+      console.warn('[iap] failed to write iap-transactions.json:', e.message);
+    }
+  }, 2000);
+}
+
+function trimIapTransactions() {
+  const entries = Object.entries(iapTransactions);
+  if (entries.length <= MAX_IAP_TRANSACTIONS) return;
+  entries.sort((a, b) => (a[1].validatedAt || 0) - (b[1].validatedAt || 0));
+  const remove = entries.length - MAX_IAP_TRANSACTIONS;
+  for (let i = 0; i < remove; i++) delete iapTransactions[entries[i][0]];
+}
+
+function normalizePlatform(platform, receipt) {
+  const p = String(platform || '').toLowerCase();
+  if (p.includes('ios') || p.includes('apple')) return 'apple';
+  if (p.includes('android') || p.includes('google')) return 'google';
+  if (receipt && typeof receipt === 'object') {
+    if (receipt.purchaseToken || receipt.token) return 'google';
+    if (receipt.receiptData || receipt['receipt-data']) return 'apple';
+  }
+  return 'unknown';
+}
+
+function readReceiptObject(receipt) {
+  if (receipt && typeof receipt === 'object') return receipt;
+  if (typeof receipt !== 'string') return null;
+  try { return JSON.parse(receipt); } catch (_) { return null; }
+}
+
+function toBase64Url(input) {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function parseAppleReceiptData(receipt) {
+  if (typeof receipt === 'string') return receipt;
+  if (!receipt || typeof receipt !== 'object') return null;
+  return receipt.receiptData || receipt.receipt_data || receipt['receipt-data'] || receipt.appReceipt || null;
+}
+
+function parseGoogleReceiptData(receipt) {
+  const data = readReceiptObject(receipt) || {};
+  return {
+    purchaseToken: data.purchaseToken || data.token || null,
+    packageName: data.packageName || process.env.GOOGLE_PLAY_PACKAGE_NAME || process.env.ANDROID_PACKAGE_NAME || null,
+    productId: data.productId || null,
+  };
+}
+
+async function validateAppleReceipt(productId, transactionId, receipt) {
+  const receiptData = parseAppleReceiptData(receipt);
+  if (!receiptData) return { ok: false, reason: 'missing apple receipt data' };
+  const password = process.env.APPLE_IAP_SHARED_SECRET || process.env.APPLE_SHARED_SECRET || '';
+  const body = { 'receipt-data': receiptData };
+  if (password) body.password = password;
+  const callApple = async (url) => {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error('apple HTTP ' + resp.status);
+    return resp.json();
+  };
+  let data = await callApple('https://buy.itunes.apple.com/verifyReceipt');
+  if (data && data.status === 21007) data = await callApple('https://sandbox.itunes.apple.com/verifyReceipt');
+  if (!data || data.status !== 0) return { ok: false, reason: 'apple status ' + (data ? data.status : 'unknown') };
+  const rows = ((data.receipt && data.receipt.in_app) || []).concat(data.latest_receipt_info || []);
+  const match = rows.find(r =>
+    String(r.transaction_id || r.original_transaction_id || '') === String(transactionId) &&
+    String(r.product_id || '') === String(productId)
+  );
+  if (!match) return { ok: false, reason: 'apple transaction mismatch' };
+  return {
+    ok: true,
+    store: 'apple',
+    storeTransactionId: String(match.transaction_id || match.original_transaction_id || transactionId),
+  };
+}
+
+async function getGoogleAccessToken() {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+  let privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';
+  privateKey = privateKey.replace(/\\n/g, '\n');
+  if (!clientEmail || !privateKey) return null;
+  const iat = Math.floor(Date.now() / 1000);
+  const exp = iat + 3600;
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: clientEmail,
+    scope: 'https://www.googleapis.com/auth/androidpublisher',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat,
+    exp,
+  };
+  const h = toBase64Url(JSON.stringify(header));
+  const p = toBase64Url(JSON.stringify(payload));
+  const signerInput = h + '.' + p;
+  let signature;
+  try {
+    signature = toBase64Url(crypto.sign('RSA-SHA256', Buffer.from(signerInput), privateKey));
+  } catch (e) {
+    throw new Error('google private key signing failed: ' + (e && e.message ? e.message : 'unknown error'));
+  }
+  const assertion = signerInput + '.' + signature;
+  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }),
+  });
+  if (!tokenResp.ok) throw new Error('google oauth HTTP ' + tokenResp.status);
+  const tokenData = await tokenResp.json();
+  return tokenData && tokenData.access_token ? tokenData.access_token : null;
+}
+
+async function validateGooglePurchase(productId, transactionId, receipt) {
+  const parsed = parseGoogleReceiptData(receipt);
+  const purchaseToken = parsed.purchaseToken;
+  const packageName = parsed.packageName;
+  const finalProductId = parsed.productId || productId;
+  if (!purchaseToken || !packageName || !finalProductId) {
+    return { ok: false, reason: 'missing google purchase token/package/product' };
+  }
+  const accessToken = await getGoogleAccessToken();
+  if (!accessToken) return { ok: false, reason: 'google credentials not configured' };
+  const url = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' +
+    encodeURIComponent(packageName) +
+    '/purchases/products/' + encodeURIComponent(finalProductId) +
+    '/tokens/' + encodeURIComponent(purchaseToken);
+  const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+  if (!resp.ok) return { ok: false, reason: 'google api HTTP ' + resp.status };
+  const data = await resp.json();
+  if (!data) return { ok: false, reason: 'google api empty response' };
+  const purchaseState = Number(data.purchaseState);
+  if (!Number.isFinite(purchaseState) || purchaseState !== 0) return { ok: false, reason: 'google purchaseState not purchased' };
+  if (transactionId && data.orderId && String(transactionId) !== String(data.orderId) && String(transactionId) !== String(purchaseToken)) {
+    return { ok: false, reason: 'google transaction mismatch' };
+  }
+  return { ok: true, store: 'google', storeTransactionId: String(data.orderId || purchaseToken) };
+}
+
 // Simple in-memory rate limiter for the register endpoint.
 const registerRateMap = new Map(); // ip -> { count, windowStart }
 const REGISTER_WINDOW_MS = 60000;
@@ -180,6 +357,7 @@ function isRegisterRateLimited(ip) {
 }
 
 loadAccounts();
+loadIapTransactions();
 
 const server = http.createServer((req, res) => {
   // Permissive CORS — read-only static assets.
@@ -207,6 +385,18 @@ const server = http.createServer((req, res) => {
     const board = (scoreboards[mode] || []).slice(0, 10);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, mode, scores: board }));
+    return;
+  }
+
+  if (urlPathApi === '/api/leaderboards' && req.method === 'GET') {
+    const qs = new URLSearchParams(urlParsed[1] || '');
+    const limit = Math.max(1, Math.min(100, parseInt(qs.get('limit') || '10', 10) || 10));
+    const modes = {};
+    for (const [mode, entries] of Object.entries(scoreboards)) {
+      modes[mode] = (entries || []).slice(0, limit);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, global: getGlobalScores(limit), modes }));
     return;
   }
 
@@ -344,7 +534,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ---- IAP Receipt Validation (stub — real validation uses Apple/Google server APIs) ----
+  // ---- IAP Receipt Validation ----
   if (urlPathApi === '/api/iap/validate' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => {
@@ -352,19 +542,47 @@ const server = http.createServer((req, res) => {
       body += chunk;
     });
     req.on('end', () => {
-      try {
+      (async () => {
         const { productId, transactionId, receipt, platform } = JSON.parse(body);
-        if (!productId || !transactionId) throw new Error('missing fields');
-        // TODO: Integrate Apple App Store / Google Play server-side receipt validation.
-        // For now, log the transaction and accept — production must verify receipts
-        // against the real store APIs before granting entitlements.
-        console.log('[iap] validate:', { productId, transactionId, platform, ts: Date.now() });
+        if (!productId || !transactionId || !receipt) throw new Error('missing fields');
+        const normTx = String(transactionId).slice(0, 256);
+        const normProduct = String(productId).slice(0, 128);
+        const existing = iapTransactions[normTx];
+        if (existing && existing.productId === normProduct) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, productId: normProduct, transactionId: normTx, duplicate: true }));
+          return;
+        }
+        if (existing && existing.productId !== normProduct) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'transaction already linked to another product' }));
+          return;
+        }
+        const store = normalizePlatform(platform, readReceiptObject(receipt));
+        let result = { ok: false, reason: 'unsupported platform' };
+        if (store === 'apple') result = await validateAppleReceipt(normProduct, normTx, receipt);
+        if (store === 'google') result = await validateGooglePurchase(normProduct, normTx, receipt);
+        if (!result.ok) {
+          res.writeHead(422, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'receipt validation failed', reason: result.reason || 'invalid receipt' }));
+          return;
+        }
+        iapTransactions[normTx] = {
+          txId: normTx,
+          rawId: String(result.storeTransactionId || normTx).slice(0, 256),
+          productId: normProduct,
+          platform: store,
+          validatedAt: Date.now(),
+        };
+        trimIapTransactions();
+        saveIapTransactionsDebounced();
+        console.log('[iap] validated:', { productId: normProduct, transactionId: normTx, store, ts: Date.now() });
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, productId, transactionId }));
-      } catch (e) {
+        res.end(JSON.stringify({ ok: true, productId: normProduct, transactionId: normTx, platform: store }));
+      })().catch(() => {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'bad request' }));
-      }
+      });
     });
     req.on('error', () => {});
     return;

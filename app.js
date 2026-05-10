@@ -5240,6 +5240,7 @@ const BOSS_DEFS = [
   { name:'WARLORD TITAN', hp: 420, w: 120, h: 140, color:'#8a2a1a', pattern:'lance',   fireRate: 0.35, dmg: 20, contactDmg: 48 },
   { name:'THE CHIMERA',   hp: 620, w: 128, h: 148, color:'#3a3a9a', pattern:'maelstrom', fireRate: 0.28, dmg: 24, contactDmg: 56, twin: true },
 ];
+const MOD_BOSS_PATTERN_DEFS = Object.create(null);
 function spawnBoss(tier) {
   const def = BOSS_DEFS[tier] || BOSS_DEFS[1];
   const { x0, x1 } = roadBounds();
@@ -5406,6 +5407,20 @@ function fireBossPattern(b) {
   const dx = px - b.x, dy = py - b.y;
   const dist = Math.hypot(dx, dy) || 1;
   const dmg = b.dmg;
+  const customPattern = MOD_BOSS_PATTERN_DEFS[b.pattern];
+  if (customPattern && typeof customPattern.fire === 'function') {
+    try {
+      customPattern.fire({
+        Game,
+        boss: b,
+        player: Game.player,
+        dx, dy, dist, sp, dmg,
+      });
+      return;
+    } catch (err) {
+      console.warn('[boss] custom pattern failed:', b.pattern, err);
+    }
+  }
   if (b.pattern === 'spread') {
     // 3-way + center
     [-0.35, 0, 0.35].forEach(a => {
@@ -10428,24 +10443,33 @@ const UI = {
     const el = document.getElementById('scoreboard-list');
     const titleEl = document.getElementById('scoreboard-mode');
     const modeId = mode || Game.mode || 'classic';
-    titleEl.textContent = (MODES.find(m => m.id === modeId) || { name: 'GLOBAL' }).name;
+    const isGlobal = modeId === 'global';
+    titleEl.textContent = isGlobal ? 'GLOBAL LEADERBOARD' : (MODES.find(m => m.id === modeId) || { name: 'GLOBAL' }).name;
     el.innerHTML = '<div class="small center" style="padding:14px">LOADING...</div>';
     this.show('scoreboard');
-    const url = (window.RENDER_API || '') + '/api/scores?mode=' + encodeURIComponent(modeId);
+    const url = isGlobal
+      ? (window.RENDER_API || '') + '/api/leaderboards?limit=25'
+      : (window.RENDER_API || '') + '/api/scores?mode=' + encodeURIComponent(modeId);
     fetch(url)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(data => {
-        if (!data || !data.scores || data.scores.length === 0) {
+        const rows = isGlobal ? ((data && data.global) || []) : ((data && data.scores) || []);
+        if (!rows || rows.length === 0) {
           el.innerHTML = '<div class="small center" style="padding:14px">NO SCORES YET. BE THE FIRST!</div>';
           return;
         }
-        el.innerHTML = data.scores.map((s, i) =>
+        const modeNames = Object.create(null);
+        MODES.forEach(m => { modeNames[m.id] = m.name; });
+        el.innerHTML = rows.map((s, i) => {
+          const modeLabel = modeNames[s.mode] || (s.mode || 'CLASSIC').toUpperCase();
+          return (
           `<div class="res-row${i === 0 ? ' big' : ''}">
-            <div class="lbl">#${i+1} ${escapeHtml(s.name || '???')}</div>
+            <div class="lbl">#${i+1} ${escapeHtml(s.name || '???')}${isGlobal ? ` <span style="opacity:.55">· ${modeLabel}</span>` : ''}</div>
             <div class="val">${(s.score | 0).toLocaleString()}</div>
           </div>`
-        ).join('') +
-        `<div class="small center" style="margin-top:8px;opacity:.5">${data.scores.length} ENTRIES · TOP ${Math.min(data.scores.length,50)}</div>`;
+          );
+        }).join('') +
+        `<div class="small center" style="margin-top:8px;opacity:.5">${rows.length} ENTRIES · TOP ${Math.min(rows.length, isGlobal ? 25 : 50)}</div>`;
       })
       .catch(() => {
         el.innerHTML = '<div class="small center" style="padding:14px;color:var(--danger)">SCOREBOARD UNAVAILABLE<br><span style="font-size:10px">ONLINE SCORES REQUIRE SERVER HOSTING</span></div>';
@@ -10453,7 +10477,8 @@ const UI = {
     // populate mode selector buttons
     const btnRow = document.getElementById('scoreboard-modes');
     if (btnRow) {
-      btnRow.innerHTML = MODES.map(m =>
+      const scoreboardModes = [{ id: 'global', name: 'GLOBAL' }, ...MODES];
+      btnRow.innerHTML = scoreboardModes.map(m =>
         `<button class="btn${m.id === modeId ? ' primary' : ''}" data-act="scoreboard-mode" data-mode="${m.id}" style="font-size:10px;min-height:36px;padding:6px 8px">${m.name}</button>`
       ).join('');
     }
@@ -10635,7 +10660,7 @@ const UI = {
         UI.showStats();
         break;
       case 'menu-scoreboard':
-        UI.showScoreboard(Game.mode || 'classic');
+        UI.showScoreboard('global');
         break;
       case 'scoreboard-mode':
         UI.showScoreboard(data);
@@ -11961,7 +11986,7 @@ const LevelEditor = {
 // via <script src="mymod.js">) can register custom vehicles, modes, and hazards.
 // Share codes use the same base64 format as the Level Editor.
 (function setupModdingAPI() {
-  const _modVehicles = [], _modModes = [], _modHazards = [], _modBiomes = [], _modMutators = [];
+  const _modVehicles = [], _modModes = [], _modHazards = [], _modBiomes = [], _modMutators = [], _modBossPatterns = [], _modSeasons = [];
   const _scriptListeners = new Map();
   function removeScriptEntry(event, entryToRemove) {
     const list = _scriptListeners.get(event);
@@ -12045,6 +12070,39 @@ const LevelEditor = {
       console.info('[MojaveMod] Registered mutator:', def.id);
       return true;
     },
+    // Register a custom boss fire pattern: { id, fire(ctx) }.
+    registerBossPattern(def) {
+      if (!def || !def.id || typeof def.fire !== 'function') { console.warn('[MojaveMod] registerBossPattern: id+fire required'); return false; }
+      const id = String(def.id).trim();
+      if (!id) { console.warn('[MojaveMod] registerBossPattern: id required'); return false; }
+      if (MOD_BOSS_PATTERN_DEFS[id]) { console.warn('[MojaveMod] Boss pattern id already exists:', id); return false; }
+      def.id = id;
+      def.modded = true;
+      MOD_BOSS_PATTERN_DEFS[id] = def;
+      _modBossPatterns.push(def);
+      console.info('[MojaveMod] Registered boss pattern:', id);
+      return true;
+    },
+    // Register a seasonal event definition: { name, theme, icon, bonusDesc }.
+    registerSeason(def) {
+      if (!def || !def.name || !def.bonusDesc) { console.warn('[MojaveMod] registerSeason: name+bonusDesc required'); return false; }
+      const seasonName = String(def.name).slice(0, 40);
+      if (SEASON_DEFS.some(s => String(s.name || '').toUpperCase() === seasonName.toUpperCase())) {
+        console.warn('[MojaveMod] Season name already exists:', def.name);
+        return false;
+      }
+      const row = {
+        name: seasonName,
+        theme: String(def.theme || '#c0c0c0').slice(0, 24),
+        icon: String(def.icon || '✦').slice(0, 4),
+        bonusDesc: String(def.bonusDesc).slice(0, 120),
+        modded: true,
+      };
+      _modSeasons.push(row);
+      SEASON_DEFS.push(row);
+      console.info('[MojaveMod] Registered season:', row.name);
+      return true;
+    },
     // Load a level/vehicle/mode pack from a Level Editor share code
     loadShareCode(code) {
       const cfg = LevelEditor.parseCode(code);
@@ -12056,6 +12114,8 @@ const LevelEditor = {
     get hazards()   { return _modHazards.slice();    },
     get biomes()    { return _modBiomes.slice();     },
     get mutators()  { return _modMutators.slice();   },
+    get bossPatterns() { return _modBossPatterns.slice(); },
+    get seasons()   { return _modSeasons.slice();    },
     // Lightweight platform event bus for mods and page-level scripts.
     // Built-in hooks currently emitted by the game use namespace:action keys:
     // run:start, run:end, weekly:complete, weekly:claim, craft:complete,
@@ -14548,7 +14608,7 @@ const IAPService = (() => {
 
   async function validateReceipt(productId, purchaseResult) {
     const base = cloudApiBase();
-    if (!base) return true; // offline-first: grant without server validation
+    if (!base) return false;
     try {
       const resp = await fetch(base + '/api/iap/validate', {
         method: 'POST',
@@ -14563,7 +14623,7 @@ const IAPService = (() => {
       const data = await resp.json();
       return data && data.ok;
     } catch (_) {
-      return true; // network failure — grant optimistically, server can reconcile later
+      return false;
     }
   }
 
