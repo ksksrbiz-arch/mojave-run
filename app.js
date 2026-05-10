@@ -1994,6 +1994,10 @@ const Settings = {
   damageNumbers: true,
   // darker HUD backing + brighter labels for readability
   hudContrast: false,
+  // Cinematic post-FX layer (god rays, film grain, chromatic aberration on
+  // high speed, speed-line vignette, bloom highlights, camera tilt+zoom).
+  // Purely visual — disabling it has zero effect on gameplay/scoring.
+  cinematic: true,
   load() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
@@ -2008,6 +2012,7 @@ const Settings = {
        if (typeof o.autoFire === 'boolean') this.autoFire = o.autoFire;
        if (typeof o.damageNumbers === 'boolean') this.damageNumbers = o.damageNumbers;
        if (typeof o.hudContrast === 'boolean') this.hudContrast = o.hudContrast;
+       if (typeof o.cinematic === 'boolean') this.cinematic = o.cinematic;
     } catch (_) {}
   },
   save() {
@@ -2016,12 +2021,14 @@ const Settings = {
         master: this.master, sfx: this.sfx, shake: this.shake,
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
+        cinematic: this.cinematic,
       }));
     } catch (_) {}
     this.applyBodyClass();
   },
   applyBodyClass() {
     document.body.classList.toggle('big-touch', !!this.bigButtons);
+    document.body.classList.toggle('cinematic-on', !!this.cinematic);
   },
 };
 // local clamp (real `clamp` is defined later in HELPERS section)
@@ -7802,6 +7809,9 @@ function render() {
       // the shake source ends, instead of snapping.
       Game.shakeOX *= 0.7; Game.shakeOY *= 0.7;
     }
+    // Cinematic camera (additive, no gameplay effect): subtle tilt on lateral
+    // input + speed-driven zoom. Self-gated by Settings.cinematic.
+    if (typeof Cinematic !== 'undefined') Cinematic.preTransform(ctx);
     drawBackground();
     drawRoad();
     drawSkidMarks();
@@ -7879,6 +7889,12 @@ function render() {
     ctx.fillStyle = VIGNETTE_PLAY;
     ctx.fillRect(0, 0, W, H);
 
+    // Cinematic post-FX layer (god rays, film grain, chromatic aberration on
+    // high speed, speed-line motion vignette, bloom highlights). Drawn before
+    // the HUD so chrome stays crisp. Self-gated by Settings.cinematic and
+    // PerfMon.quality.
+    if (typeof Cinematic !== 'undefined') Cinematic.postFx(ctx);
+
     if (Game.state === 'playing') {
       drawHUD();
       drawPowerupStrip();
@@ -7894,6 +7910,7 @@ function render() {
     drawIdleBackground();
     ctx.fillStyle = VIGNETTE_MENU;
     ctx.fillRect(0, 0, W, H);
+    if (typeof Cinematic !== 'undefined') Cinematic.postFxMenu(ctx);
   }
 }
 
@@ -8756,6 +8773,8 @@ const UI = {
         <div class="set-q-row">${qopts}</div>
       </div>
       ${toggle('HIGH CONTRAST HUD', 'hudContrast', 'STRONGER HUD BACKDROP + BRIGHTER LABELS')}
+      ${toggle('CINEMATIC FX', 'cinematic', 'GOD RAYS · FILM GRAIN · BLOOM · SPEED LINES · CAMERA TILT')}
+      <div class="set-row"><div class="set-head"><div class="set-name set-sub" style="opacity:.55">QUALITY presets also scale Cinematic FX intensity automatically.</div></div></div>
       <h2>CONTROLS</h2>
       ${toggle('HAPTICS', 'haptics', 'VIBRATE ON HIT / KILL / DEATH')}
       ${toggle('LARGE TOUCH TARGETS', 'bigButtons', 'EASIER TO TAP ON SMALL SCREENS')}
@@ -8988,6 +9007,56 @@ const UI = {
               UI.toast(text.split('\n')[1]);
             }
           } catch (_) { UI.toast('COULD NOT SHARE'); }
+        }
+        break;
+      }
+      case 'res-photo': {
+        // PHOTO / CINEMATIC MODE — composite the current canvas into a
+        // dramatic poster (vignette, letterbox, title, score, brand) and
+        // either share via navigator.share, or download as a PNG. Read-
+        // only on game state — does not affect runs/scores.
+        try {
+          if (typeof Cinematic === 'undefined' || !Cinematic.buildPosterDataURL) {
+            UI.toast('PHOTO MODE UNAVAILABLE');
+            break;
+          }
+          const titleEl = document.getElementById('res-title');
+          const subEl = document.getElementById('res-subtitle');
+          const title = (titleEl && titleEl.textContent) || 'MOJAVE RUN';
+          const subtitle = (subEl && subEl.textContent) || '';
+          const score = 'SCORE ' + Math.floor(Game.score || 0);
+          const dataURL = Cinematic.buildPosterDataURL({ title, subtitle, score });
+          if (!dataURL) { UI.toast('PHOTO MODE FAILED'); break; }
+          // Try Web Share with file first (mobile-friendly), then download.
+          let shared = false;
+          try {
+            if (navigator.canShare && window.fetch) {
+              fetch(dataURL).then(r => r.blob()).then(blob => {
+                const file = new File([blob], 'mojave-run.png', { type: 'image/png' });
+                if (navigator.canShare({ files: [file] })) {
+                  navigator.share({ files: [file], title: 'Mojave Run', text: title + ' — ' + score })
+                    .then(() => UI.toast('SHARED'))
+                    .catch(() => fallbackDownload(dataURL));
+                } else {
+                  fallbackDownload(dataURL);
+                }
+              }).catch(() => fallbackDownload(dataURL));
+              shared = true;
+            }
+          } catch (_) {}
+          if (!shared) fallbackDownload(dataURL);
+          function fallbackDownload(url) {
+            try {
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'mojave-run-' + Math.floor(Game.score || 0) + '.png';
+              document.body.appendChild(a); a.click();
+              setTimeout(() => a.remove(), 0);
+              UI.toast('POSTER SAVED');
+            } catch (e) { UI.toast('COULD NOT SAVE'); }
+          }
+        } catch (e) {
+          UI.toast('PHOTO MODE FAILED');
         }
         break;
       }
@@ -10097,6 +10166,384 @@ function boot() {
     document.addEventListener(ev, ensureAudio, { once:false, passive:true })
   );
 }
+// ============================================================
+// CINEMATIC POST-FX — "Wasteland Cinematic" v2.1
+// ============================================================
+// Purely additive visual layer drawn on top of the existing render pipeline.
+// Does not touch gameplay, scoring, input, AI, or simulation. Disable any
+// time via Settings.cinematic, or scale via the QUALITY preset (auto/low/
+// medium/high) — PerfMon.quality multiplies all costs.
+//
+// Layers (cheap, all 2D canvas, no extra textures > one tiny pre-rendered
+// grain tile):
+//   - preTransform(): cinematic camera tilt on lateral input + speed zoom.
+//   - postFx():       god rays in upper sky, additive bloom around the
+//                     player on nitro / muzzle flashes / explosions, speed-
+//                     line motion vignette at high speed, chromatic
+//                     aberration tint at very high speed, film grain.
+//   - postFxMenu():   subtle grain + soft god rays on idle/menu canvas.
+//
+// All draws use ctx.save/restore. None modifies Game.* fields. Reading
+// Game.player.x, Game.speed, Game.t, Game.muzzleT, Game.shake, Game.flash
+// is read-only. Safe.
+const Cinematic = (function () {
+  const GRAIN_TILE_SIZE = 96;
+  let _grainCanvas = null;
+  let _grainCtx = null;
+  let _grainBuiltAt = 0;
+
+  // Pre-bake a small tile of monochrome noise. We rotate / scroll its draw
+  // offset each frame so it looks like animated film grain at almost zero
+  // cost (one drawImage per frame). Rebuild every ~3s for variety.
+  function buildGrain(now) {
+    if (!_grainCanvas) {
+      _grainCanvas = document.createElement('canvas');
+      _grainCanvas.width = _grainCanvas.height = GRAIN_TILE_SIZE;
+      _grainCtx = _grainCanvas.getContext('2d');
+    }
+    const img = _grainCtx.createImageData(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
+    const data = img.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const v = (Math.random() * 255) | 0;
+      data[i] = v; data[i+1] = v; data[i+2] = v; data[i+3] = 255;
+    }
+    _grainCtx.putImageData(img, 0, 0);
+    _grainBuiltAt = now;
+  }
+
+  // Cinematic camera state — smoothed deltas so the world doesn't jitter.
+  const cam = {
+    rot: 0, rotTarget: 0,
+    zoom: 1, zoomTarget: 1,
+    lastPx: 0, lastT: 0,
+  };
+
+  function isOn() {
+    // Hard gate: feature flag off OR very low quality kills cinematic FX so
+    // the perf governor can fully relieve weak devices.
+    if (!Settings.cinematic) return false;
+    if (typeof PerfMon !== 'undefined' && PerfMon.quality < 0.2) return false;
+    return true;
+  }
+
+  // Returns 0..1 intensity scaled by quality. 1.0 at HIGH, ~0.5 at MEDIUM,
+  // ~0 at LOW. Lets each layer cheap-out gracefully.
+  function intensity() {
+    if (!isOn()) return 0;
+    const q = (typeof PerfMon !== 'undefined') ? PerfMon.quality : 1;
+    return Math.max(0, Math.min(1, q));
+  }
+
+  // Player normalized speed 0..1 — uses the same Game.speed source the
+  // gauge uses, but is read-only here.
+  function speedNorm() {
+    const s = (Game && typeof Game.speed === 'number') ? Game.speed : 0;
+    // 700 ≈ a strong cruising speed; clamp.
+    return Math.max(0, Math.min(1, s / 700));
+  }
+
+  // Smoothed lateral velocity proxy: derive from player x delta over time.
+  function lateralProxy() {
+    if (!Game.player || Game.state !== 'playing') { cam.lastPx = 0; cam.lastT = 0; return 0; }
+    const t = Game.t || 0;
+    const px = Game.player.x;
+    let v = 0;
+    if (cam.lastT > 0) {
+      // 1/120 = ~8ms floor on dt to avoid divide-by-tiny when frames are
+      // back-to-back from a stalled-then-resumed tab.
+      const dt = Math.max(1/120, t - cam.lastT);
+      v = (px - cam.lastPx) / dt;
+    }
+    cam.lastPx = px; cam.lastT = t;
+    // Normalize: ~400 px/s is a strong lateral swerve in this game; clamp
+    // to ±1 so the tilt is bounded regardless of input device.
+    return Math.max(-1, Math.min(1, v / 400));
+  }
+
+  // ========================================================================
+  // preTransform — applied INSIDE the existing render save/restore so it is
+  // automatically unwound. We layer rotation/zoom on top of the shake
+  // translate that already happened.
+  // ========================================================================
+  function preTransform(ctx) {
+    if (!isOn()) { cam.rot *= 0.85; cam.zoom += (1 - cam.zoom) * 0.2; return; }
+    if (Game.state !== 'playing') { cam.rot *= 0.85; cam.zoom += (1 - cam.zoom) * 0.2; return; }
+    const k = intensity();
+    // Tilt: max ~1.5° at full lateral input. Subtle, never disorienting.
+    cam.rotTarget = lateralProxy() * 0.026 * k;
+    cam.rot += (cam.rotTarget - cam.rot) * 0.12;
+    // Zoom: up to +4% at top speed.
+    cam.zoomTarget = 1 + speedNorm() * 0.04 * k;
+    cam.zoom += (cam.zoomTarget - cam.zoom) * 0.08;
+    if (Math.abs(cam.rot) < 0.0008 && Math.abs(cam.zoom - 1) < 0.0008) return;
+    // Pivot near the player so tilt feels anchored to the car.
+    const px = (Game.player && Game.player.x) || W * 0.5;
+    const py = (Game.player && Game.player.y) || H * 0.78;
+    ctx.translate(px, py);
+    ctx.rotate(cam.rot);
+    ctx.scale(cam.zoom, cam.zoom);
+    ctx.translate(-px, -py);
+  }
+
+  // ========================================================================
+  // postFx — layered effects drawn after the main scene + vignette, before
+  // the HUD. All draws self-contained with save/restore.
+  // ========================================================================
+  function postFx(ctx) {
+    if (!isOn()) return;
+    const k = intensity();
+    const sp = speedNorm();
+    const playing = (Game.state === 'playing');
+
+    // ---- 1. Volumetric god rays (sky band) ----
+    // Two angled additive bands that drift very slowly. Faded out at night
+    // (we don't have a hard "isNight" flag here, so we lean on biome theme
+    // brightness via an alpha cap).
+    if (k > 0.35) {
+      drawGodRays(ctx, k);
+    }
+
+    // ---- 2. Bloom highlights around bright events ----
+    // Read-only: we glow on muzzle flash, hit flash, recent shockwave, or
+    // when shake is high (explosion/impact). One additive radial.
+    if (playing && k > 0.25) {
+      drawBloomHighlights(ctx, k);
+    }
+
+    // ---- 3. Speed-line motion vignette ----
+    // Thin radial-from-edges streaks scaling with speed. Cheap line draws.
+    if (playing && sp > 0.55 && k > 0.3) {
+      drawSpeedLines(ctx, k, sp);
+    }
+
+    // ---- 4. Chromatic aberration ----
+    // At very high speed, draw two faint offset color rectangles at the
+    // edges (cyan on left, red on right) to fake RGB split.
+    if (playing && sp > 0.7 && k > 0.4) {
+      drawChromatic(ctx, k, sp);
+    }
+
+    // ---- 5. Film grain (always last, lowest-cost) ----
+    if (k > 0.2) {
+      drawGrain(ctx, k * (playing ? 0.55 : 0.4));
+    }
+  }
+
+  // Lighter pass for the menu / idle background — no speed lines, no
+  // chromatic, just god rays + grain to give the idle screen the same
+  // production-value vibe.
+  function postFxMenu(ctx) {
+    if (!isOn()) return;
+    const k = intensity() * 0.85;
+    if (k > 0.35) drawGodRays(ctx, k * 0.85);
+    if (k > 0.2)  drawGrain(ctx, k * 0.4);
+  }
+
+  // ----- god rays -----
+  function drawGodRays(ctx, k) {
+    const t = (Game.t || 0) * 0.05;
+    const skyH = H * 0.55;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.07 * k;
+    // Gold-warm rays
+    const grad1 = ctx.createLinearGradient(0, 0, W, skyH);
+    grad1.addColorStop(0, 'rgba(0,0,0,0)');
+    grad1.addColorStop(0.5, 'rgba(255,180,90,1)');
+    grad1.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad1;
+    ctx.translate(W * 0.5, 0);
+    ctx.rotate(-0.32 + Math.sin(t) * 0.04);
+    ctx.fillRect(-W, -skyH * 0.2, W * 2, skyH * 0.4);
+    ctx.restore();
+
+    // Cool rim ray (neon blue/purple — wasteland-meets-bladerunner)
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.045 * k;
+    const grad2 = ctx.createLinearGradient(0, 0, W, skyH);
+    grad2.addColorStop(0, 'rgba(0,0,0,0)');
+    grad2.addColorStop(0.5, 'rgba(120,160,255,1)');
+    grad2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad2;
+    ctx.translate(W * 0.5, 0);
+    ctx.rotate(0.45 + Math.cos(t * 0.7) * 0.05);
+    ctx.fillRect(-W, -skyH * 0.18, W * 2, skyH * 0.36);
+    ctx.restore();
+  }
+
+  // ----- bloom highlights -----
+  function drawBloomHighlights(ctx, k) {
+    if (!Game.player) return;
+    // Compute a bloom amount from current bright events. Read-only.
+    const muzzle = Math.max(0, Math.min(1, (Game.muzzleT || 0) / 0.08));
+    const flash = Math.max(0, Math.min(1, (Game.flash || 0)));
+    const shake = Math.max(0, Math.min(1, (Game.shake || 0) / 1.4));
+    const hit = Math.max(0, Math.min(1, (Game.hitFlash || 0) / 0.35));
+    const nitroAmt = (typeof isPowerupActive === 'function' && isPowerupActive('nitro')) ? 0.6 : 0;
+    const total = Math.min(1.4, muzzle * 0.9 + flash * 0.6 + shake * 0.5 + hit * 0.4 + nitroAmt);
+    if (total < 0.05) return;
+    const px = Game.player.x, py = Game.player.y - 8;
+    const r = 80 + total * 120;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.min(0.45, total * 0.32 * k);
+    const g = ctx.createRadialGradient(px, py, 4, px, py, r);
+    // Vehicle-glow color if available, else warm wasteland orange.
+    const glow = (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#ffb060';
+    g.addColorStop(0, glow);
+    g.addColorStop(0.45, 'rgba(255,140,60,0.6)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ----- speed lines -----
+  function drawSpeedLines(ctx, k, sp) {
+    const amt = (sp - 0.55) / 0.45; // 0..1
+    const lines = Math.round(8 + amt * 14);
+    const t = (Game.t || 0) * 6;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.18 * amt * k;
+    ctx.strokeStyle = 'rgba(255,220,180,1)';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < lines; i++) {
+      // Pseudo-random but stable-ish per-frame using i+t for animation.
+      const seed = i * 12.9898 + t * 0.7;
+      const rx = (Math.sin(seed) * 43758.5453) % 1;
+      const ry = (Math.cos(seed * 1.31) * 24578.123) % 1;
+      const sideRand = (Math.abs(rx) > 0.5);
+      const yy = (Math.abs(ry) * H);
+      const len = 30 + Math.abs(rx) * 90;
+      const xx = sideRand
+        ? (Math.abs(rx) * (W * 0.18))                    // left edge band
+        : (W - Math.abs(rx) * (W * 0.18) - len);          // right edge band
+      ctx.beginPath();
+      ctx.moveTo(xx, yy);
+      ctx.lineTo(xx + len, yy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ----- chromatic aberration (faked) -----
+  function drawChromatic(ctx, k, sp) {
+    const amt = (sp - 0.7) / 0.3; // 0..1
+    const a = 0.06 * amt * k;
+    if (a < 0.005) return;
+    const band = Math.max(40, W * 0.08);
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    // cyan-ish on left
+    const gl = ctx.createLinearGradient(0, 0, band, 0);
+    gl.addColorStop(0, `rgba(80,200,255,${a})`);
+    gl.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gl;
+    ctx.fillRect(0, 0, band, H);
+    // red-ish on right
+    const gr = ctx.createLinearGradient(W - band, 0, W, 0);
+    gr.addColorStop(0, 'rgba(0,0,0,0)');
+    gr.addColorStop(1, `rgba(255,80,80,${a})`);
+    ctx.fillStyle = gr;
+    ctx.fillRect(W - band, 0, band, H);
+    ctx.restore();
+  }
+
+  // ----- film grain -----
+  function drawGrain(ctx, k) {
+    const a = 0.07 * k;
+    if (a < 0.005) return;
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    if (!_grainCanvas || (now - _grainBuiltAt) > 2800) buildGrain(now);
+    ctx.save();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = a;
+    // Scroll the tile so it doesn't look static (0.07 / 0.11 px-per-ms are
+    // intentionally non-harmonic so x/y drift never visibly aligns).
+    const ox = -(now * 0.07) % GRAIN_TILE_SIZE;
+    const oy = -(now * 0.11) % GRAIN_TILE_SIZE;
+    const pat = ctx.createPattern(_grainCanvas, 'repeat');
+    if (pat) {
+      ctx.fillStyle = pat;
+      ctx.translate(ox, oy);
+      ctx.fillRect(-ox, -oy, W, H);
+    }
+    ctx.restore();
+  }
+
+  // ========================================================================
+  // PHOTO MODE — composites the current canvas into a poster (title, score,
+  // brand, dramatic frame). Returns a dataURL or null. Used by the results
+  // screen "PHOTO MODE" button. Pure read of the current canvas pixels —
+  // does not affect the live game.
+  // ========================================================================
+  function buildPosterDataURL(opts) {
+    try {
+      const w = cvs.width, h = cvs.height;
+      if (!w || !h) return null;
+      const out = document.createElement('canvas');
+      out.width = w; out.height = h;
+      const c = out.getContext('2d');
+      // 1. Base = the current rendered canvas.
+      c.drawImage(cvs, 0, 0, w, h);
+      // 2. Dramatic dark vignette + gold tint to push poster mood.
+      const vg = c.createRadialGradient(w/2, h/2, Math.min(w,h)*0.25, w/2, h/2, Math.max(w,h)*0.7);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.65)');
+      c.fillStyle = vg;
+      c.fillRect(0, 0, w, h);
+      c.fillStyle = 'rgba(255,140,40,0.05)';
+      c.fillRect(0, 0, w, h);
+      // 3. Top + bottom letterbox bars for cinematic framing.
+      const bar = Math.round(h * 0.085);
+      c.fillStyle = '#000';
+      c.fillRect(0, 0, w, bar);
+      c.fillRect(0, h - bar, w, bar);
+      // 4. Title + score band at bottom inside the letterbox.
+      const title = (opts && opts.title) || 'MOJAVE RUN';
+      const sub   = (opts && opts.subtitle) || '';
+      const score = (opts && opts.score) || '';
+      c.save();
+      c.fillStyle = '#ffd86b';
+      c.font = `bold ${Math.round(h * 0.045)}px "Courier New", monospace`;
+      c.textBaseline = 'middle';
+      c.textAlign = 'left';
+      c.shadowColor = 'rgba(255,140,40,0.7)';
+      c.shadowBlur = 14;
+      c.fillText(title, Math.round(w * 0.04), h - bar / 2);
+      if (score) {
+        c.textAlign = 'right';
+        c.fillStyle = '#fff3b0';
+        c.fillText(score, w - Math.round(w * 0.04), h - bar / 2);
+      }
+      if (sub) {
+        c.shadowBlur = 0;
+        c.fillStyle = 'rgba(255,216,107,0.85)';
+        c.font = `${Math.round(h * 0.022)}px "Courier New", monospace`;
+        c.textAlign = 'center';
+        c.fillText(sub, w / 2, bar / 2);
+      }
+      c.restore();
+      // 5. Brand strip at the very top.
+      c.fillStyle = 'rgba(255,216,107,0.55)';
+      c.font = `${Math.round(h * 0.018)}px "Courier New", monospace`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('— WASTELAND CINEMATIC v2.1 —', w / 2, bar / 2);
+      return out.toDataURL('image/png');
+    } catch (e) {
+      console.warn('[Cinematic] poster build failed', e);
+      return null;
+    }
+  }
+
+  return { preTransform, postFx, postFxMenu, buildPosterDataURL };
+})();
+
 boot();
 
 })();

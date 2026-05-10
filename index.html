@@ -1024,6 +1024,61 @@
     .mp-peer .pdot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
     .mp-peer .pscore{color:var(--gold-dim)}
     .mp-peer.self{border-color:var(--gold)}
+
+    /* ============================================================
+       WASTELAND CINEMATIC v2.1 — additive HUD/menu chrome.
+       Activated by body.cinematic-on (set when Settings.cinematic is true).
+       Pure CSS, no DOM/layout changes, no impact on hit areas or buttons.
+       ============================================================ */
+    body.cinematic-on .screen .inner h1{
+      text-shadow:
+        0 0 12px rgba(255,170,80,.55),
+        0 0 30px rgba(255,80,40,.25),
+        0 2px 0 rgba(0,0,0,.85);
+      letter-spacing:3px;
+    }
+    body.cinematic-on .screen .inner h2{
+      text-shadow:0 0 8px rgba(255,170,80,.4);
+      letter-spacing:2.5px;
+    }
+    body.cinematic-on .btn.primary{
+      box-shadow:
+        0 0 0 1px rgba(255,200,100,.55) inset,
+        0 0 14px rgba(255,140,40,.45),
+        0 0 28px rgba(255,80,40,.18);
+    }
+    body.cinematic-on .btn:not(.primary):not(.danger){
+      box-shadow:0 0 10px rgba(255,170,80,.12);
+    }
+    body.cinematic-on .btn:hover,
+    body.cinematic-on .btn:focus{
+      text-shadow:0 0 6px rgba(255,200,100,.6);
+    }
+    /* Subtle scanline veil across menu screens — non-interactive overlay so
+       all clicks/taps still hit underlying buttons. Only visible on the
+       active .screen.show so it doesn't double-stack. */
+    body.cinematic-on .screen.show::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          rgba(255,170,80,.025) 0px,
+          rgba(255,170,80,.025) 1px,
+          transparent 1px,
+          transparent 3px
+        );
+      mix-blend-mode:overlay;
+      z-index:1;
+    }
+    body.cinematic-on .screen.show .inner{position:relative;z-index:2}
+    /* Photo Mode button — make it pop on results screen. */
+    body.cinematic-on #screen-results .btn[data-act="res-photo"]{
+      border-color:rgba(255,180,90,.6);
+      text-shadow:0 0 8px rgba(255,180,90,.55);
+    }
   </style>
 
   <!-- ===== SCOREBOARD ===== -->
@@ -1054,6 +1109,7 @@
       <button class="btn primary" data-act="res-again">▶ RUN AGAIN</button>
       <button class="btn" id="res-next" data-act="res-next" style="display:none">NEXT SECTOR ►</button>
       <button class="btn" id="res-share" data-act="res-share" style="display:none">SHARE SCORE</button>
+      <button class="btn" data-act="res-photo">📸 PHOTO MODE</button>
       <button class="btn" data-act="res-scoreboard">🏆 SCOREBOARD</button>
       <button class="btn" data-act="back-menu">◄ MENU</button>
     </div>
