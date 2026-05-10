@@ -1123,7 +1123,7 @@ const ACHIEVEMENTS = [
   { id:'wingman',        icon:'\u{1F91D}',     name:'WINGMAN',           desc:'Unlock any sidekick' },
   { id:'scrap_hound',    icon:'\u{1F4B0}',     name:'SCRAP HOUND',       desc:'Earn 10,000 lifetime scrap' },
   { id:'scrap_baron',    icon:'\u{1F48E}',     name:'SCRAP BARON',       desc:'Earn 50,000 lifetime scrap' },
-  { id:'wild_wasteland', icon:'\u{1F3B2}',     name:'WILD WASTELAND',    desc:'Hit a 15-kill streak in a single run', hidden:true, hint:'Get weird enough and the Mojave answers back.' },
+  { id:'wild_wasteland', icon:'\u{1F3B2}',     name:'WILD WASTELAND',    desc:'Hit a 15-kill combo in a single run', hidden:true, hint:'Get weird enough and the Mojave answers back.' },
   { id:'big_iron',       icon:'\u{1F920}',     name:'BIG IRON',          desc:'Score 30 kills in a single run', hidden:true, hint:'There is a certain swagger to solving everything with violence.' },
   { id:'junk_jet',       icon:'\u{1F9F0}',     name:'JUNK JET',          desc:'Earn 1,500 scrap in a single run', hidden:true, hint:'One driver’s roadside trash is another driver’s fortune.' },
   { id:'lonesome_road',  icon:'\u{1F6E3}\uFE0F', name:'LONESOME ROAD',   desc:'Travel 8,000 m in a single run', hidden:true, hint:'Just keep the motor hot and the ghosts in the rearview.' },
