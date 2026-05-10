@@ -14530,8 +14530,16 @@ const _origActPhase1 = UI.act.bind(UI);
 UI.act = function(action, data) {
   if (action === 'platform-sync-now') {
     SFX.click();
-    cloudAutoSync();
-    UI.toast('CLOUD SYNC QUEUED');
+    try {
+      if (typeof cloudAutoSync === 'function') {
+        cloudAutoSync();
+        UI.toast('CLOUD SYNC QUEUED');
+      } else {
+        UI.toast('CLOUD SYNC UNAVAILABLE');
+      }
+    } catch (_) {
+      UI.toast('CLOUD SYNC FAILED');
+    }
     return;
   }
   if (action === 'push-enable') {
