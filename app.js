@@ -68,6 +68,14 @@ const VEHICLES = [
     base: { maxHp: 260, accel: 1250, maxV: 340, fireRate: 0.34, dmg: 4, guns: 2, bigShot: true },
     color: { body:'#4c5358', hood:'#31373c', cab:'#181d22', windshield:'#88a8b8', glow:'#ff9d66' },
   },
+  {
+    id: 'warlordking', name: 'WARLORD KING',
+    desc: 'The boss car itself. Full mastery of campaign and gauntlet unlocks this armored war machine.',
+    cost: 0,
+    masteryUnlock: true,
+    base: { maxHp: 320, accel: 1600, maxV: 440, fireRate: 0.20, dmg: 5, guns: 3, bigShot: true },
+    color: { body:'#1a1a3a', hood:'#0e0e28', cab:'#060614', windshield:'#ff4040', glow:'#ff2020' },
+  },
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
@@ -322,6 +330,24 @@ const VEHICLE_BRANCHES = {
       effects: { bossDamageMul: 1.18, critChance: 0.08, critMul: 1.7 },
     },
   ],
+  warlordking: [
+    {
+      id: 'warcrown',
+      name: 'WAR CROWN',
+      desc: 'Throne weaponry. Heavier hits and devastating boss damage.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.25, fireRate: 0.88 },
+      effects: { bossDamageMul: 1.30, critChance: 0.12, critMul: 2.0 },
+    },
+    {
+      id: 'ironfortress',
+      name: 'IRON FORTRESS',
+      desc: 'Bulletproof shell. More hull and greatly reduced incoming damage.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.30, maxV: 0.90 },
+      effects: { damageTakenMul: 0.75, contactDamageMul: 1.50 },
+    },
+  ],
 };
 
 const UPGRADE_TRACKS = [
@@ -393,7 +419,8 @@ const MODES = [
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
   { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
-  { id: 'zombie',     name: 'ZOMBIE HORDE',     desc: 'The dead walk the Mojave. No bullets — just claws, teeth, and numbers. Survive the endless shamble.' },
+  { id: 'zombie',      name: 'ZOMBIE HORDE',     desc: 'The dead walk the Mojave. No bullets — just claws, teeth, and numbers. Survive the endless shamble.' },
+  { id: 'ironthrone',  name: 'IRON THRONE',      desc: 'Full mastery unlocks the boss campaign. Eight Warlords with different weapons and armored rigs. No survivors.' },
 ];
 
 // Zombie enemy definitions for ZOMBIE HORDE mode
@@ -401,6 +428,22 @@ const ZOMBIE_DEFS = [
   { id:'walker',  w:20, h:30, hp:2, vy:42,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10' },
   { id:'runner',  w:16, h:26, hp:1, vy:90,  vxRange:36, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410' },
   { id:'bruiser', w:32, h:38, hp:5, vy:26,  vxRange:8,  contact:22, score:220, color:'#4a3828', goreColor:'#3a2818', accent:'#1a1210' },
+];
+
+// ============================================================
+// IRON THRONE — 8-stage boss campaign (unlocked by full mastery)
+// Each stage is a unique boss car with a named weapon loadout
+// and a distinct fire pattern. diff scales with stage number.
+// ============================================================
+const IRON_THRONE_STAGES = [
+  { num:1, name:'THE IRON HERALD',  weapon:'SPREAD CANNONS',    hp:140,  w:88,  h:108, color:'#7a1818', pattern:'spread',    fireRate:1.0,  dmg:14, contactDmg:28, twin:false, map:'wastes',    night:false, storm:false, diff:3.5, reward:600,  story:'The Herald guards the first gate. He has never lost a road fight. He has never faced you.' },
+  { num:2, name:'THE TWIN WRAITHS', weapon:'TWIN SEEKERS',      hp:230,  w:72,  h:92,  color:'#aa1838', pattern:'aimed',     fireRate:0.58, dmg:16, contactDmg:32, twin:true,  map:'saltflats', night:false, storm:false, diff:4.0, reward:800,  story:'They hunt in pairs. Two cars, two minds, one kill streak. Split their fire — or be halved.' },
+  { num:3, name:'THE HELLBRINGER',  weapon:'HELLFIRE LAUNCHERS',hp:340,  w:112, h:132, color:'#8a1848', pattern:'hellfire',  fireRate:0.40, dmg:18, contactDmg:38, twin:false, map:'redcanyon', night:false, storm:true,  diff:4.5, reward:1000, story:'The canyons remember every volley she has fired. The rocks are still warm from the last one.' },
+  { num:4, name:'THE LANCE WARDEN', weapon:'RAIL LANCE',        hp:480,  w:122, h:142, color:'#184888', pattern:'lance',     fireRate:0.34, dmg:22, contactDmg:45, twin:false, map:'ash',       night:true,  storm:false, diff:5.0, reward:1200, story:'He invented the rail lance. He has had years to perfect it. You have seconds to survive it.' },
+  { num:5, name:'THE MAELSTROM',    weapon:'CHAOS MORTARS',     hp:640,  w:130, h:150, color:'#383898', pattern:'maelstrom', fireRate:0.27, dmg:26, contactDmg:52, twin:true,  map:'midnight',  night:true,  storm:true,  diff:5.5, reward:1500, story:'Two rigs, twelve mortars, no pattern. The Maelstrom does not aim — it fills the sky.' },
+  { num:6, name:'THE PHANTOM CZAR', weapon:'GHOST CANNONS',     hp:820,  w:132, h:152, color:'#28186a', pattern:'phantom',   fireRate:0.22, dmg:28, contactDmg:56, twin:false, map:'midnight',  night:true,  storm:false, diff:6.0, reward:1800, story:'Faster than anything you have outrun. His ghost cannons fire where you are going, not where you are.' },
+  { num:7, name:'THE WAR MACHINE',  weapon:'SIEGE CANNON',      hp:1050, w:142, h:162, color:'#3a1808', pattern:'cannon',    fireRate:0.50, dmg:42, contactDmg:64, twin:false, map:'ash',       night:true,  storm:true,  diff:6.5, reward:2200, story:'The siege cannon takes a full second to charge. In that second it can punch through a convoy wall. Or you.' },
+  { num:8, name:'THE IRON THRONE',  weapon:'THRONE ARRAY',      hp:1400, w:152, h:168, color:'#1a0818', pattern:'throne',    fireRate:0.19, dmg:34, contactDmg:72, twin:true,  map:'midnight',  night:true,  storm:true,  diff:7.5, reward:3600, story:'Everything the wasteland could forge. Every weapon ever mounted on a war rig, loaded and aimed at you. This is the end.' },
 ];
 
 // Story chapters shown during classic mode as milestones
@@ -1131,6 +1174,8 @@ const ACHIEVEMENTS = [
   { id:'desert_survivalist', icon:'\u{1F343}', name:'DESERT SURVIVALIST', desc:'Finish a run without hitting a single innocent', hidden:true, hint:'Try acting like somebody raised you right.' },
   { id:'ncr_poster_child', icon:'\u{1F396}\uFE0F', name:'NCR POSTER CHILD', desc:'Finish 5 runs without hitting a single innocent', hidden:true, hint:'Keep your fenders clean long enough and the NCR notices.' },
   { id:'goodsprings_butcher', icon:'\u{1F62C}', name:'GOODSPRINGS BUTCHER', desc:'Hit 5 innocents in a single run', hidden:true, hint:'Even the raiders think that was low.' },
+  { id:'full_mastery',   icon:'\u{1F4AA}',     name:'FULL MASTERY',      desc:'Clear all Campaign locations and all Gauntlet sectors', hidden:true, hint:'The road is yours. Every mile of it.' },
+  { id:'throne_claimed', icon:'\u{1F451}',     name:'THRONE CLAIMED',    desc:'Complete the Iron Throne boss campaign', hidden:true, hint:'Eight warlords fall. The wasteland bows.' },
 ];
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
@@ -1191,6 +1236,12 @@ function checkAchievementCondition(id, p) {
     case 'desert_survivalist': return (p.cleanRuns || 0) >= 1;
     case 'ncr_poster_child': return (p.cleanRuns || 0) >= 5;
     case 'goodsprings_butcher': return (p.maxCivilianHits || 0) >= CIVILIAN_INFAMY_HITS;
+    case 'full_mastery':
+      return CAMPAIGN_LOCATIONS.every(loc => {
+        const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
+        return cleared.length >= loc.levels.length;
+      }) && LEVELS.length > 0 && LEVELS.every(L => (p.gauntletCleared || []).includes(L.num));
+    case 'throne_claimed': return (p.ironThroneCleared || []).length >= IRON_THRONE_STAGES.length;
     default: return false;
   }
 }
@@ -1257,6 +1308,8 @@ const Profile = {
         if (typeof p.totalCivilianHits !== 'number') { p.totalCivilianHits = 0; dirty = true; }
         if (typeof p.maxCivilianHits !== 'number') { p.maxCivilianHits = 0; dirty = true; }
         if (typeof p.cleanRuns !== 'number') { p.cleanRuns = 0; dirty = true; }
+        if (typeof p.bestIronThrone !== 'number') { p.bestIronThrone = 0; dirty = true; }
+        if (!Array.isArray(p.ironThroneCleared)) { p.ironThroneCleared = []; dirty = true; }
         if (normalizeCosmetics(p, true)) dirty = true;
       });
       if (dirty) this.save();
@@ -1296,6 +1349,7 @@ const Profile = {
       bestBossRush: 0,
       bestDistance: 0,
       bestZombie: 0,
+      bestIronThrone: 0,
       bestKills: 0,
       bestCombo: 0,
       bestScrapRun: 0,
@@ -1307,6 +1361,7 @@ const Profile = {
       vehicleBranches: { rustbucket: null },
       activeVehicle: 'rustbucket',
       gauntletCleared: [], // array of cleared level numbers
+      ironThroneCleared: [], // array of cleared Iron Throne stage numbers
       achievements: [],    // array of earned achievement IDs
       cosmetics: defaultCosmetics(),
     };
@@ -1479,6 +1534,14 @@ const Profile = {
       p.gauntletCleared.push(result.level);
       p.gauntletCleared.sort((a,b)=>a-b);
     }
+    if (result.mode === 'ironthrone' && result.score > (p.bestIronThrone || 0)) p.bestIronThrone = result.score;
+    if (result.mode === 'ironthrone' && result.victory && result.ironThroneStage) {
+      if (!p.ironThroneCleared) p.ironThroneCleared = [];
+      if (!p.ironThroneCleared.includes(result.ironThroneStage)) {
+        p.ironThroneCleared.push(result.ironThroneStage);
+        p.ironThroneCleared.sort((a, b) => a - b);
+      }
+    }
     this.save();
   },
   isLevelUnlocked(num) {
@@ -1512,6 +1575,41 @@ const Profile = {
   },
   isZombieModeUnlocked() {
     return this.campaignLevelsCleared() >= ZOMBIE_UNLOCK_CAMPAIGN_LEVELS;
+  },
+  isFullMasteryUnlocked() {
+    const p = this.active(); if (!p) return false;
+    const allCampaign = CAMPAIGN_LOCATIONS.every(loc => {
+      const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
+      return cleared.length >= loc.levels.length;
+    });
+    const allGauntlet = LEVELS.length > 0 && LEVELS.every(L => (p.gauntletCleared || []).includes(L.num));
+    return allCampaign && allGauntlet;
+  },
+  // Grant the WARLORD KING vehicle automatically when full mastery is first achieved.
+  // Returns true if the vehicle was newly granted.
+  checkMasteryVehicleGrant() {
+    const p = this.active(); if (!p) return false;
+    if (!this.isFullMasteryUnlocked()) return false;
+    if (p.ownedVehicles['warlordking']) return false;
+    p.ownedVehicles['warlordking'] = true;
+    p.vehicleUpgrades['warlordking'] = Object.assign({}, UPGRADE_TRACK_DEFAULTS);
+    p.vehicleBranches['warlordking'] = null;
+    this.save();
+    return true;
+  },
+  isIronThroneStageUnlocked(stageNum) {
+    if (stageNum === 1) return this.isFullMasteryUnlocked();
+    const p = this.active(); if (!p) return false;
+    return (p.ironThroneCleared || []).includes(stageNum - 1);
+  },
+  recordIronThroneStage(stageNum) {
+    const p = this.active(); if (!p) return;
+    if (!p.ironThroneCleared) p.ironThroneCleared = [];
+    if (!p.ironThroneCleared.includes(stageNum)) {
+      p.ironThroneCleared.push(stageNum);
+      p.ironThroneCleared.sort((a, b) => a - b);
+    }
+    this.save();
   },
   recordCampaignLevel(locId, levelNum) {
     const p = this.active(); if (!p) return null;
@@ -2534,6 +2632,7 @@ const Game = {
   bonusObjectiveT: 0,
   bossRushStage: 0,
   bossRushPending: 0,
+  ironThroneStage: 0,     // current Iron Throne stage number (1–8)
   // boss horde levels: timer + nuke-pickup spawn cooldown
   hordeMode: null,        // { dur, nukeT } when active, else null
   hordeWaveT: 0,
@@ -2668,6 +2767,11 @@ function startRun(mode, level) {
     UI.showMode();
     return;
   }
+  if (mode === 'ironthrone' && !Profile.isFullMasteryUnlocked()) {
+    UI.toast('IRON THRONE LOCKED — CLEAR ALL CAMPAIGN LOCATIONS AND ALL GAUNTLET SECTORS');
+    UI.showMode();
+    return;
+  }
   // Daily Challenge: seed Math.random for the run so every player who runs
   // it on the same UTC date sees identical world generation. Always restore
   // before any new run so seeding doesn't leak across modes.
@@ -2682,7 +2786,19 @@ function startRun(mode, level) {
   const stats = Profile.effectiveStats(profile.activeVehicle);
   const perkState = getCharacterPerkState(profile.characterId);
   Game.mode = mode;
-  if (mode === 'campaign' && typeof level === 'string') {
+  if (mode === 'ironthrone') {
+    const stageNum = (typeof level === 'number' && level >= 1 && level <= IRON_THRONE_STAGES.length) ? level : 1;
+    const stageDef = IRON_THRONE_STAGES[stageNum - 1];
+    Game.ironThroneStage = stageNum;
+    Game.campaignLevelId = null;
+    Game.level = stageNum;
+    Game.levelData = {
+      num: stageNum, name: stageDef.name, obj: 'boss', target: 1,
+      reward: stageDef.reward, diff: stageDef.diff,
+      map: stageDef.map, night: !!stageDef.night, storm: !!stageDef.storm,
+      ironThroneBoss: stageDef,
+    };
+  } else if (mode === 'campaign' && typeof level === 'string') {
     Game.campaignLevelId = level;
     const _ce = CAMPAIGN_LEVEL_MAP[level];
     Game.level = level;
@@ -2695,6 +2811,7 @@ function startRun(mode, level) {
     Game.campaignLevelId = null;
     Game.level = level || null;
     Game.levelData = level ? LEVELS.find(l => l.num === level) : null;
+    if (mode !== 'ironthrone') Game.ironThroneStage = 0;
   }
   Game.biome = pickBiome(mode, Game.levelData, Game.dailySeedKey);
   Game.runMutators = getRunMutators(mode, Game.levelData, Game.dailySeedKey);
@@ -2779,6 +2896,8 @@ function startRun(mode, level) {
   Game.bonusObjectiveT = 0;
   Game.bossRushStage = mode === 'bossrush' ? 1 : 0;
   Game.bossRushPending = 0;
+  // ironThroneStage is already set in the mode-specific block above; reset here only if not ironthrone
+  if (mode !== 'ironthrone') Game.ironThroneStage = 0;
   Game.hordeMode = null;
   Game.hordeWaveT = 0;
   Game.skidMarks.length = 0;
@@ -2819,7 +2938,14 @@ function beginPlaying() {
     else SFX[horn.sfx]();
   }
   // Spawn boss right away in boss levels
-  if (Game.levelData && Game.levelData.obj === 'boss') {
+  if (Game.mode === 'ironthrone') {
+    spawnIronThroneBoss(Game.ironThroneStage);
+    const stageDef = IRON_THRONE_STAGES[Game.ironThroneStage - 1];
+    Game.bossWarning = 2.4;
+    announceEvent('WARLORD ' + Game.ironThroneStage + '/' + IRON_THRONE_STAGES.length + ' — ' + stageDef.weapon, '#ff4040');
+    SFX.boss();
+    Haptics.bossWarn();
+  } else if (Game.levelData && Game.levelData.obj === 'boss') {
     spawnBoss(Game.levelData.boss);
     Game.bossWarning = 2.4;
     SFX.boss();
@@ -2877,9 +3003,16 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     level: Game.level,
     victory: reason === 'victory',
     dailySeedKey: Game.dailySeedKey,
+    // iron throne: stage number that was just cleared (incremented on boss death)
+    ironThroneStage: Game.mode === 'ironthrone' ? Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length) : 0,
   });
-  // check achievements earned this run
+  // check achievements earned this run; also grant mastery vehicle if newly unlocked
+  const _masteryWasUnlocked = !!(Profile.active() && Profile.active().ownedVehicles['warlordking']);
   Game._pendingBadges = Profile.checkAchievements();
+  const _newlyGranted = Profile.checkMasteryVehicleGrant();
+  if (_newlyGranted && !_masteryWasUnlocked) {
+    Game._pendingBadges = Game._pendingBadges.concat([{ icon:'🚗', name:'WARLORD KING UNLOCKED', desc:'The boss car is yours.' }]);
+  }
   Game._pendingCosmetics = Profile.checkCosmetics();
   // SFX already played by death/victory sequences; only play here for time-out
   if (reason === 'time') SFX.victory();
@@ -3324,6 +3457,32 @@ function spawnBoss(tier) {
   };
 }
 
+function spawnIronThroneBoss(stageNum) {
+  const def = IRON_THRONE_STAGES[(stageNum - 1) % IRON_THRONE_STAGES.length];
+  const { x0, x1 } = roadBounds();
+  Game.boss = {
+    name: def.name,
+    weapon: def.weapon,
+    x: (x0+x1)/2, y: -def.h,
+    targetY: H * 0.22,
+    w: def.w, h: def.h,
+    hp: def.hp, maxHp: def.hp,
+    color: def.color,
+    pattern: def.pattern,
+    fireRate: def.fireRate,
+    dmg: def.dmg,
+    contactDmg: def.contactDmg,
+    fireT: 1.2,
+    moveT: 0,
+    vx: 0,
+    enrage: false,
+    twin: !!def.twin,
+    twinX: 80,
+    phase: 0,
+  };
+}
+
+
 function updateBoss(dt) {
   const b = Game.boss; if (!b) return;
   // approach
@@ -3373,15 +3532,17 @@ function updateBoss(dt) {
         Game.shake = 1.4;
         const bossScore = 1500 * (Game.levelData ? Game.levelData.diff : 1);
         applyKill(b.x, b.y - 20, Math.floor(bossScore));
-        const isBossLevel = !!(Game.levelData && Game.levelData.obj === 'boss');
+        const isBossLevel = !!(Game.levelData && Game.levelData.obj === 'boss' && Game.mode !== 'ironthrone');
         Game.bossDeathSeq = {
-          t: 0, dur: isBossLevel ? 2.0 : 1.4,
+          t: 0, dur: 2.0,
           x: b.x, y: b.y, w: b.w, h: b.h,
           color: b.color, twin: b.twin, twinX: b.twinX,
           levelClear: isBossLevel,
           bossRush: Game.mode === 'bossrush',
+          ironThrone: Game.mode === 'ironthrone',
         };
         if (Game.mode === 'bossrush') Game.bossRushStage += 1;
+        if (Game.mode === 'ironthrone') Game.ironThroneStage += 1;
         clearEnemyShotsFrom(b);
         Game.boss = null;
         return;
@@ -3456,6 +3617,43 @@ function fireBossPattern(b) {
       }
     }
     Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:8, h:14, vx:dx/dist*sp*1.25, vy:dy/dist*sp*1.25, dmg:dmg, big:true, src:b });
+  } else if (b.pattern === 'phantom') {
+    // fast multi-way ghost cannon burst — wide arc, high speed
+    const count = b.enrage ? 7 : 5;
+    const spread = 0.22;
+    const fsp = sp * 1.5;
+    const half = Math.floor(count / 2);
+    for (let i = -half; i <= half; i++) {
+      const a = i * spread;
+      const cs = Math.cos(a), sn = Math.sin(a);
+      const vx = (dx*cs - dy*sn)/dist*fsp, vy = (dx*sn + dy*cs)/dist*fsp;
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:5, h:8, vx, vy, dmg:dmg*0.85, big:false, src:b });
+    }
+  } else if (b.pattern === 'cannon') {
+    // slow, massive siege cannon shot — devastating direct hit, flanking shrapnel
+    const csp = sp * 0.65;
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:14, h:22, vx:dx/dist*csp, vy:dy/dist*csp, dmg:dmg*2.1, big:true, src:b });
+    [-0.42, 0.42].forEach(a => {
+      const cs = Math.cos(a), sn = Math.sin(a);
+      const vx = (dx*cs - dy*sn)/dist*csp*1.2, vy = (dx*sn + dy*cs)/dist*csp*1.2;
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:7, h:11, vx, vy, dmg:dmg*0.75, big:false, src:b });
+    });
+  } else if (b.pattern === 'throne') {
+    // throne array: spread volley + rail lance + rotating orbs + twin shot
+    [-0.35, 0, 0.35].forEach(a => {
+      const cs = Math.cos(a), sn = Math.sin(a);
+      const vx = (dx*cs - dy*sn)/dist*sp, vy = (dx*sn + dy*cs)/dist*sp;
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:6, h:10, vx, vy, dmg, big:true, src:b });
+    });
+    Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:10, h:18, vx:dx/dist*sp*1.7, vy:dy/dist*sp*1.7, dmg:dmg*1.3, big:true, src:b });
+    const burst = b.enrage ? 8 : 4;
+    for (let i = 0; i < burst; i++) {
+      const a = b.moveT * 2.4 + (Math.PI * 2 * i) / burst;
+      Game.enemyBullets.push({ x:b.x, y:b.y+b.h/2, w:5, h:5, vx:Math.cos(a)*200, vy:Math.sin(a)*200, dmg:dmg*0.5, big:false, src:b });
+    }
+    if (b.twin) {
+      Game.enemyBullets.push({ x:b.twinX, y:b.y+b.h/2, w:8, h:14, vx:dx/dist*sp*1.3, vy:dy/dist*sp*1.3, dmg:dmg, big:true, src:b });
+    }
   }
 }
 
@@ -3606,6 +3804,26 @@ function updateBossDeath(dt) {
         Game.bossRushPending = 2.1;
         announceEvent('NEXT BOSS INBOUND', '#ff8a8a');
       }
+    } else if (seq.ironThrone) {
+      Game.pickups.push({ kind:'powerup', power: rollPowerup(), x: seq.x - 18, y: seq.y, w:26, h:26, t:0 });
+      Game.pickups.push({ kind:'repair', x: seq.x + 18, y: seq.y, w:22, h:22, t:0 });
+      // ironThroneStage was already incremented on boss death; check if all cleared
+      if (Game.ironThroneStage > IRON_THRONE_STAGES.length) {
+        triggerVictory('ironthrone');
+      } else {
+        const nextDef = IRON_THRONE_STAGES[Game.ironThroneStage - 1];
+        Game.biome = nextDef.map;
+        Game.isNight = !!nextDef.night;
+        Game.isStorm = !!nextDef.storm;
+        _skyKey = ''; _roadKey = ''; // invalidate cached gradients for new biome
+        if (Game.levelData) {
+          Game.levelData.name = nextDef.name;
+          Game.levelData.diff = nextDef.diff;
+          Game.levelData.ironThroneBoss = nextDef;
+        }
+        Game.bossRushPending = 2.3;
+        announceEvent('WARLORD ' + Game.ironThroneStage + '/' + IRON_THRONE_STAGES.length + ' INBOUND — ' + nextDef.weapon, '#ff4040');
+      }
     }
   }
 }
@@ -3743,6 +3961,21 @@ function update(dt) {
         Haptics.bossWarn();
       } else {
         triggerVictory('bossrush');
+      }
+    }
+  }
+
+  if (Game.mode === 'ironthrone' && !Game.boss && !Game.bossDeathSeq && Game.bossRushPending > 0) {
+    Game.bossRushPending -= dt;
+    if (Game.bossRushPending <= 0 && Game.state === 'playing') {
+      if (Game.ironThroneStage <= IRON_THRONE_STAGES.length) {
+        spawnIronThroneBoss(Game.ironThroneStage);
+        Game.bossWarning = 2.1;
+        SFX.boss();
+        Haptics.bossWarn();
+        Game.bossRushPending = 0;
+      } else {
+        triggerVictory('ironthrone');
       }
     }
   }
@@ -6003,6 +6236,9 @@ function drawHUD() {
     subL = `TIME ATTACK`;
   } else if (Game.mode === 'bossrush') {
     subL = `BOSS RUSH`;
+  } else if (Game.mode === 'ironthrone') {
+    const itDef = IRON_THRONE_STAGES[Math.min(Game.ironThroneStage, IRON_THRONE_STAGES.length) - 1];
+    subL = itDef ? itDef.weapon : 'IRON THRONE';
   }
   ctx.fillText(subL, 50, hudH * 0.72);
 
@@ -6026,6 +6262,9 @@ function drawHUD() {
     else if (L.obj === 'horde') mainR = 'HORDE ' + Math.max(0, (Game.hordeMode ? Game.hordeMode.dur : L.target) - Game.t).toFixed(1) + 'S';
   } else if (Game.mode === 'bossrush') {
     mainR = `BOSS ${Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length)}/${BOSS_RUSH_STAGES.length}`;
+  } else if (Game.mode === 'ironthrone') {
+    const itStage = Math.min(Game.ironThroneStage, IRON_THRONE_STAGES.length);
+    mainR = `WARLORD ${itStage}/${IRON_THRONE_STAGES.length}`;
   }
   ctx.fillText(mainR, W - 50, hudH * 0.32);
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
@@ -6752,11 +6991,23 @@ const UI = {
       const fireN  = norm(1 / stats.fireRate, 11);
       const dmgN   = norm(stats.dmg * stats.guns, 4);
 
+      const masteryLocked = !!v.masteryUnlock && !owned;
+      const costLabel = owned
+        ? (selected ? 'EQUIPPED' : 'OWNED')
+        : (v.masteryUnlock ? '👑 FULL MASTERY UNLOCK' : 'COST <b>' + v.cost + '</b> SCRAP');
+      const buyBtn = owned
+        ? (selected
+            ? '<button class="btn primary" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE ▲</button>'
+            : '<div class="btn-row"><button class="btn" data-vact="select" data-vid="'+v.id+'">EQUIP</button><button class="btn" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE</button></div>')
+        : (v.masteryUnlock
+            ? '<button class="btn primary" disabled>LOCKED — ACHIEVE FULL MASTERY</button>'
+            : '<button class="btn primary" data-vact="buy" data-vid="'+v.id+'" '+(p.scrap < v.cost ? 'disabled' : '')+'>UNLOCK · '+v.cost+' SCRAP</button>');
+
       tile.innerHTML = `
         <div class="vt-head">
           <div>
             <div class="vt-name">${v.name}${selected ? ' ◀' : ''}</div>
-            <div class="vt-cost">${owned ? (selected ? 'EQUIPPED' : 'OWNED') : 'COST <b>' + v.cost + '</b> SCRAP'}</div>
+            <div class="vt-cost">${costLabel}</div>
           </div>
         </div>
         <div class="vt-preview"><canvas></canvas></div>
@@ -6768,11 +7019,7 @@ const UI = {
           <div class="stat-bar"><div class="lbl">FIRE</div><div class="bar"><div class="fill" style="width:${fireN}%"></div></div><div class="num">${(1/stats.fireRate).toFixed(1)}</div></div>
           <div class="stat-bar"><div class="lbl">DAMAGE</div><div class="bar"><div class="fill" style="width:${dmgN}%"></div></div><div class="num">${stats.dmg}×${stats.guns}</div></div>
         </div>
-        ${owned
-          ? (selected
-              ? '<button class="btn primary" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE ▲</button>'
-              : '<div class="btn-row"><button class="btn" data-vact="select" data-vid="'+v.id+'">EQUIP</button><button class="btn" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE</button></div>')
-          : '<button class="btn primary" data-vact="buy" data-vid="'+v.id+'" '+(p.scrap < v.cost ? 'disabled' : '')+'>UNLOCK · '+v.cost+' SCRAP</button>'}
+        ${buyBtn}
       `;
       list.appendChild(tile);
       // render preview
@@ -6887,6 +7134,7 @@ const UI = {
     const p = Profile.active(); if (!p) return;
     const v = VEHICLE_BY_ID[p.activeVehicle];
     const zombieUnlocked = Profile.isZombieModeUnlocked();
+    const masteryUnlocked = Profile.isFullMasteryUnlocked();
     const campaignCleared = Profile.campaignLevelsCleared();
     document.getElementById('mode-vehicle').textContent = v.name;
     const list = document.getElementById('mode-list');
@@ -6894,11 +7142,17 @@ const UI = {
     MODES.forEach(m => {
       const tile = document.createElement('button');
       const zombieLocked = m.id === 'zombie' && !zombieUnlocked;
-      const desc = zombieLocked ? `${m.desc} Unlocks at campaign midpoint.` : m.desc;
-      const lockLine = zombieLocked
-        ? `<div class="mt-lock">🔒 ${campaignCleared} / ${ZOMBIE_UNLOCK_CAMPAIGN_LEVELS} CAMPAIGN LEVELS CLEARED</div>`
-        : '';
-      tile.className = 'mode-tile' + (zombieLocked ? ' locked' : '');
+      const ironThroneLocked = m.id === 'ironthrone' && !masteryUnlocked;
+      const isLocked = zombieLocked || ironThroneLocked;
+      let desc = m.desc;
+      let lockLine = '';
+      if (zombieLocked) {
+        desc = `${m.desc} Unlocks at campaign midpoint.`;
+        lockLine = `<div class="mt-lock">🔒 ${campaignCleared} / ${ZOMBIE_UNLOCK_CAMPAIGN_LEVELS} CAMPAIGN LEVELS CLEARED</div>`;
+      } else if (ironThroneLocked) {
+        lockLine = `<div class="mt-lock">👑 REQUIRES FULL MASTERY — CLEAR ALL CAMPAIGN + ALL GAUNTLET</div>`;
+      }
+      tile.className = 'mode-tile' + (isLocked ? ' locked' : '');
       tile.dataset.mid = m.id;
       tile.innerHTML = `
         <div class="mt-name">${m.name}</div>
@@ -6942,6 +7196,31 @@ const UI = {
     this.show('gauntlet');
   },
 
+  // ---- IRON THRONE ----
+  showIronThrone() {
+    const p = Profile.active(); if (!p) return;
+    const ironThroneCleared = p.ironThroneCleared || [];
+    document.getElementById('ironthrone-progress').textContent = `${ironThroneCleared.length} / ${IRON_THRONE_STAGES.length}`;
+    const grid = document.getElementById('ironthrone-grid');
+    grid.innerHTML = '';
+    IRON_THRONE_STAGES.forEach(stage => {
+      const cleared = ironThroneCleared.includes(stage.num);
+      const unlocked = Profile.isIronThroneStageUnlocked(stage.num);
+      const tile = document.createElement('button');
+      tile.className = 'level-tile boss' + (cleared ? ' cleared' : '') + (!unlocked ? ' locked' : '');
+      tile.innerHTML = `
+        <div class="ln">${stage.num}</div>
+        <div class="lname">${stage.name}</div>
+        <div class="lobj">${stage.weapon}</div>
+        ${cleared ? '<div class="lcheck">✓</div>' : ''}
+        ${!cleared ? '<div class="star">☠</div>' : ''}
+      `;
+      tile.dataset.itstage = stage.num;
+      grid.appendChild(tile);
+    });
+    this.show('ironthrone');
+  },
+
   // ---- STATS ----
   showStats() {
     const p = Profile.active(); if (!p) return;
@@ -6960,6 +7239,8 @@ const UI = {
       ['BEST TIME ATK', p.bestTime],
       ['BEST BOSS RUSH', p.bestBossRush || 0],
       ['BEST HORDE', p.bestZombie || 0],
+      ['BEST IRON THRONE', p.bestIronThrone || 0],
+      ['IRON THRONE', (p.ironThroneCleared || []).length + ' / ' + IRON_THRONE_STAGES.length],
       ['LONGEST RUN', p.bestDistance + ' M'],
       ['BEST KILL RUN', p.bestKills || 0],
       ['BEST COMBO', (p.bestCombo || 0) + KILL_STREAK_LABEL],
@@ -7042,6 +7323,10 @@ const UI = {
     } else if (Game.mode === 'bossrush') {
       rows.push(['BOSSES', Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) + ' / ' + BOSS_RUSH_STAGES.length, false]);
       rows.push(['BEST', p.bestBossRush || 0, false]);
+    } else if (Game.mode === 'ironthrone') {
+      const clearedStage = Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length);
+      rows.push(['WARLORDS', clearedStage + ' / ' + IRON_THRONE_STAGES.length, false]);
+      rows.push(['BEST', p.bestIronThrone || 0, false]);
     } else if (Game.mode === 'daily' && Game.dailySeedKey) {
       const best = (p.dailyBest && p.dailyBest[Game.dailySeedKey]) || Math.floor(Game.score);
       rows.push(['DAILY', Game.dailySeedKey, false]);
@@ -7060,6 +7345,10 @@ const UI = {
     rows.push(['TOP COMBO', (Game.comboBest || 0) + KILL_STREAK_LABEL, false]);
     rows.push(['MOJAVE REP', getWastelandReputation(), false]);
     const bestMoment = (() => {
+      if (Game.state === 'victory' && Game.mode === 'ironthrone') {
+        const clearedStage = Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length);
+        return clearedStage >= IRON_THRONE_STAGES.length ? 'ALL EIGHT WARLORDS FALL. THE THRONE IS YOURS.' : 'WARLORD SLAIN';
+      }
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'horde') return 'HORDE BROKEN';
@@ -7106,6 +7395,17 @@ const UI = {
           nextBtn.dataset.next = nextId;
           nextBtn.dataset.nextmode = 'campaign';
         } else nextBtn.style.display = 'none';
+      } else nextBtn.style.display = 'none';
+    } else if (Game.state === 'victory' && Game.mode === 'ironthrone') {
+      // ironThroneStage was incremented on boss death; points to next stage
+      const clearedStage = Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length);
+      const nextStageNum = clearedStage + 1;
+      const nextDef = IRON_THRONE_STAGES[nextStageNum - 1];
+      if (nextDef && Profile.isIronThroneStageUnlocked(nextStageNum)) {
+        nextBtn.style.display = '';
+        nextBtn.textContent = 'NEXT: ' + nextDef.name + ' ►';
+        nextBtn.dataset.next = nextStageNum;
+        nextBtn.dataset.nextmode = 'ironthrone';
       } else nextBtn.style.display = 'none';
     } else nextBtn.style.display = 'none';
 
@@ -7397,8 +7697,12 @@ const UI = {
           const remaining = getZombieUnlockLevelsRemaining(Profile.active());
           UI.toast(zombieLockedMessage('LOCKED', remaining));
         }
+        else if (m === 'ironthrone' && !Profile.isFullMasteryUnlocked()) {
+          UI.toast('IRON THRONE LOCKED — CLEAR ALL CAMPAIGN LOCATIONS AND ALL GAUNTLET SECTORS');
+        }
         else if (m === 'gauntlet') UI.showGauntlet();
         else if (m === 'campaign') UI.showCampaign();
+        else if (m === 'ironthrone') UI.showIronThrone();
         else startRun(m);
         break;
       }
@@ -7406,6 +7710,16 @@ const UI = {
         const num = data;
         if (Profile.isLevelUnlocked(num)) startRun('gauntlet', num);
         else UI.toast('LOCKED');
+        break;
+      }
+      case 'ironthrone-start': {
+        const stageNum = typeof data === 'number' ? data : parseInt(data, 10);
+        if (Profile.isIronThroneStageUnlocked(stageNum)) {
+          UI.hideAllScreens();
+          startRun('ironthrone', stageNum);
+        } else {
+          UI.toast('STAGE LOCKED — CLEAR PREVIOUS WARLORD FIRST');
+        }
         break;
       }
       case 'res-again': {
@@ -7420,6 +7734,7 @@ const UI = {
         const _rnVal  = _rnBtn.dataset.next;
         UI.hideAllScreens();
         if (_rnMode === 'campaign') startRun('campaign', _rnVal);
+        else if (_rnMode === 'ironthrone') startRun('ironthrone', parseInt(_rnVal, 10));
         else startRun('gauntlet', parseInt(_rnVal, 10));
         break;
       }
@@ -7639,10 +7954,14 @@ document.addEventListener('click', e => {
   // mode tile
   const mt = e.target.closest('.mode-tile');
   if (mt) { UI.act('mode-select', mt.dataset.mid); return; }
-  // gauntlet tile
+  // gauntlet / iron throne tile
   const lt = e.target.closest('.level-tile');
   if (lt && !lt.classList.contains('locked')) {
-    UI.act('gauntlet-start', parseInt(lt.dataset.level, 10));
+    if (lt.dataset.itstage) {
+      UI.act('ironthrone-start', parseInt(lt.dataset.itstage, 10));
+    } else {
+      UI.act('gauntlet-start', parseInt(lt.dataset.level, 10));
+    }
     return;
   }
   // campaign map dot
