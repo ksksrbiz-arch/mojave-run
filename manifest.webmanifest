@@ -53,7 +53,13 @@
       "label": "Mojave Run gameplay"
     }
   ],
-  "related_applications": [],
+  "related_applications": [
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=com.mojaverun.game",
+      "id": "com.mojaverun.game"
+    }
+  ],
   "edge_side_panel": { "preferred_width": 400 }
 }
 

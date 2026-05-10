@@ -13,7 +13,7 @@
  * Cache-name versioning: bump CACHE_VERSION to invalidate old caches when
  * shipping a major asset change. Old caches are purged in `activate`.
  */
-const CACHE_VERSION = 'v1-2026-05-08';
+const CACHE_VERSION = 'v2-2026-05-10';
 const CACHE_NAME    = 'mojave-run-' + CACHE_VERSION;
 
 const PRECACHE = [
@@ -23,6 +23,7 @@ const PRECACHE = [
   '/mp.js',
   '/icon.svg',
   '/manifest.webmanifest',
+  '/privacy-policy.html',
 ];
 
 self.addEventListener('install', event => {
