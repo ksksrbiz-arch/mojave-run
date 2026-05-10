@@ -3050,6 +3050,8 @@ const ambientState = {
 const MUSIC_LOOKAHEAD_SECONDS = 0.24;
 const MUSIC_MIN_NOTE = 35;
 const MUSIC_MAX_NOTE = 3200;
+const MUSIC_BEAT_RESET_THRESHOLD = 1;
+const MUSIC_BEAT_INITIAL_DELAY = 0.02;
 const MUSIC_STATE_PRESETS = {
   menu: {
     bpm: 82,
@@ -3188,7 +3190,7 @@ function tone(freq, dur, type='square', vol=0.08, slide=0, when=0, destination=a
   const g = audioCtx.createGain();
   o.type = type;
   o.frequency.setValueAtTime(Math.max(MUSIC_MIN_NOTE, Math.min(MUSIC_MAX_NOTE, freq)), t);
-  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, Math.max(1, freq + slide)), t + dur);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(Math.max(q, 0.0001), t + dur);
   o.connect(g).connect(destination);
@@ -3217,8 +3219,8 @@ function gunShot(baseFreq=132, dur=0.085, vol=0.12, crackVol=0.55) {
   const t = audioCtx.currentTime;
   const outVol = vol;
   if (outVol <= 0.0001) return;
-  const punch = baseFreq * (1 + (Math.random() - 0.5) * 0.2);
-  tone(punch, 0.045, 'sine', outVol * 1.25, -96, t, audioSfxGain);
+  const jitteredFreq = baseFreq * (1 + (Math.random() - 0.5) * 0.2);
+  tone(jitteredFreq, 0.045, 'sine', outVol * 1.25, -96, t, audioSfxGain);
   tone(baseFreq * 2.3, dur, 'triangle', outVol * 0.28, -110, t + 0.004, audioSfxGain);
   filteredNoise(Math.max(0.018, dur * 0.55), outVol * crackVol, 2800 + Math.random() * 900, t, audioSfxGain, 'bandpass', 1.1);
   filteredNoise(0.06, outVol * 0.15, 800, t + 0.008, audioSfxGain, 'lowpass', 0.8);
@@ -3304,7 +3306,9 @@ const AudioEngine = {
     }
     updateAmbientBed(mode, preset);
     if ((Settings.music || 0) <= 0.0001 || (Settings.master || 0) <= 0.0001) return;
-    if (!musicState.nextBeatTime || musicState.nextBeatTime < audioCtx.currentTime - 1) musicState.nextBeatTime = audioCtx.currentTime + 0.02;
+    if (!musicState.nextBeatTime || musicState.nextBeatTime < audioCtx.currentTime - MUSIC_BEAT_RESET_THRESHOLD) {
+      musicState.nextBeatTime = audioCtx.currentTime + MUSIC_BEAT_INITIAL_DELAY;
+    }
     const beat = Math.max(0.08, (60 / preset.bpm) * 0.5);
     while (musicState.nextBeatTime < audioCtx.currentTime + MUSIC_LOOKAHEAD_SECONDS) {
       scheduleMusicBeat(musicState.nextBeatTime, mode, preset);
