@@ -69,7 +69,7 @@ const VEHICLES = [
     color: { body:'#4c5358', hood:'#31373c', cab:'#181d22', windshield:'#88a8b8', glow:'#ff9d66' },
   },
   {
-    id: 'cemetarytank', name: 'CEMETERY TANK',
+    id: 'cemeterytank', name: 'CEMETERY TANK',
     desc: 'Death incarnate on treads. Rolls out of the grave and into your enemies. Nothing survives.',
     cost: 100000,
     master: true,
@@ -331,7 +331,7 @@ const VEHICLE_BRANCHES = {
       effects: { bossDamageMul: 1.18, critChance: 0.08, critMul: 1.7 },
     },
   ],
-  cemetarytank: [
+  cemeterytank: [
     {
       id: 'gravedigger',
       name: 'GRAVEDIGGER',
@@ -5077,7 +5077,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
 
     // armor bolt rivets
     ctx.fillStyle = '#3a3828';
-    [[-tw/2 + 3, 2], [tw/2 - 7, 2]].forEach(([bx, by]) => {
+    [-tw/2 + 3, tw/2 - 7].forEach(bx => {
       for (let i = 0; i < 4; i++) ctx.fillRect(bx, -th/2 + 14 + i * 13, 4, 4);
     });
 
@@ -6924,6 +6924,14 @@ const UI = {
     }
     list.innerHTML = '';
     cosmeticList.innerHTML = '';
+    // Compute stat-bar scale maxes from all vehicle base stats so bars stay proportional
+    const statMax = VEHICLES.reduce((m, vv) => ({
+      maxV:     Math.max(m.maxV,     vv.base.maxV),
+      accel:    Math.max(m.accel,    vv.base.accel),
+      maxHp:    Math.max(m.maxHp,    vv.base.maxHp),
+      fireRate: Math.min(m.fireRate, vv.base.fireRate),
+      dmgGuns:  Math.max(m.dmgGuns,  vv.base.dmg * vv.base.guns),
+    }), { maxV: 1, accel: 1, maxHp: 1, fireRate: 1, dmgGuns: 1 });
     VEHICLES.forEach(v => {
       const owned = !!p.ownedVehicles[v.id];
       const selected = p.activeVehicle === v.id;
@@ -6933,11 +6941,11 @@ const UI = {
 
       // stat values normalized for bar display
       const norm = (val, max) => clamp(val / max, 0, 1) * 100;
-      const speedN = norm(stats.maxV, 600);
-      const accelN = norm(stats.accel, 2500);
-      const armorN = norm(stats.maxHp, 650);
-      const fireN  = norm(1 / stats.fireRate, 13);
-      const dmgN   = norm(stats.dmg * stats.guns, 18);
+      const speedN = norm(stats.maxV, statMax.maxV);
+      const accelN = norm(stats.accel, statMax.accel);
+      const armorN = norm(stats.maxHp, statMax.maxHp);
+      const fireN  = norm(1 / stats.fireRate, 1 / statMax.fireRate);
+      const dmgN   = norm(stats.dmg * stats.guns, statMax.dmgGuns);
 
       tile.innerHTML = `
         <div class="vt-head">
