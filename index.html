@@ -775,13 +775,12 @@
 
   /* === PLATFORM FEATURES CSS === */
   /* Color-blind simulation — applied to canvas via Settings.applyBodyClass() */
-  /* Reduced motion — disables non-essential CSS animations */
+  /* Reduced motion — completely eliminates non-essential CSS animations */
   body.reduced-motion *,
   body.reduced-motion *::before,
   body.reduced-motion *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    animation: none !important;
+    transition: none !important;
   }
   /* Platform screen layout */
   #screen-platform .inner,

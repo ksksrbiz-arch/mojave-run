@@ -10275,7 +10275,7 @@ const Rivals = {
       const rival = JSON.parse(atob(b64));
       if (!rival.name) return { ok: false, reason: 'INVALID RIVAL DATA' };
       if (!this._list) this.load();
-      if (this._list.length >= MAX_RIVALS) return { ok: false, reason: 'MAX ' + MAX_RIVALS + ' RIVALS' };
+      if (this._list.length >= MAX_RIVALS) return { ok: false, reason: 'RIVAL LIMIT REACHED (' + MAX_RIVALS + '/' + MAX_RIVALS + ')' };
       if (this._list.some(r => r.name === rival.name)) return { ok: false, reason: 'RIVAL ALREADY IMPORTED' };
       rival.imported = Date.now();
       this._list.push(rival); this.save();
@@ -10441,7 +10441,7 @@ const PhotoMode = {
     } catch (_) {
       // Canvas may be tainted in cross-origin contexts — fall back to new tab
       try { window.open(canvas.toDataURL('image/png'), '_blank'); }
-      catch (_2) { UI.toast('SCREENSHOT FAILED — CANVAS TAINTED'); }
+      catch (_2) { UI.toast('SCREENSHOT UNAVAILABLE — CROSS-ORIGIN SECURITY RESTRICTION'); }
     }
   },
   exit() {
@@ -10569,14 +10569,23 @@ function buildPlatformScreen() {
 }
 
 function buildEditorScreen() {
-  const draft = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+  const raw = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+  // Sanitize numeric values from localStorage before inserting into HTML attributes
+  const draft = {
+    name:         escapeHtml(String(raw.name || 'CUSTOM RUN').slice(0, 20)),
+    biome:        String(raw.biome || 'wastes'),
+    objective:    String(raw.objective || 'score'),
+    difficulty:   Math.max(1, Math.min(5, Math.round(Number(raw.difficulty) || 2))),
+    enemyDensity: Math.max(0.5, Math.min(2.0, Math.round((Number(raw.enemyDensity) || 1) * 10) / 10)),
+    pickupRate:   Math.max(0.5, Math.min(2.0, Math.round((Number(raw.pickupRate)   || 1) * 10) / 10)),
+  };
   const biomes = ['wastes','canyon','city','neon'];
   const objectives = ['score','distance','kills','survive'];
   return `
     <h2>🛠 LEVEL EDITOR</h2>
     <div class="set-row">
       <div class="set-head"><div class="set-name">LEVEL NAME</div></div>
-      <input id="ed-name" class="mp-input" maxlength="20" value="${escapeHtml(draft.name||'CUSTOM RUN')}" style="margin-top:4px" placeholder="CUSTOM RUN" />
+      <input id="ed-name" class="mp-input" maxlength="20" value="${draft.name}" style="margin-top:4px" placeholder="CUSTOM RUN" />
     </div>
     <div class="set-row">
       <div class="set-head"><div class="set-name">BIOME</div></div>
@@ -10773,8 +10782,8 @@ UI.act = function(action, data) {
     }
     case 'platform-remove-replay': {
       SFX.click();
-      const rdate2 = parseInt(data || '0', 10);
-      Replay.removeReplay(rdate2);
+      const replayDateToRemove = parseInt(data || '0', 10);
+      Replay.removeReplay(replayDateToRemove);
       UI.toast('REPLAY REMOVED');
       UI.showPlatform();
       return;
@@ -10815,53 +10824,55 @@ UI.act = function(action, data) {
 };
 
 // === PLATFORM FRAME HOOK ===
-// Piggybacks on the existing requestAnimationFrame loop to:
-//  1. Capture replay frames during gameplay
-//  2. Draw rival ghost cars during gameplay
-//  3. Show weekly challenge completion toast after a run ends
+// Captures replay frames and draws rival ghosts using lightweight periodic polling.
+// Avoids monkey-patching requestAnimationFrame; instead uses a dedicated interval
+// (5fps for replay) and a state-change watcher (100ms poll for game state events).
 (function installPlatformFrameHook() {
-  // Inject into the render pipeline via a lightweight post-render callback.
-  // We replace the global `frame` reference only if doing so is safe.
-  // To avoid touching the tight inner loop, we intercept after render() returns.
-  // The safest approach: hook into the visibility-change + existing try/catch wrapper.
-  // We add rival ghost drawing and replay capture by wrapping requestAnimationFrame.
   let _pfLastGameState = null;
-  const _pfOrigRAF = window.requestAnimationFrame.bind(window);
-  window.requestAnimationFrame = function(cb) {
-    if (cb !== frame) return _pfOrigRAF(cb);
-    return _pfOrigRAF(function(now) {
-      cb(now);
-      // Replay capture during active gameplay
-      if (Game.state === 'playing' && !Game.paused) {
-        Replay.captureFrame(now);
-        // Draw rival ghosts after main render (rivals appear as overlay)
-        if (Rivals.list().length > 0 && ctx) {
-          try { Rivals.drawGhosts(ctx); } catch (_) {}
-        }
+
+  // 5 fps replay capture interval — runs independently of the render loop
+  setInterval(function() {
+    if (Game.state === 'playing' && !Game.paused) {
+      Replay.captureFrame(performance.now());
+    }
+  }, 1000 / REPLAY_FPS);
+
+  // 100ms state-change watcher — handles start/stop recording and weekly toasts
+  setInterval(function() {
+    const cur = Game.state;
+    // Auto-start recording when a run begins
+    if (cur === 'playing' && _pfLastGameState !== 'playing') {
+      Replay.startRecording();
+    }
+    // Auto-stop and save recording when a run ends
+    if (cur !== 'playing' && _pfLastGameState === 'playing') {
+      Replay.stopRecording();
+      if (Replay._frames.length >= REPLAY_FPS * 5) {
+        const p = Profile.active();
+        Replay.saveReplay(p ? p.name + ' ' + new Date().toLocaleDateString() : 'RUN');
       }
-      // Auto-start/stop replay recording on run begin/end
-      if (Game.state === 'playing' && _pfLastGameState !== 'playing') {
-        Replay.startRecording();
-      }
-      if (Game.state !== 'playing' && _pfLastGameState === 'playing') {
-        Replay.stopRecording();
-        // Auto-save replay if there are enough frames (at least 5 seconds)
-        if (Replay._frames.length >= REPLAY_FPS * 5) {
-          const p = Profile.active();
-          Replay.saveReplay(p ? p.name + ' ' + new Date().toLocaleDateString() : 'RUN');
-        }
-      }
-      // Weekly challenge toast notification
-      if (Game._pendingWeekly && (Game.state === 'gameover' || Game.state === 'victory')) {
-        const wc = Game._pendingWeekly;
-        Game._pendingWeekly = null;
-        setTimeout(() => {
-          UI.toast('✦ WEEKLY "' + wc.label + '" COMPLETE! CLAIM ' + wc.reward.toLocaleString() + ' SCRAP IN PLATFORM HUB', 4000);
-        }, 1500);
-      }
-      _pfLastGameState = Game.state;
-    });
-  };
+    }
+    // Weekly challenge completion notification
+    if (Game._pendingWeekly && (cur === 'gameover' || cur === 'victory')) {
+      const wc = Game._pendingWeekly;
+      Game._pendingWeekly = null;
+      setTimeout(function() {
+        UI.toast('✦ WEEKLY "' + wc.label + '" COMPLETE! CLAIM ' + wc.reward.toLocaleString() + ' SCRAP IN PLATFORM HUB', 4000);
+      }, 1500);
+    }
+    _pfLastGameState = cur;
+  }, 100);
+
+  // Rival ghost rendering: hook into the existing game render pipeline by
+  // scheduling a post-render draw via the window's animationframe queue.
+  // We use a separate RAF loop (not wrapping the main one) to draw ghosts
+  // on top of the canvas after the main render completes.
+  (function rivalRenderLoop(now) {
+    if (Game.state === 'playing' && !Game.paused && Rivals.list().length > 0 && ctx) {
+      try { Rivals.drawGhosts(ctx); } catch (_) {}
+    }
+    requestAnimationFrame(rivalRenderLoop);
+  })(0);
 })();
 
 // Editor live-update handlers (delegate from the global click handler)
