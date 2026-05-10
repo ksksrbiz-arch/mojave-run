@@ -11289,7 +11289,7 @@ let controlHintMode = IS_TOUCH ? 'touch' : 'keyboard';
 const CONTROL_HINT_TEXT = {
   touch: 'DRAG TO STEER · HOLD TO FIRE',
   keyboard: 'A / D OR ← / → TO STEER · SPACE TO FIRE',
-  gamepad: 'CONTROLLER: LEFT STICK TO STEER · A TO FIRE · B SPECIAL',
+  gamepad: 'LEFT STICK TO STEER · A TO FIRE · B SPECIAL',
 };
 function setControlHintMode(mode) {
   if (mode !== 'touch' && mode !== 'keyboard' && mode !== 'gamepad') return;
