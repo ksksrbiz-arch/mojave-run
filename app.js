@@ -2195,6 +2195,12 @@ function getWastelandReputation() {
   return 'MOJAVE DRIFTER';
 }
 
+// Returns how many Iron Throne stages have been cleared in the current run.
+// ironThroneStage is incremented on boss death, so subtract 1 and clamp.
+function ironThroneStagesCleared() {
+  return Math.max(0, Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length));
+}
+
 function comboMult() {
   const c = Game.combo | 0;
   let m = 1;
@@ -3004,7 +3010,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     victory: reason === 'victory',
     dailySeedKey: Game.dailySeedKey,
     // iron throne: stage number that was just cleared (incremented on boss death)
-    ironThroneStage: Game.mode === 'ironthrone' ? Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length) : 0,
+    ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
   });
   // check achievements earned this run; also grant mastery vehicle if newly unlocked
   const _masteryWasUnlocked = !!(Profile.active() && Profile.active().ownedVehicles['warlordking']);
@@ -7324,7 +7330,7 @@ const UI = {
       rows.push(['BOSSES', Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) + ' / ' + BOSS_RUSH_STAGES.length, false]);
       rows.push(['BEST', p.bestBossRush || 0, false]);
     } else if (Game.mode === 'ironthrone') {
-      const clearedStage = Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length);
+      const clearedStage = ironThroneStagesCleared();
       rows.push(['WARLORDS', clearedStage + ' / ' + IRON_THRONE_STAGES.length, false]);
       rows.push(['BEST', p.bestIronThrone || 0, false]);
     } else if (Game.mode === 'daily' && Game.dailySeedKey) {
@@ -7346,7 +7352,7 @@ const UI = {
     rows.push(['MOJAVE REP', getWastelandReputation(), false]);
     const bestMoment = (() => {
       if (Game.state === 'victory' && Game.mode === 'ironthrone') {
-        const clearedStage = Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length);
+        const clearedStage = ironThroneStagesCleared();
         return clearedStage >= IRON_THRONE_STAGES.length ? 'ALL EIGHT WARLORDS FALL. THE THRONE IS YOURS.' : 'WARLORD SLAIN';
       }
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
@@ -7398,7 +7404,7 @@ const UI = {
       } else nextBtn.style.display = 'none';
     } else if (Game.state === 'victory' && Game.mode === 'ironthrone') {
       // ironThroneStage was incremented on boss death; points to next stage
-      const clearedStage = Math.min(Game.ironThroneStage - 1, IRON_THRONE_STAGES.length);
+      const clearedStage = ironThroneStagesCleared();
       const nextStageNum = clearedStage + 1;
       const nextDef = IRON_THRONE_STAGES[nextStageNum - 1];
       if (nextDef && Profile.isIronThroneStageUnlocked(nextStageNum)) {
