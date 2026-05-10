@@ -3221,7 +3221,8 @@ function detonateHordeNuke() {
   Game.enemyBullets.length = 0;
   if (Game.boss) {
     Game.boss.hp -= 25;
-    if (Settings.damageNumbers) addPopup('-25', Game.boss.x, Game.boss.y - 18, '#ff3a3a', 13);
+    const bossBody = getBossBodyInRadius(Game.boss, px, py, Infinity) || { x: Game.boss.x, y: Game.boss.y };
+    if (Settings.damageNumbers) addPopup('-25', bossBody.x, bossBody.y - 18, '#ff3a3a', 13);
   }
 }
 
@@ -3453,9 +3454,10 @@ function firePulseBurst() {
       }
     }
   }
-  if (Game.boss && Math.hypot(Game.boss.x - px, Game.boss.y - py) < 170) {
+  const pulseBossHit = getBossBodyInRadius(Game.boss, px, py, 170);
+  if (pulseBossHit) {
     Game.boss.hp -= 4;
-    if (Settings.damageNumbers) addPopup('-4', Game.boss.x, Game.boss.y - 18, '#8ec5ff', 12);
+    if (Settings.damageNumbers) addPopup('-4', pulseBossHit.x, pulseBossHit.y - 18, '#8ec5ff', 12);
   }
 }
 
@@ -4720,6 +4722,40 @@ function spawnIronThroneBoss(stageNum) {
   };
 }
 
+function forEachBossBody(b, fn) {
+  if (!b) return;
+  fn(b.x, b.y);
+  if (b.twin) fn(b.twinX, b.y);
+}
+
+function getBossBodyHit(b, x, y, w = 0, h = 0) {
+  let hit = null;
+  let bestDist = Infinity;
+  forEachBossBody(b, (bx, by) => {
+    if (Math.abs(x - bx) * 2 < b.w + w && Math.abs(y - by) * 2 < b.h + h) {
+      const dist = Math.hypot(x - bx, y - by);
+      if (dist < bestDist) {
+        bestDist = dist;
+        hit = { x: bx, y: by };
+      }
+    }
+  });
+  return hit;
+}
+
+function getBossBodyInRadius(b, x, y, r) {
+  let hit = null;
+  let bestDist = r;
+  forEachBossBody(b, (bx, by) => {
+    const dist = Math.hypot(bx - x, by - y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      hit = { x: bx, y: by };
+    }
+  });
+  return hit;
+}
+
 
 function updateBoss(dt) {
   const b = Game.boss; if (!b) return;
@@ -4756,24 +4792,25 @@ function updateBoss(dt) {
   // bullets vs boss
   for (let j = Game.bullets.length - 1; j >= 0; j--) {
     const bu = Game.bullets[j];
-    if (Math.abs(bu.x - b.x)*2 < b.w && Math.abs(bu.y - b.y)*2 < b.h) {
+    const hitBody = getBossBodyHit(b, bu.x, bu.y, bu.w || 0, bu.h || 0);
+    if (hitBody) {
       Game.bullets.splice(j,1);
       const dmg = (bu.dmg || 1) * Game.bossDamageMul;
       b.hp -= dmg;
-      if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), bu.x, bu.y - 10, '#ffd86b', 11);
+      if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), hitBody.x, bu.y - 10, '#ffd86b', 11);
       emit(bu.x, bu.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
       if (b.hp <= 0) {
         SFX.bigBoom();
-        emit(b.x, b.y, 60, { color:'#ff6a2b', speed:480, life:1.0, size:5 });
-        emit(b.x, b.y, 30, { color:'#ffd86b', speed:360, life:0.8, size:4 });
-        shockwave(b.x, b.y, 'rgba(255,180,80,0.7)', 200);
+        emit(hitBody.x, hitBody.y, 60, { color:'#ff6a2b', speed:480, life:1.0, size:5 });
+        emit(hitBody.x, hitBody.y, 30, { color:'#ffd86b', speed:360, life:0.8, size:4 });
+        shockwave(hitBody.x, hitBody.y, 'rgba(255,180,80,0.7)', 200);
         Game.shake = 1.4;
         const bossScore = 1500 * (Game.levelData ? Game.levelData.diff : 1);
-        applyKill(b.x, b.y - 20, Math.floor(bossScore));
+        applyKill(hitBody.x, hitBody.y - 20, Math.floor(bossScore));
         const isBossLevel = !!(Game.levelData && Game.levelData.obj === 'boss' && Game.mode !== 'ironthrone');
         Game.bossDeathSeq = {
           t: 0, dur: 2.0,
-          x: b.x, y: b.y, w: b.w, h: b.h,
+          x: hitBody.x, y: hitBody.y, w: b.w, h: b.h,
           color: b.color, twin: b.twin, twinX: b.twinX,
           levelClear: isBossLevel,
           bossRush: Game.mode === 'bossrush',
@@ -4790,8 +4827,7 @@ function updateBoss(dt) {
     }
   }
   // contact
-  if (Math.abs(b.x - Game.player.x)*2 < (b.w + Game.player.w) &&
-      Math.abs(b.y - Game.player.y)*2 < (b.h + Game.player.h)) {
+  if (getBossBodyHit(b, Game.player.x, Game.player.y, Game.player.w, Game.player.h)) {
     damagePlayer(b.contactDmg * dt * 4);
   }
 }
@@ -6086,7 +6122,7 @@ function splashDamage(x, y, r, dmg) {
   }
   if (Math.hypot(Game.player.x - x, Game.player.y - y) < r * 0.7) damagePlayer(10);
   // boss splash? minor
-  if (Game.boss && Math.hypot(Game.boss.x - x, Game.boss.y - y) < r * 0.8) {
+  if (getBossBodyInRadius(Game.boss, x, y, r * 0.8)) {
     Game.boss.hp -= dmg * 0.5;
   }
 }
