@@ -18,6 +18,21 @@ const IS_MOBILE = HAS_COARSE_POINTER || (IS_TOUCH && Math.min(window.innerWidth,
 // ============================================================
 // DATA — VEHICLES, UPGRADES, MODES, LEVELS
 // ============================================================
+const APEX_VEHICLE_MIN_PRESTIGE = 10;
+const ALL_COMPLETABLE_MODES = ['classic','winding','timeattack','daily','bossrush','zombie','wastelandrun','extraction'];
+const CUSTOM_TARGETS = { score: 50000, distance: 3000, kills: 35, survive: 75 };
+const GAMEPAD_AXIS_THRESHOLD = 0.25;
+const GAMEPAD_BUTTON_A = 0;
+const GAMEPAD_BUTTON_B = 1;
+const GAMEPAD_BUTTON_DPAD_LEFT = 14;
+const GAMEPAD_BUTTON_DPAD_RIGHT = 15;
+const MAX_ACTIVE_CRAFTING_MODS = 3;
+const BOSS_PART_TIERS = [
+  { max: 2, parts: ['engine_coil'] },
+  { max: 4, parts: ['boss_casing'] },
+  { max: 6, parts: ['titan_plating'] },
+  { max: Infinity, parts: ['reactor_shard', 'salvage_coil'] },
+];
 const VEHICLES = [
   {
     id: 'rustbucket', name: 'RUST BUCKET',
@@ -90,7 +105,7 @@ const VEHICLES = [
     desc: 'Cosmetic Wasteland Legend frame. Prestige 10+ only; tuned like the Rust Bucket to avoid pay-to-win power creep.',
     cost: 0,
     apexVehicle: true,
-    prestigeUnlock: 10,
+    prestigeUnlock: APEX_VEHICLE_MIN_PRESTIGE,
     base: { maxHp: 100, accel: 1800, maxV: 460, fireRate: 0.18, dmg: 1, guns: 2, bigShot: false },
     color: { body:'#2a123a', hood:'#160820', cab:'#08040e', windshield:'#ffd86b', glow:'#ff40d0' },
   },
@@ -2004,7 +2019,7 @@ function checkAchievementCondition(id, p) {
       return Profile.isFullMasteryUnlocked();
     case 'throne_claimed': return (p.ironThroneCleared || []).length >= IRON_THRONE_STAGES.length;
     case 'empire_start': return (p.bestWastelandRun || 0) > 0 || ((p.lastRunMeta || {}).mode === 'wastelandrun');
-    case 'empire_clear': return !!((p.lastRunMeta || {}).mode === 'wastelandrun' && (p.lastRunMeta || {}).victory && !(p.lastRunMeta || {}).died);
+    case 'empire_clear': return !!((p.lastRunMeta || {}).mode === 'wastelandrun' && (p.lastRunMeta || {}).victory === true && (p.lastRunMeta || {}).died === false);
     case 'hover_master': return !!((p.lastRunMeta || {}).vehicleId === 'vortexhover' && (p.lastRunMeta || {}).victory && !(p.lastRunMeta || {}).died);
     case 'craft_first': return (p.v23Counters && (p.v23Counters.crafts || 0) >= 1) || (p.craftingMods || []).length >= 1;
     case 'craft_all': return (p.v23Counters && (p.v23Counters.crafts || 0) >= CRAFTING_RECIPES.length);
@@ -2029,7 +2044,7 @@ function checkAchievementCondition(id, p) {
     case 'war_engine': return (p.craftingMods || []).includes('warengine');
     case 'all_v23_vehicles': return ['vortexhover','bloodravenbomber','irontitan','spectrestealth','doomhauler','neonphantom'].every(id => (p.ownedVehicles || {})[id]);
     case 'biome_collector': return (p.biomesVisited || []).length >= Math.min(8, BIOME_KEYS.length);
-    case 'mode_master': return ['classic','winding','timeattack','daily','bossrush','zombie','wastelandrun','extraction'].every(id => (p.modesCompleted || []).includes(id));
+    case 'mode_master': return ALL_COMPLETABLE_MODES.every(id => (p.modesCompleted || []).includes(id));
     case 'roguelite_seed': return (p.wastelandSeedsPlayed || []).length >= 10;
     default: return false;
   }
@@ -2038,6 +2053,11 @@ function checkAchievementCondition(id, p) {
 // ============================================================
 // PROFILE STORE
 // ============================================================
+function canUseVehicle(vehicle, profile) {
+  if (!vehicle || !profile) return false;
+  return !vehicle.apexVehicle || (profile.prestigeTokens || 0) >= (vehicle.prestigeUnlock || APEX_VEHICLE_MIN_PRESTIGE);
+}
+
 const STORAGE_KEY = 'mojaveRun_profiles_v2';
 const ACTIVE_KEY  = 'mojaveRun_activeProfile_v2';
 const LEGACY_BEST = 'mojaveRunBest';
@@ -2234,7 +2254,7 @@ const Profile = {
     const p = this.active(); if (!p) return false;
     const v = VEHICLE_BY_ID[vehicleId]; if (!v) return false;
     if (p.ownedVehicles[vehicleId]) return false;
-    if (v.apexVehicle && (p.prestigeTokens || 0) < (v.prestigeUnlock || 10)) return false;
+    if (!canUseVehicle(v, p)) return false;
     if (p.scrap < v.cost) return false;
     p.scrap -= v.cost;
     p.ownedVehicles[vehicleId] = true;
@@ -3989,7 +4009,7 @@ function startRun(mode, level) {
     activateSeededRng(seedFromString('mojave-run-wasteland-' + Game.wastelandSeedKey));
   }
   let v = VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0];
-  if (v.apexVehicle && (profile.prestigeTokens || 0) < (v.prestigeUnlock || 10)) v = VEHICLES[0];
+  if (!canUseVehicle(v, profile)) v = VEHICLES[0];
   let stats = Profile.effectiveStats(v.id || profile.activeVehicle);
   const perkState = getCharacterPerkState(profile.characterId);
   Game.mode = mode;
@@ -4021,7 +4041,7 @@ function startRun(mode, level) {
     Game.level = 'custom';
     Game.levelData = {
       num: 'C', name: cfg.name || 'CUSTOM RUN', obj: cfg.objective || 'score',
-      target: cfg.objective === 'distance' ? 3000 : cfg.objective === 'kills' ? 35 : cfg.objective === 'survive' ? 75 : 50000,
+      target: CUSTOM_TARGETS[cfg.objective] || CUSTOM_TARGETS.score,
       reward: 1200, diff: cfg.difficulty || 2, map: cfg.biome || 'wastes'
     };
   } else {
@@ -4120,8 +4140,10 @@ function startRun(mode, level) {
   Game.enemyDamageReduction = 0;
   Game.enemyContactMul = 1;
   Game.scoreMul = 1;
-  Game.bountyStreak = 0;
-  Game.bountyMul = 1;
+  if (hasMutator('bountyhunter')) {
+    Game.bountyStreak = 0;
+    Game.bountyMul = 1;
+  }
   Game.wastelandWaveT = 90;
   Game.extraction = null;
   Game.drones = [];
@@ -11217,7 +11239,8 @@ const PhotoMode = {
     if (!canvas) { UI.toast('NO CANVAS'); return; }
     try {
       const url = canvas.toDataURL('image/png');
-      if (typeof NativeBridge !== 'undefined' && NativeBridge.isNative && NativeBridge.share({ title:'Mojave Run', text:'My wasteland run', url })) {
+      const shareText = 'I scored ' + Math.floor(Game.score || 0).toLocaleString() + ' in ' + ((Game.mode || 'MOJAVE RUN').toUpperCase()) + '!';
+      if (typeof NativeBridge !== 'undefined' && NativeBridge.isNative && NativeBridge.share({ title:'Mojave Run', text:shareText, url }) !== null) {
         UI.toast('NATIVE SHARE OPENED!');
         return;
       }
@@ -12469,6 +12492,7 @@ const CraftingWorkshop = {
     if (recipe.type === 'permanent') {
       if (!p.craftingMods.includes(recipeId)) p.craftingMods.push(recipeId);
     } else if (!p.activeCraftingMods.includes(recipeId)) {
+      if (p.activeCraftingMods.length >= MAX_ACTIVE_CRAFTING_MODS) return { ok: false, reason: 'RUN MOD QUEUE FULL' };
       p.activeCraftingMods.push(recipeId);
     }
     Profile.save();
@@ -12943,7 +12967,8 @@ function updateVehicleAbility(dt) {
 
 function dropBossPart(tier, x, y) {
   const t = Number(tier) || 1;
-  let part = t <= 2 ? 'engine_coil' : t <= 4 ? 'boss_casing' : t <= 6 ? 'titan_plating' : (Math.random() < 0.5 ? 'reactor_shard' : 'salvage_coil');
+  const bucket = BOSS_PART_TIERS.find(b => t <= b.max) || BOSS_PART_TIERS[BOSS_PART_TIERS.length - 1];
+  const part = bucket.parts[Math.floor(Math.random() * bucket.parts.length)];
   CraftingWorkshop.awardPart(part, 1);
   addPopup('PART +' + part.replace(/_/g, ' ').toUpperCase(), x, y - 28, '#d2ff6f', 13);
 }
@@ -13097,11 +13122,11 @@ const GamepadInput = {
     const gp = Array.from(pads || []).find(Boolean);
     if (!gp || Game.state !== 'playing') return;
     const ax = (gp.axes && gp.axes[0]) || 0;
-    input.left = input.left || ax < -0.25 || (gp.buttons[14] && gp.buttons[14].pressed);
-    input.right = input.right || ax > 0.25 || (gp.buttons[15] && gp.buttons[15].pressed);
-    input.fire = input.fire || !!(gp.buttons[0] && gp.buttons[0].pressed);
-    if (gp.buttons[1] && gp.buttons[1].pressed && !this._specialHeld) triggerVehicleAbility();
-    this._specialHeld = !!(gp.buttons[1] && gp.buttons[1].pressed);
+    input.left = input.left || ax < -GAMEPAD_AXIS_THRESHOLD || (gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT] && gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT].pressed);
+    input.right = input.right || ax > GAMEPAD_AXIS_THRESHOLD || (gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT] && gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT].pressed);
+    input.fire = input.fire || !!(gp.buttons[GAMEPAD_BUTTON_A] && gp.buttons[GAMEPAD_BUTTON_A].pressed);
+    if (gp.buttons[GAMEPAD_BUTTON_B] && gp.buttons[GAMEPAD_BUTTON_B].pressed && !this._specialHeld) triggerVehicleAbility();
+    this._specialHeld = !!(gp.buttons[GAMEPAD_BUTTON_B] && gp.buttons[GAMEPAD_BUTTON_B].pressed);
     if (!this.active) { this.active = true; setControlHintMode('gamepad'); }
   }
 };
