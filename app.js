@@ -14782,19 +14782,21 @@ UI.act = function(action, data) {
   const cap = window.Capacitor;
   const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
 
+  // Delay before acting on deep links — allows boot() to finish initializing
+  // game state, profile system, and UI before we try to start a run or show a screen.
+  const DEEP_LINK_INIT_DELAY = 500;
+
   function routeDeepLink(url) {
     try {
       const u = new URL(url, 'https://mojaverun.game');
       const mode = u.searchParams.get('mode');
       const cont = u.searchParams.get('continue');
       if (mode && typeof startRun === 'function') {
-        // Wait a tick for the game to be ready
-        setTimeout(() => { try { startRun(mode); } catch (_) {} }, 500);
+        setTimeout(() => { try { startRun(mode); } catch (_) {} }, DEEP_LINK_INIT_DELAY);
         return true;
       }
       if (cont) {
-        // Jump to menu (continue last session)
-        setTimeout(() => { try { UI.showScreen('menu'); } catch (_) {} }, 500);
+        setTimeout(() => { try { UI.showScreen('menu'); } catch (_) {} }, DEEP_LINK_INIT_DELAY);
         return true;
       }
     } catch (_) {}
