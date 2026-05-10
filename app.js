@@ -13035,6 +13035,7 @@ function applyCraftingRunBonuses() {
 
 function applyWastelandRunStartBonuses() {
   if (Game.mode !== 'wastelandrun') return;
+  Game.weaponSpecState = Game.weaponSpecState || {};
   if (hasMutator('ironwall')) { Game.enemyHpMul *= 1.5; Game.vehicleStats.dmg *= 1.15; }
   if (hasMutator('glassroad')) Game.scoreMul *= 2;
   if (hasMutator('nightonly')) Game.isNight = true;
@@ -13045,7 +13046,7 @@ function applyWastelandRunStartBonuses() {
   if (hasMutator('stormfrontier')) { Game.enemyFireMul *= 0.65; Game.scrapMul *= 1.45; Game.pickupRateMul = Math.max(Game.pickupRateMul || 1, 1.25); }
   if (hasMutator('overclocked')) { Game.enemyHpMul *= 1.20; Game.weaponSpecState.fireRateMul = (Game.weaponSpecState.fireRateMul || 1) * 0.75; }
   if (hasMutator('graveyardshift')) Game.isNight = true;
-  if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; }
+  if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; } // intended: all incoming damage types, not contact-only
 }
 
 function pickWastelandRunBiome(seedKey) {
