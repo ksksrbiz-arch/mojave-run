@@ -10249,11 +10249,14 @@ const Cinematic = (function () {
     const px = Game.player.x;
     let v = 0;
     if (cam.lastT > 0) {
+      // 1/120 = ~8ms floor on dt to avoid divide-by-tiny when frames are
+      // back-to-back from a stalled-then-resumed tab.
       const dt = Math.max(1/120, t - cam.lastT);
       v = (px - cam.lastPx) / dt;
     }
     cam.lastPx = px; cam.lastT = t;
-    // Normalize: ~400 px/s max lateral motion in this game.
+    // Normalize: ~400 px/s is a strong lateral swerve in this game; clamp
+    // to ±1 so the tilt is bounded regardless of input device.
     return Math.max(-1, Math.min(1, v / 400));
   }
 
@@ -10459,7 +10462,8 @@ const Cinematic = (function () {
     ctx.save();
     ctx.globalCompositeOperation = 'overlay';
     ctx.globalAlpha = a;
-    // Scroll the tile so it doesn't look static.
+    // Scroll the tile so it doesn't look static (0.07 / 0.11 px-per-ms are
+    // intentionally non-harmonic so x/y drift never visibly aligns).
     const ox = -(now * 0.07) % GRAIN_TILE_SIZE;
     const oy = -(now * 0.11) % GRAIN_TILE_SIZE;
     const pat = ctx.createPattern(_grainCanvas, 'repeat');
