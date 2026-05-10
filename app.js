@@ -11006,8 +11006,7 @@ const LevelEditor = {
     const idx = list.indexOf(entryToRemove);
     if (idx < 0) return false;
     list.splice(idx, 1);
-    if (list.length) _scriptListeners.set(event, list);
-    else _scriptListeners.delete(event);
+    if (list.length === 0) _scriptListeners.delete(event);
     return true;
   }
   function addScriptListener(event, fn, once) {
@@ -11103,7 +11102,7 @@ const LevelEditor = {
       on(event, fn)  { return addScriptListener(event, fn, false); },
       once(event, fn){ return addScriptListener(event, fn, true);  },
       off(event, fn) { return removeScriptListener(event, fn);      },
-      emit(event, d) { return emitScriptEvent(event, d);            },
+      emit(event, data) { return emitScriptEvent(event, data);      },
     },
   };
 })();
