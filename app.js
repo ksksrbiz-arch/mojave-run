@@ -2388,6 +2388,27 @@ const rand = (a,b) => a + Math.random() * (b - a);
 const irand = (a,b) => Math.floor(rand(a,b+1));
 const clamp = (v,lo,hi) => v < lo ? lo : v > hi ? hi : v;
 const PARTICLE_SCALE = IS_MOBILE ? 0.65 : 1;
+const WINDING_MAX_PACE_BONUS = 1.35;
+const WINDING_PACE_DISTANCE = 4500;
+const WINDING_AMP_DISTANCE_BONUS = 0.4;
+const WINDING_AMP_DISTANCE = 14000;
+const WINDING_PRIMARY_WAVE_WEIGHT = 0.68;
+const WINDING_SECONDARY_WAVE_WEIGHT = 0.32;
+const WINDING_ROAD_SLICES = 44;
+const WINDING_CURVE_SPEED_BASE = 0.95;
+const WINDING_CURVE_SPEED_RANGE = 0.16;
+const WINDING_DISTANCE_FREQ_BASE = 0.0018;
+const WINDING_DISTANCE_FREQ_RANGE = 0.0012;
+const WINDING_WAVE_A_BASE = 4.8;
+const WINDING_WAVE_A_MIN_DELTA = -0.8;
+const WINDING_WAVE_A_MAX_DELTA = 1.2;
+const WINDING_WAVE_B_BASE = 9.2;
+const WINDING_WAVE_B_RANGE = 1.4;
+const WINDING_SECONDARY_MUL_BASE = 1.7;
+const WINDING_SECONDARY_MUL_MIN_DELTA = -0.2;
+const WINDING_SECONDARY_MUL_MAX_DELTA = 0.35;
+const WINDING_DRIFT_FREQ_BASE = 0.32;
+const WINDING_DRIFT_FREQ_RANGE = 0.25;
 
 function aabb(a,b){return Math.abs(a.x-b.x)*2<(a.w+b.w)&&Math.abs(a.y-b.y)*2<(a.h+b.h);}
 
@@ -2408,14 +2429,14 @@ function getWindingRoadShift(y = H * 0.5) {
   const wr = Game.windingRoad;
   const yNorm = clamp(y / Math.max(1, H), 0, 1);
   // Curves "speed up" as the run progresses: up to +135% animation pace by ~4.5 km.
-  const pace = 1 + Math.min(1.35, (Game.distance || 0) / 4500);
+  const pace = 1 + Math.min(WINDING_MAX_PACE_BONUS, (Game.distance || 0) / WINDING_PACE_DISTANCE);
   const ampScale = 0.35 + 0.65 * (1 - yNorm);
-  const amp = wr.amp * ampScale * (1 + Math.min(0.4, (Game.distance || 0) / 14000));
+  const amp = wr.amp * ampScale * (1 + Math.min(WINDING_AMP_DISTANCE_BONUS, (Game.distance || 0) / WINDING_AMP_DISTANCE));
   const t = (Game.t || 0) * wr.curveSpeed * pace + (Game.distance || 0) * wr.distanceFreq + wr.seed;
   const swayA = Math.sin(t + yNorm * wr.waveA);
   const swayB = Math.sin(t * wr.secondaryWaveMul + yNorm * wr.waveB + wr.seed2);
   const drift = Math.sin((Game.t || 0) * wr.driftFreq + wr.seed3) * wr.driftAmp;
-  return (swayA * 0.68 + swayB * 0.32) * amp + drift;
+  return (swayA * WINDING_PRIMARY_WAVE_WEIGHT + swayB * WINDING_SECONDARY_WAVE_WEIGHT) * amp + drift;
 }
 
 function emit(x, y, n, opts = {}) {
@@ -3216,12 +3237,12 @@ function startRun(mode, level) {
     Game.windingRoad = {
       // Maximum lateral bend amplitude as a fraction of road width.
       amp: Math.max(24, roadW * 0.22),
-      curveSpeed: 0.95 + rand(-0.12, 0.16),
-      distanceFreq: 0.0018 + rand(0, 0.0012),
-      waveA: 4.8 + rand(-0.8, 1.2),
-      waveB: 9.2 + rand(-1.4, 1.4),
-      secondaryWaveMul: 1.7 + rand(-0.2, 0.35),
-      driftFreq: 0.32 + rand(0, 0.25),
+      curveSpeed: WINDING_CURVE_SPEED_BASE + rand(0, WINDING_CURVE_SPEED_RANGE),
+      distanceFreq: WINDING_DISTANCE_FREQ_BASE + rand(0, WINDING_DISTANCE_FREQ_RANGE),
+      waveA: WINDING_WAVE_A_BASE + rand(WINDING_WAVE_A_MIN_DELTA, WINDING_WAVE_A_MAX_DELTA),
+      waveB: WINDING_WAVE_B_BASE + rand(-WINDING_WAVE_B_RANGE, WINDING_WAVE_B_RANGE),
+      secondaryWaveMul: WINDING_SECONDARY_MUL_BASE + rand(WINDING_SECONDARY_MUL_MIN_DELTA, WINDING_SECONDARY_MUL_MAX_DELTA),
+      driftFreq: WINDING_DRIFT_FREQ_BASE + rand(0, WINDING_DRIFT_FREQ_RANGE),
       driftAmp: Math.min(54, roadW * 0.16),
       seed: rand(0, Math.PI * 2),
       seed2: rand(0, Math.PI * 2),
@@ -5535,7 +5556,7 @@ function drawRoad() {
   const t = activeBiomeTheme();
   const { x0, x1, w } = roadBounds();
   if (Game.mode === 'winding') {
-    const slices = 44;
+    const slices = WINDING_ROAD_SLICES;
     const step = H / slices;
     const mid = roadBounds(H * 0.5);
     const roadFill = getRoadGradient(mid.x0, mid.x1);
