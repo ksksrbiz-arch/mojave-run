@@ -19,6 +19,8 @@
 //   POST /api/accounts/register    — create a cloud account, returns { id, token }
 //   POST /api/accounts/save        — save profile data { id, token, data }
 //   GET  /api/accounts/load?id=&token= — restore profile data
+//   POST /api/push/register        — register a push notification token
+//   POST /api/iap/validate          — validate an in-app purchase receipt
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -304,6 +306,67 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, data: acc.data }));
+    return;
+  }
+
+  // ---- Push Token Registration ----
+  if (urlPathApi === '/api/push/register' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      if (body.length + chunk.length > 2048) { req.destroy(); return; }
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const { id, token, pushToken, platform } = JSON.parse(body);
+        if (!id || !token || !pushToken) throw new Error('missing fields');
+        const normId    = parseCredential(id, 6);
+        const normToken = parseCredential(token, 6);
+        const acc = accounts[normId];
+        if (!acc || !safeEqual(acc.token, normToken)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
+          return;
+        }
+        // Store push token on the account
+        acc.pushToken = String(pushToken).slice(0, 512);
+        acc.pushPlatform = String(platform || 'unknown').slice(0, 16);
+        acc.pushRegisteredAt = Date.now();
+        saveAccountsDebounced();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'bad request' }));
+      }
+    });
+    req.on('error', () => {});
+    return;
+  }
+
+  // ---- IAP Receipt Validation (stub — real validation uses Apple/Google server APIs) ----
+  if (urlPathApi === '/api/iap/validate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      if (body.length + chunk.length > 8192) { req.destroy(); return; }
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const { productId, transactionId, receipt, platform } = JSON.parse(body);
+        if (!productId || !transactionId) throw new Error('missing fields');
+        // TODO: Integrate Apple App Store / Google Play server-side receipt validation.
+        // For now, log the transaction and accept — production must verify receipts
+        // against the real store APIs before granting entitlements.
+        console.log('[iap] validate:', { productId, transactionId, platform, ts: Date.now() });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, productId, transactionId }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'bad request' }));
+      }
+    });
+    req.on('error', () => {});
     return;
   }
 
