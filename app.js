@@ -425,9 +425,9 @@ const MODES = [
 
 // Zombie enemy definitions for ZOMBIE HORDE mode
 const ZOMBIE_DEFS = [
-  { id:'walker',  w:20, h:30, hp:2, vy:42,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10' },
-  { id:'runner',  w:16, h:26, hp:1, vy:90,  vxRange:36, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410' },
-  { id:'bruiser', w:32, h:38, hp:5, vy:26,  vxRange:8,  contact:22, score:220, color:'#4a3828', goreColor:'#3a2818', accent:'#1a1210' },
+  { id:'walker',  w:20, h:30, hp:3, vy:50,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10' },
+  { id:'runner',  w:16, h:26, hp:1, vy:110, vxRange:40, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410' },
+  { id:'bruiser', w:32, h:38, hp:7, vy:30,  vxRange:8,  contact:22, score:220, color:'#4a3828', goreColor:'#3a2818', accent:'#1a1210' },
 ];
 
 // Story chapters shown during classic mode as milestones
@@ -2372,8 +2372,10 @@ function currentCampaignLocIdx() {
   return ce ? ce.locIdx : -1;
 }
 // Zombie horde burst spawn distance thresholds — horde grows denser past these
-const ZOMBIE_BURST_DIST_1 = 4000;  // first burst tier: occasional double-spawn
-const ZOMBIE_BURST_DIST_2 = 10000; // second burst tier: triple-spawn waves
+const ZOMBIE_BURST_DIST_1 = 2500;  // first burst tier: occasional double-spawn
+const ZOMBIE_BURST_DIST_2 = 6000;  // second burst tier: triple-spawn waves
+// Scrap earned in a single zombie-mode run is capped to prevent economy exploits
+const ZOMBIE_SCRAP_CAP = 4000;
 
 const COMBO_WINDOW = 2.5;          // seconds between kills to keep combo
 const COMBO_THRESHOLDS = [0, 3, 6, 10, 15, 22, 30]; // combo count for each multiplier tier
@@ -3211,6 +3213,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     bonus += BOSS_RUSH_REWARD_BASE + Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) * BOSS_RUSH_REWARD_PER_STAGE;
   }
   Game.scrapEarned = baseScrap + bonus;
+  // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
+  if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
   Profile.earn(Game.scrapEarned);
   // record stats
   Profile.recordRunResult({
@@ -4780,8 +4784,8 @@ function update(dt) {
     if (Game.spawnTimer <= 0) {
       const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? AMBUSH_SPAWN_MULTIPLIER : 1;
       const isZombieMode = Game.mode === 'zombie';
-      // Zombie mode: shorter spawn intervals that tighten over time (escalating horde)
-      const zombieInterval = Math.max(0.3, 1.0 - Game.distance / 20000);
+      // Zombie mode: shorter spawn intervals that tighten faster (harder escalating horde)
+      const zombieInterval = Math.max(0.25, 0.9 - Game.distance / 18000);
       let baseInterval = isZombieMode ? zombieInterval :
         (Game.mode === 'timeattack' ? 0.35 :
         clamp(1.4 - (Game.levelData ? Game.levelData.diff : 1) * 0.18, 0.45, 1.4));
@@ -8303,8 +8307,91 @@ const UI = {
     this.show('sidekick');
   },
 
+  // ---- CINEMATIC HELPERS ----
+  // Duration (ms) for each fullscreen cinematic before auto-dismiss.
+  _LOCATION_INTRO_DURATION: 6500,
+  _ZOMBIE_CUTSCENE_DURATION: 6000,
+
+  // Force CSS animations to replay by removing them, triggering a reflow, then
+  // restoring them. Used before showing any animated cinematic overlay.
+  _resetAnimations(screenId, selectors) {
+    const el = document.getElementById('screen-' + screenId);
+    if (!el) return;
+    el.querySelectorAll(selectors).forEach(child => {
+      child.style.animation = 'none';
+      void child.offsetWidth; // force reflow so the browser acknowledges the reset
+      child.style.animation = '';
+    });
+  },
+
+  // Show a fullscreen cinematic overlay (screenId without 'screen-' prefix),
+  // then call cb when dismissed (tap or auto-dismiss after durationMs).
+  _showCinematic(screenId, durationMs, cb) {
+    this.show(screenId);
+    const overlay = document.getElementById('screen-' + screenId);
+    const dismiss = () => {
+      if (overlay) overlay.removeEventListener('pointerdown', once);
+      clearTimeout(timer);
+      UI.hideAllScreens();
+      cb();
+    };
+    const timer = setTimeout(dismiss, durationMs);
+    const once = () => dismiss();
+    if (overlay) overlay.addEventListener('pointerdown', once);
+  },
+
+  // ---- LOCATION INTRO CINEMATIC ----
+  // Shown before the first level of a new campaign location — animates in the
+  // region name, state, and backstory intro text. Auto-dismisses or tap-to-skip.
+  showLocationIntro(loc, cb) {
+    const nameEl  = document.getElementById('loc-intro-name');
+    const stateEl = document.getElementById('loc-intro-state');
+    const textEl  = document.getElementById('loc-intro-text');
+    if (nameEl)  nameEl.textContent  = loc.name.toUpperCase();
+    if (stateEl) stateEl.textContent = loc.state.toUpperCase();
+    if (textEl)  textEl.textContent  = loc.intro;
+    this._resetAnimations('loc-intro', '.loc-intro-eyebrow,.loc-intro-name,.loc-intro-state,.loc-intro-divider,.loc-intro-text');
+    this._showCinematic('loc-intro', this._LOCATION_INTRO_DURATION, cb);
+  },
+
+  // ---- ZOMBIE PORT EMOTIONAL CUTSCENE ----
+  // Plays the first time zombie mode unlocks — connects the civilian deaths the
+  // player caused throughout the campaign to the zombie horde rising against them.
+  showZombiePortCutscene(civCount, cb) {
+    const titleEl = document.getElementById('zombie-cut-title');
+    const countEl = document.getElementById('zombie-cut-count');
+    const textEl  = document.getElementById('zombie-cut-text');
+    if (titleEl) titleEl.textContent = 'THE DEAD REMEMBER';
+    if (countEl) {
+      countEl.textContent = civCount > 0
+        ? civCount + ' INNOCENT' + (civCount !== 1 ? 'S' : '') + ' LEFT ON THE ROAD BEHIND YOU'
+        : 'YOU DROVE CLEAN — BUT THE ROAD REMEMBERS ANYWAY';
+    }
+    if (textEl) {
+      textEl.textContent = civCount > 0
+        ? 'Every car you crushed. Every body you left in the dust. Every civilian you clipped and didn\'t look back at. They didn\'t stay down. The Mojave doesn\'t forget. The dead are rising — and they know your engine noise. They\'re coming for you. The zombie horde begins here.'
+        : 'You didn\'t pull the trigger on them yourself. But the violence you drove through left a wake. The dead rise from every battlefield you passed through. They\'re coming. The zombie horde begins here.';
+    }
+    this._resetAnimations('zombie-cut', '.zombie-cut-icon,.zombie-cut-title,.zombie-cut-count,.zombie-cut-text');
+    this._showCinematic('zombie-cut', this._ZOMBIE_CUTSCENE_DURATION, cb);
+  },
+
   // ---- CAMPAIGN STORY OVERLAY ----
   showCampaignStory(levelId, sidekickId, zombieUnlocked, cb) {
+    // If zombie mode just unlocked, show the emotional cutscene first before the
+    // regular level-cleared story card.
+    if (zombieUnlocked) {
+      const p = Profile.active();
+      const civCount = (p && p.totalCivilianHits) || 0;
+      this.showZombiePortCutscene(civCount, () => {
+        this._showCampaignStoryCard(levelId, sidekickId, true, cb);
+      });
+      return;
+    }
+    this._showCampaignStoryCard(levelId, sidekickId, false, cb);
+  },
+
+  _showCampaignStoryCard(levelId, sidekickId, zombieUnlocked, cb) {
     const entry = levelId ? CAMPAIGN_LEVEL_MAP[levelId] : null;
     if (!entry) { cb(); return; }
     const loc = entry.loc;
@@ -8447,7 +8534,18 @@ document.addEventListener('click', e => {
   if (campTile && !campTile.classList.contains('locked')) {
     SFX.click();
     const campId = campTile.dataset.campid;
-    if (campId) { UI.hideAllScreens(); startRun('campaign', campId); }
+    if (campId) {
+      const _ce = CAMPAIGN_LEVEL_MAP[campId];
+      // Show animated location intro cinematic when entering the first level of
+      // a new location (level num === 1) — gives the campaign its sense of place.
+      if (_ce && _ce.lvl.num === 1) {
+        UI.hideAllScreens();
+        UI.showLocationIntro(_ce.loc, () => startRun('campaign', campId));
+      } else {
+        UI.hideAllScreens();
+        startRun('campaign', campId);
+      }
+    }
     return;
   }
   // sidekick card actions
