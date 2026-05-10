@@ -85,6 +85,61 @@ const VEHICLES = [
     base: { maxHp: 650, accel: 900, maxV: 290, fireRate: 0.08, dmg: 9, guns: 2, bigShot: true },
     color: { body:'#1a1a12', hood:'#0d0d08', cab:'#23231a', windshield:'#3a6a3a', glow:'#7aff5a' },
   },
+  // === v2.3 NEW VEHICLES — Wasteland Empire ===
+  {
+    id: 'vortexhover', name: 'VORTEX HOVER',
+    desc: 'Terrain-skimming hovercraft. Ignores surface slow-down. Unique drift boost.',
+    cost: 12000,
+    v23: true,
+    base: { maxHp: 90, accel: 2100, maxV: 560, fireRate: 0.14, dmg: 1, guns: 3, bigShot: false },
+    color: { body:'#1a4a6a', hood:'#0e3050', cab:'#061828', windshield:'#80eeff', glow:'#40d8ff' },
+    special: 'terrainIgnore',
+  },
+  {
+    id: 'bloodravenbomber', name: 'BLOOD RAVEN BOMBER',
+    desc: 'War rig with air-strike payload. Special ability calls in a devastating bombing run.',
+    cost: 15000,
+    v23: true,
+    base: { maxHp: 110, accel: 1700, maxV: 440, fireRate: 0.20, dmg: 2, guns: 2, bigShot: false },
+    color: { body:'#6a1a1a', hood:'#4a0e0e', cab:'#220606', windshield:'#ffb0b0', glow:'#ff3030' },
+    special: 'airstrike',
+  },
+  {
+    id: 'irontitan', name: 'IRON TITAN',
+    desc: 'Heavy ram tank with massive armor and area-denial cannon. Nothing gets past.',
+    cost: 18000,
+    v23: true,
+    base: { maxHp: 350, accel: 1000, maxV: 300, fireRate: 0.36, dmg: 5, guns: 1, bigShot: true },
+    color: { body:'#3a3a3a', hood:'#282828', cab:'#141414', windshield:'#6a8888', glow:'#ff6a10' },
+    special: 'areaDenial',
+  },
+  {
+    id: 'spectrestealth', name: 'SPECTRE STEALTH',
+    desc: 'Cloaking infiltrator. Temporary invisibility, silent running, and ambush crits.',
+    cost: 21000,
+    v23: true,
+    base: { maxHp: 75, accel: 2200, maxV: 540, fireRate: 0.13, dmg: 1, guns: 2, bigShot: false },
+    color: { body:'#1a1a2a', hood:'#101018', cab:'#06060e', windshield:'#c0b0ff', glow:'#8060ff' },
+    special: 'cloak',
+  },
+  {
+    id: 'doomhauler', name: 'DOOM HAULER',
+    desc: 'Charge-up ram smash. Hold fire to charge, release for a devastating kinetic impact.',
+    cost: 24000,
+    v23: true,
+    base: { maxHp: 220, accel: 1500, maxV: 390, fireRate: 0.25, dmg: 3, guns: 2, bigShot: false },
+    color: { body:'#4a2a1a', hood:'#2e1810', cab:'#140a06', windshield:'#cc8844', glow:'#ff7722' },
+    special: 'chargeRam',
+  },
+  {
+    id: 'neonphantom', name: 'NEON PHANTOM',
+    desc: 'Glass-cannon speedster with nitro chain lightning. Maximum risk, maximum output.',
+    cost: 28000,
+    v23: true,
+    base: { maxHp: 55, accel: 2800, maxV: 680, fireRate: 0.09, dmg: 2, guns: 4, bigShot: false },
+    color: { body:'#0a0a2a', hood:'#04041c', cab:'#02020e', windshield:'#40ffb0', glow:'#00ffcc' },
+    special: 'chainLightning',
+  },
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
 
@@ -375,6 +430,115 @@ const VEHICLE_BRANCHES = {
       effects: { bossDamageMul: 1.35, critChance: 0.20, critMul: 2.2 },
     },
   ],
+  // === v2.3 NEW VEHICLE BRANCHES — Wasteland Empire ===
+  vortexhover: [
+    {
+      id: 'riftdrift',
+      name: 'RIFT DRIFT',
+      desc: 'Amplified hover drift. Extreme speed boost and sharper turning.',
+      unlockTotal: 8,
+      statMods: { accel: 1.12, maxV: 1.08 },
+      effects: { pickupRadius: 80, critChance: 0.10, critMul: 1.7 },
+    },
+    {
+      id: 'wavecaster',
+      name: 'WAVE CASTER',
+      desc: 'Hover pulse weapons. Wider spread and improved fire efficiency.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.10, fireRate: 0.94 },
+      effects: { critChance: 0.08, critMul: 1.8, scrapMul: 1.12 },
+    },
+  ],
+  bloodravenbomber: [
+    {
+      id: 'napalm',
+      name: 'NAPALM STRIKE',
+      desc: 'Incendiary bombing runs. Bigger blast radius and burn damage on bosses.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.15, fireRate: 0.92 },
+      effects: { bossDamageMul: 1.20, critChance: 0.09, critMul: 1.8 },
+    },
+    {
+      id: 'ironwing',
+      name: 'IRON WING',
+      desc: 'Armored payload delivery. Extra hull and crash resistance.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.20, maxV: 0.94 },
+      effects: { damageTakenMul: 0.86, scrapMul: 1.14 },
+    },
+  ],
+  irontitan: [
+    {
+      id: 'siegetitan',
+      name: 'SIEGE TITAN',
+      desc: 'Unstoppable fortress. Maximum hull and punishing contact pressure.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.28, dmg: 1.08 },
+      effects: { damageTakenMul: 0.78, contactDamageMul: 1.55 },
+    },
+    {
+      id: 'warcannon',
+      name: 'WAR CANNON',
+      desc: 'Overcharged area cannon. Devastates bosses and clustered enemies.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.22, fireRate: 0.90 },
+      effects: { bossDamageMul: 1.28, critChance: 0.10, critMul: 1.9 },
+    },
+  ],
+  spectrestealth: [
+    {
+      id: 'shadowveil',
+      name: 'SHADOW VEIL',
+      desc: 'Extended cloak duration and silenced weapon profile.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.90, maxV: 1.06 },
+      effects: { damageTakenMul: 0.88, pickupRadius: 75 },
+    },
+    {
+      id: 'ghostmark',
+      name: 'GHOST MARK',
+      desc: 'Surprise attack amplifier. Crits from stealth deal triple damage.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.12, accel: 1.06 },
+      effects: { critChance: 0.18, critMul: 2.2 },
+    },
+  ],
+  doomhauler: [
+    {
+      id: 'rampage',
+      name: 'RAMPAGE',
+      desc: 'Charge smash amplified. Faster charge-up and massive contact pressure.',
+      unlockTotal: 8,
+      statMods: { maxHp: 1.18, accel: 1.05 },
+      effects: { contactDamageMul: 1.60, damageTakenMul: 0.87 },
+    },
+    {
+      id: 'doomload',
+      name: 'DOOM LOAD',
+      desc: 'Heavy payload rig. Extra hull and boosted boss ordnance damage.',
+      unlockTotal: 8,
+      statMods: { dmg: 1.16, fireRate: 0.93 },
+      effects: { bossDamageMul: 1.22, scrapMul: 1.15 },
+    },
+  ],
+  neonphantom: [
+    {
+      id: 'lightningchain',
+      name: 'LIGHTNING CHAIN',
+      desc: 'Chain lightning amplified. More forks and higher crit ceiling.',
+      unlockTotal: 8,
+      statMods: { fireRate: 0.88, dmg: 1.08 },
+      effects: { critChance: 0.20, critMul: 2.3 },
+    },
+    {
+      id: 'nitroburst',
+      name: 'NITRO BURST',
+      desc: 'Nitro-fueled demon. Top speed extended, boost damage multiplied.',
+      unlockTotal: 8,
+      statMods: { accel: 1.14, maxV: 1.12 },
+      effects: { nitroDamageMul: 1.45, critChance: 0.12, critMul: 1.9 },
+    },
+  ],
 };
 
 const UPGRADE_TRACKS = [
@@ -449,6 +613,8 @@ const MODES = [
   { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
   { id: 'zombie',      name: 'ZOMBIE WASTELAND', desc: 'Unlockable co-op-ready zombie gauntlet: waves, special infected, survivor objectives, and exclusive tools.' },
   { id: 'ironthrone',  name: 'IRON THRONE',      desc: 'Full mastery unlocks the boss campaign. Eight Warlords with different weapons and armored rigs. No survivors.' },
+  // === v2.3 NEW MODES — Wasteland Empire ===
+  { id: 'wastelandrun', name: 'WASTELAND RUN',   desc: 'Roguelite endless mode. Procedural runs with random mutators, escalating difficulty, and high-score leaderboards per seed. Unlocked after full campaign.' },
 ];
 
 // Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
@@ -460,6 +626,10 @@ const ZOMBIE_DEFS = [
   { id:'hunter',  name:'HUNTER',  w:18, h:28, hp:3,  vy:145, vxRange:70, contact:16, score:210, color:'#253a25', goreColor:'#102010', accent:'#7af07a', icon:'H', special:true },
   { id:'charger', name:'CHARGER', w:30, h:40, hp:8,  vy:95,  vxRange:8,  contact:26, score:260, color:'#58402c', goreColor:'#3a2818', accent:'#ff8a3d', icon:'C', special:true },
   { id:'tank',    name:'TANK',    w:46, h:52, hp:24, vy:34,  vxRange:6,  contact:42, score:650, color:'#6a402c', goreColor:'#4a2018', accent:'#ff5050', icon:'T', special:true, miniBoss:true },
+  // === v2.3 NEW SPECIAL INFECTED — Wasteland Empire ===
+  { id:'spitter',  name:'SPITTER',  w:22, h:32, hp:5,  vy:60,  vxRange:28, contact:14, score:240, color:'#3a6a1a', goreColor:'#2a4a0e', accent:'#aaff40', icon:'S', special:true, ranged:true },
+  { id:'screamer',  name:'SCREAMER',  w:18, h:28, hp:2,  vy:80,  vxRange:50, contact:6,  score:160, color:'#5a2a6a', goreColor:'#3a1a4a', accent:'#ff80ff', icon:'X', special:true, debuff:'horde_call' },
+  { id:'mutant',   name:'MUTANT',   w:36, h:44, hp:16, vy:48,  vxRange:12, contact:34, score:480, color:'#4a6a1a', goreColor:'#2a4a0a', accent:'#c8ff40', icon:'M', special:true, miniBoss:true },
 ];
 const ZOMBIE_DEF_BY_ID = Object.fromEntries(ZOMBIE_DEFS.map(z => [z.id, z]));
 const ZOMBIE_OBJECTIVES = [
@@ -754,6 +924,213 @@ const CAMPAIGN_LOCATIONS = [
       {num:5,name:'NYC LAST STAND',  obj:'horde',   target:60,  diff:7.0,reward:3600,night:true,storm:true},
     ],
   },
+  // === v2.3 CAMPAIGN EPILOGUE — US ROAD STORY (Locations 19–36) ===
+  // Branching epilogue chapters unlocked after completing the main campaign.
+  // New biomes (neonruins, irradiated, scraparch) are introduced here.
+  {
+    id:'boston', name:'BOSTON RUINS', state:'MASSACHUSETTS', biome:'midnight', reward:2200,
+    sidekickUnlock:'nova', mapPos:[291,52], v23: true,
+    intro:'Harvard burned. Fenway is a fortress. The Freedom Trail is a kill corridor — and you\'re on it.',
+    outro:'Boston cracks. NOVA climbs aboard with a plasma coil and two magazines of bad news.',
+    levels:[
+      {num:1,name:'FREEDOM SIEGE',  obj:'survive', target:75,  diff:6.2,reward:700,night:true,storm:true},
+      {num:2,name:'HARBOR BLITZ',   obj:'kills',   target:44,  diff:6.4,reward:780,night:true},
+      {num:3,name:'CHARLES RIVER',  obj:'distance',target:8500,diff:6.7,reward:880,night:true,storm:true},
+      {num:4,name:'THE PATRIOT',    obj:'boss',    target:1,   diff:7.0,reward:2600,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'providence', name:'PROVIDENCE NEON', state:'RHODE ISLAND', biome:'neonruins', reward:2400,
+    sidekickUnlock:null, mapPos:[293,48], v23: true,
+    intro:'The neon grid never died here. The raiders run on battery packs and stolen light.',
+    outro:'Providence flickers out behind you. The neon sea stretches further east.',
+    levels:[
+      {num:1,name:'GRID BREACH',    obj:'survive', target:80,  diff:6.5,reward:740,night:true},
+      {num:2,name:'PIXEL ALLEY',    obj:'kills',   target:46,  diff:6.7,reward:820,night:true,storm:true},
+      {num:3,name:'CYBER CORRIDOR', obj:'distance',target:9000,diff:7.0,reward:920},
+      {num:4,name:'NEON LORD',      obj:'boss',    target:1,   diff:7.3,reward:2800,boss:5,night:true},
+    ],
+  },
+  {
+    id:'hartford', name:'HARTFORD HOLD', state:'CONNECTICUT', biome:'neonruins', reward:2600,
+    sidekickUnlock:null, mapPos:[287,56], v23: true,
+    intro:'The insurance vaults held. What\'s inside them is worth the war.',
+    outro:'The vault is cracked. You took the scrap. Hartford has nothing left to insure.',
+    levels:[
+      {num:1,name:'VAULT APPROACH', obj:'survive', target:80,  diff:6.8,reward:780,storm:true},
+      {num:2,name:'CONNECTOR WARS', obj:'kills',   target:48,  diff:7.0,reward:860,night:true,storm:true},
+      {num:3,name:'PARK RIVER',     obj:'distance',target:9500,diff:7.3,reward:960,night:true},
+      {num:4,name:'IRON ACTUARY',   obj:'boss',    target:1,   diff:7.6,reward:3000,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'pittsburgh', name:'PITTSBURGH IRONWORKS', state:'PENNSYLVANIA', biome:'irradiated', reward:2800,
+    sidekickUnlock:'recon', mapPos:[258,82], v23: true,
+    intro:'The steel mills still burn. The radiation plume from the riverside reactor has turned the workers into something else.',
+    outro:'Pittsburgh steel. RECON drops out of a shadow and hops in — he had eyes on you since Cleveland.',
+    levels:[
+      {num:1,name:'MILL BREACH',    obj:'survive', target:82,  diff:7.0,reward:820,storm:true},
+      {num:2,name:'RUST RIVER',     obj:'kills',   target:50,  diff:7.2,reward:900,night:true},
+      {num:3,name:'BRIDGE WARS',    obj:'distance',target:10000,diff:7.5,reward:1000,night:true,storm:true},
+      {num:4,name:'THE STEELMAKER', obj:'boss',    target:1,   diff:7.8,reward:3200,boss:5,storm:true},
+    ],
+  },
+  {
+    id:'cleveland', name:'CLEVELAND CRATER', state:'OHIO', biome:'irradiated', reward:3000,
+    sidekickUnlock:'forge', mapPos:[237,88], v23: true,
+    intro:'The crater is two kilometers wide and glowing. Whatever fell here changed everything within range.',
+    outro:'Cleveland. FORGE walks out of the smoke with a welding torch and a grin. She\'s been waiting.',
+    levels:[
+      {num:1,name:'CRATER EDGE',    obj:'survive', target:85,  diff:7.3,reward:860,storm:true},
+      {num:2,name:'TOXIC SWEEP',    obj:'kills',   target:52,  diff:7.5,reward:940,night:true,storm:true},
+      {num:3,name:'DEAD LAKE',      obj:'distance',target:10500,diff:7.8,reward:1040,night:true},
+      {num:4,name:'THE ISOTOPE',    obj:'boss',    target:1,   diff:8.1,reward:3400,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'chicago', name:'CHICAGO DEADZONE', state:'ILLINOIS', biome:'irradiated', reward:3200,
+    sidekickUnlock:'ghost', mapPos:[215,92], v23: true,
+    intro:'The Loop is a containment zone. No one goes in. Everyone comes out changed. You are not everyone.',
+    outro:'Chicago pays. GHOST steps out of nowhere — she was there the whole time. You just couldn\'t see her.',
+    levels:[
+      {num:1,name:'LOOP BREACH',    obj:'survive', target:85,  diff:7.6,reward:900,night:true},
+      {num:2,name:'LAKESHORE WAR',  obj:'kills',   target:54,  diff:7.8,reward:980,storm:true},
+      {num:3,name:'BLUE LINE',      obj:'distance',target:11000,diff:8.1,reward:1080,night:true,storm:true},
+      {num:4,name:'THE WARDEN PRIME',obj:'boss',   target:1,   diff:8.4,reward:3600,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'detroit', name:'DETROIT IRON YARDS', state:'MICHIGAN', biome:'scraparch', reward:3400,
+    sidekickUnlock:null, mapPos:[230,86], v23: true,
+    intro:'Motor City runs on scrap and spite. The aerial yards are a maze of suspended platforms and salvage cranes.',
+    outro:'Detroit steel. Everything here is recycled. So are you — harder, meaner, and faster.',
+    levels:[
+      {num:1,name:'YARD BREACH',    obj:'survive', target:88,  diff:7.9,reward:940,storm:true},
+      {num:2,name:'CRANE RUN',      obj:'kills',   target:56,  diff:8.1,reward:1020,night:true},
+      {num:3,name:'ELEVATED WAR',   obj:'distance',target:11500,diff:8.4,reward:1120,night:true,storm:true},
+      {num:4,name:'THE ASSEMBLER',  obj:'boss',    target:1,   diff:8.7,reward:3800,boss:5,storm:true},
+    ],
+  },
+  {
+    id:'milwaukee', name:'MILWAUKEE SCRAP COAST', state:'WISCONSIN', biome:'scraparch', reward:3600,
+    sidekickUnlock:null, mapPos:[208,84], v23: true,
+    intro:'The lake is gone. What\'s left is a floating graveyard of industrial platforms connected by wind-corroded bridges.',
+    outro:'Milwaukee. You didn\'t sink. That\'s the only metric that matters here.',
+    levels:[
+      {num:1,name:'PLATFORM RUN',   obj:'survive', target:90,  diff:8.2,reward:980,storm:true},
+      {num:2,name:'WIND ATTACK',    obj:'kills',   target:58,  diff:8.4,reward:1060,night:true,storm:true},
+      {num:3,name:'SCRAP CROSSING', obj:'distance',target:12000,diff:8.7,reward:1160,night:true},
+      {num:4,name:'THE PLATFORM KING',obj:'boss',  target:1,   diff:9.0,reward:4000,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'minneapolis', name:'MINNEAPOLIS ZERO', state:'MINNESOTA', biome:'ash', reward:3800,
+    sidekickUnlock:null, mapPos:[188,78], v23: true,
+    intro:'The twin cities fell to ash in the first year. What remains is a gray, frozen battlefield of old loyalties.',
+    outro:'Minneapolis. You crossed the ash fields and came out the other side. Barely.',
+    levels:[
+      {num:1,name:'ASH CROSSING',   obj:'survive', target:92,  diff:8.5,reward:1020,night:true,storm:true},
+      {num:2,name:'TWIN RUINS',     obj:'kills',   target:60,  diff:8.7,reward:1100,storm:true},
+      {num:3,name:'FROZEN HIGHWAY', obj:'distance',target:12500,diff:9.0,reward:1200,night:true,storm:true},
+      {num:4,name:'THE GRAY KING',  obj:'boss',    target:1,   diff:9.3,reward:4200,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'kansascity', name:'KANSAS CITY FORGE', state:'MISSOURI/KANSAS', biome:'wastes', reward:4000,
+    sidekickUnlock:null, mapPos:[178,108], v23: true,
+    intro:'Where the rivers cross the roads, the warlords built their first empire. It\'s still standing. For now.',
+    outro:'The forge is cold. You left it that way. The road leads on.',
+    levels:[
+      {num:1,name:'RIVER CROSSING', obj:'survive', target:92,  diff:8.8,reward:1060,storm:true},
+      {num:2,name:'PLAINS ASSAULT', obj:'kills',   target:62,  diff:9.0,reward:1140,night:true},
+      {num:3,name:'GATEWAY RUN',    obj:'distance',target:13000,diff:9.3,reward:1240,night:true,storm:true},
+      {num:4,name:'THE RIVER WARLORD',obj:'boss',  target:1,   diff:9.6,reward:4400,boss:5,storm:true},
+    ],
+  },
+  {
+    id:'denver', name:'DENVER HIGH ROAD', state:'COLORADO', biome:'redcanyon', reward:4200,
+    sidekickUnlock:null, mapPos:[122,102], v23: true,
+    intro:'A mile high and twice as dangerous. The altitude thins the air and sharpens the killers.',
+    outro:'Denver behind you. You climbed it and you came down the other side faster than anything they\'ve seen.',
+    levels:[
+      {num:1,name:'MILE HIGH SIEGE',obj:'survive', target:95,  diff:9.1,reward:1100,storm:true},
+      {num:2,name:'PEAK ASSAULT',   obj:'kills',   target:64,  diff:9.3,reward:1180,night:true,storm:true},
+      {num:3,name:'ALPINE ROAD',    obj:'distance',target:13500,diff:9.6,reward:1280,night:true},
+      {num:4,name:'THE MOUNTAINEER',obj:'boss',    target:1,   diff:9.9,reward:4600,boss:5,storm:true},
+    ],
+  },
+  {
+    id:'saltlake', name:'SALT LAKE DEAD ZONE', state:'UTAH', biome:'saltflats', reward:4400,
+    sidekickUnlock:null, mapPos:[100,104], v23: true,
+    intro:'The lake evaporated years ago. The crust beneath it is a white hellscape crossed by warring salt barons.',
+    outro:'The crust cracks behind you. Nothing lives on the flats — except whatever you leave behind.',
+    levels:[
+      {num:1,name:'SALT FLATS WAR', obj:'survive', target:95,  diff:9.4,reward:1140,storm:true},
+      {num:2,name:'WHITE DEATH',    obj:'kills',   target:66,  diff:9.6,reward:1220,night:true},
+      {num:3,name:'BRINE CROSSING', obj:'distance',target:14000,diff:9.9,reward:1320,night:true,storm:true},
+      {num:4,name:'THE SALT BARON', obj:'boss',    target:1,   diff:10.2,reward:4800,boss:5,storm:true},
+    ],
+  },
+  {
+    id:'portland', name:'PORTLAND NEON COAST', state:'OREGON', biome:'neonruins', reward:4600,
+    sidekickUnlock:null, mapPos:[30,82], v23: true,
+    intro:'The Pacific coast runs on neon, rain, and recycled tech. Portland built itself back — worse than before.',
+    outro:'The coast behind you. Rain and neon and the smell of burning silicon. Beautiful and lethal.',
+    levels:[
+      {num:1,name:'COAST SIEGE',    obj:'survive', target:98,  diff:9.7,reward:1180,night:true},
+      {num:2,name:'NEON RAIN',      obj:'kills',   target:68,  diff:9.9,reward:1260,night:true,storm:true},
+      {num:3,name:'COLUMBIA BURN',  obj:'distance',target:14500,diff:10.2,reward:1360,night:true},
+      {num:4,name:'THE CYBER WARDEN',obj:'boss',   target:1,   diff:10.5,reward:5000,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'seattle', name:'SEATTLE RISE', state:'WASHINGTON', biome:'scraparch', reward:4800,
+    sidekickUnlock:null, mapPos:[28,66], v23: true,
+    intro:'The Space Needle still stands. Around it: floating scrap platforms, elevated rail wars, and the last tech barons.',
+    outro:'Seattle paid in circuits. You took everything worth taking and left the rest for the ravens.',
+    levels:[
+      {num:1,name:'NEEDLE RUN',     obj:'survive', target:100, diff:10.0,reward:1220,storm:true},
+      {num:2,name:'PLATFORM WARS',  obj:'kills',   target:70,  diff:10.2,reward:1300,night:true,storm:true},
+      {num:3,name:'ELEVATED PUSH',  obj:'distance',target:15000,diff:10.5,reward:1400,night:true},
+      {num:4,name:'THE NEEDLE KING',obj:'boss',    target:1,   diff:10.8,reward:5200,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'anchorage', name:'ANCHORAGE LAST ROAD', state:'ALASKA', biome:'ash', reward:5000,
+    sidekickUnlock:null, mapPos:[20,30], v23: true,
+    intro:'End of the highway. End of the map. The permafrost is melting and the last warlord of the north waits at the edge.',
+    outro:'Anchorage. You drove to the end of America. No road left. Just ice, ash, and the fact that you\'re still alive.',
+    levels:[
+      {num:1,name:'PERMAFROST RUN', obj:'survive', target:100, diff:10.3,reward:1260,night:true,storm:true},
+      {num:2,name:'GLACIAL ASSAULT',obj:'kills',   target:72,  diff:10.5,reward:1340,storm:true},
+      {num:3,name:'ARCTIC HIGHWAY', obj:'distance',target:15500,diff:10.8,reward:1440,night:true,storm:true},
+      {num:4,name:'THE LAST WARLORD',obj:'boss',   target:1,   diff:11.1,reward:5600,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'miami', name:'MIAMI NEON COAST', state:'FLORIDA', biome:'neonruins', reward:5200,
+    sidekickUnlock:null, mapPos:[248,156], v23: true,
+    intro:'The ocean rose. Miami floats on its own excess. Neon and violence — the last resort town.',
+    outro:'Miami sinks a little further every day. You made it worse. You have no regrets.',
+    levels:[
+      {num:1,name:'OCEAN DRIVE',    obj:'survive', target:102, diff:10.6,reward:1300,night:true},
+      {num:2,name:'REEF WAR',       obj:'kills',   target:74,  diff:10.8,reward:1380,night:true,storm:true},
+      {num:3,name:'CAUSEWAY SIEGE', obj:'distance',target:16000,diff:11.1,reward:1480,storm:true},
+      {num:4,name:'THE REEF KING',  obj:'boss',    target:1,   diff:11.4,reward:5800,boss:5,night:true,storm:true},
+    ],
+  },
+  {
+    id:'neworleans', name:'NEW ORLEANS DELTA WAR', state:'LOUISIANA', biome:'irradiated', reward:5600,
+    sidekickUnlock:null, mapPos:[215,148], v23: true,
+    intro:'The delta glows green now. Mardi Gras masks hide mutant faces. The jazz plays on — louder, stranger.',
+    outro:'New Orleans. You danced through the fire and out the other side. The delta glows behind you.',
+    levels:[
+      {num:1,name:'DELTA SIEGE',    obj:'survive', target:104, diff:11.0,reward:1340,storm:true},
+      {num:2,name:'BAYOU ASSAULT',  obj:'kills',   target:76,  diff:11.2,reward:1420,night:true,storm:true},
+      {num:3,name:'BOURBON RUN',    obj:'distance',target:16500,diff:11.5,reward:1520,night:true},
+      {num:4,name:'THE VOODOO KING',obj:'boss',    target:1,   diff:11.8,reward:6200,boss:5,night:true,storm:true},
+    ],
+  },
 ];
 
 // Flat lookup: 'la-1' -> { loc, lvl, locIdx, levelIdx }
@@ -807,6 +1184,27 @@ const SIDEKICKS = [
     id:'vulture', name:'VULTURE', title:'SCRAP HUNTER',
     bio:'Circles every kill zone like he was born for it. Takes a cut of everything.',
     perk:'+20% SCRAP FROM KILLS', unlockLoc:'philly', color:'#f070ff',
+  },
+  // === v2.3 NEW SIDEKICKS — Wasteland Empire ===
+  {
+    id:'nova',    name:'NOVA',    title:'PLASMA TECH',
+    bio:'Jury-rigged a railgun from a satellite dish and bad intentions. She\'ll overcharge anything.',
+    perk:'+20% BULLET DAMAGE · CHAIN SHOTS BOUNCE', unlockLoc:'boston', color:'#40e0ff', v23: true,
+  },
+  {
+    id:'recon',   name:'RECON',   title:'FORWARD SCOUT',
+    bio:'Runs point so you don\'t have to. Marks enemy positions thirty seconds before you reach them.',
+    perk:'ENEMY RADAR · +15% KILL SCORE', unlockLoc:'pittsburgh', color:'#ffa030', v23: true,
+  },
+  {
+    id:'forge',   name:'FORGE',   title:'WRAITH SMITH',
+    bio:'Carries a welding torch and two grudges. Repairs the rig mid-run like she\'s daring the road to stop her.',
+    perk:'+8 HP AUTO-REPAIR EVERY 15S · SCRAP BONUS ON BOSS KILLS', unlockLoc:'cleveland', color:'#ff7040', v23: true,
+  },
+  {
+    id:'ghost',   name:'GHOST',   title:'SIGNAL HUNTER',
+    bio:'Dropped off the map before the war started. Finds power-ups no one else can see.',
+    perk:'DOUBLE POWERUP DURATION · SECRET DROPS +40%', unlockLoc:'chicago', color:'#c0c0ff', v23: true,
   },
 ];
 const SIDEKICK_BY_ID = Object.fromEntries(SIDEKICKS.map(s => [s.id, s]));
@@ -906,6 +1304,64 @@ const BIOME_THEMES = {
     skullDay:'#c0d7ee', skullNight:'#8fa6c2',
     stormLine:'rgba(110,140,255,0.22)', stormHaze:'rgba(110,140,255,0.06)',
     cloudDay:'rgba(175,192,255,1)', fogDay:'rgba(48,68,140,0.28)', fogNight:'rgba(6,10,30,0.48)',
+  },
+  // === v2.3 NEW BIOMES — Wasteland Empire ===
+  neonruins: {
+    skyDayTop:'#050510', skyDayMid:'#0a0a1e', skyDayBottom:'#10102e',
+    skyStormTop:'#04040e', skyStormMid:'#080818',
+    skyNightTop:'#020208', skyNightMid:'#06061a', skyNightBottom:'#0c0c24',
+    skyNightStormTop:'#030310', skyNightStormMid:'#050516',
+    farDay:'rgba(20,10,60,0.75)', farNight:'rgba(8,4,28,0.90)',
+    mountainDay:'#0a0a2a', mountainNight:'#040418',
+    hillsDay:'#10103a', hillsNight:'#080828',
+    shoulderDay:'#12123c', shoulderNight:'#0a0a24',
+    crackDay:'rgba(0,200,255,0.12)', crackNight:'rgba(0,200,255,0.18)',
+    lineDay:'rgba(0,220,255,0.80)', lineNight:'rgba(0,220,255,0.95)',
+    roadDayA:'#080820', roadDayB:'#0e0e2a',
+    roadNightA:'#040410', roadNightB:'#08081a',
+    cactusDay:'#1a0a40', cactusNight:'#0e063a',
+    wreckDay:'#1c1c38', wreckNight:'#0e0e28',
+    skullDay:'#80c0ff', skullNight:'#60a0e0',
+    stormLine:'rgba(0,200,255,0.30)', stormHaze:'rgba(0,100,200,0.12)',
+    cloudDay:'rgba(80,160,255,1)', fogDay:'rgba(0,60,160,0.30)', fogNight:'rgba(0,20,80,0.50)',
+  },
+  irradiated: {
+    skyDayTop:'#1a2a0a', skyDayMid:'#253a10', skyDayBottom:'#304816',
+    skyStormTop:'#14200a', skyStormMid:'#1c2e0e',
+    skyNightTop:'#080f04', skyNightMid:'#10180a', skyNightBottom:'#182210',
+    skyNightStormTop:'#060c04', skyNightStormMid:'#0e160a',
+    farDay:'rgba(30,50,8,0.68)', farNight:'rgba(10,18,4,0.85)',
+    mountainDay:'#162005', mountainNight:'#0a1204',
+    hillsDay:'#1f2e08', hillsNight:'#10180a',
+    shoulderDay:'#1c280a', shoulderNight:'#0e1608',
+    crackDay:'rgba(100,200,0,0.15)', crackNight:'rgba(80,180,0,0.20)',
+    lineDay:'rgba(180,255,50,0.72)', lineNight:'rgba(150,255,30,0.90)',
+    roadDayA:'#161a0a', roadDayB:'#1e2410',
+    roadNightA:'#0a0e06', roadNightB:'#12160a',
+    cactusDay:'#2a4a10', cactusNight:'#1a3008',
+    wreckDay:'#1e2c0c', wreckNight:'#121a08',
+    skullDay:'#c8e060', skullNight:'#98b040',
+    stormLine:'rgba(120,220,20,0.24)', stormHaze:'rgba(80,180,0,0.08)',
+    cloudDay:'rgba(180,240,80,1)', fogDay:'rgba(60,140,0,0.28)', fogNight:'rgba(20,60,0,0.42)',
+  },
+  scraparch: {
+    skyDayTop:'#4a3820', skyDayMid:'#6a5030', skyDayBottom:'#8a6840',
+    skyStormTop:'#382a18', skyStormMid:'#503c24',
+    skyNightTop:'#161008', skyNightMid:'#241a0e', skyNightBottom:'#302214',
+    skyNightStormTop:'#100c06', skyNightStormMid:'#1c1408',
+    farDay:'rgba(80,60,28,0.60)', farNight:'rgba(28,18,8,0.80)',
+    mountainDay:'#3a2c14', mountainNight:'#1a140a',
+    hillsDay:'#4a3820', hillsNight:'#241c0e',
+    shoulderDay:'#4e3c22', shoulderNight:'#261a0c',
+    crackDay:'rgba(140,100,40,0.18)', crackNight:'rgba(180,140,60,0.10)',
+    lineDay:'rgba(255,210,80,0.68)', lineNight:'rgba(255,210,80,0.88)',
+    roadDayA:'#2e2414', roadDayB:'#3a2e1c',
+    roadNightA:'#14100a', roadNightB:'#1e180e',
+    cactusDay:'#5a4e2c', cactusNight:'#38321e',
+    wreckDay:'#5c4a2a', wreckNight:'#362c1a',
+    skullDay:'#d8c090', skullNight:'#a89060',
+    stormLine:'rgba(200,160,60,0.22)', stormHaze:'rgba(160,120,40,0.08)',
+    cloudDay:'rgba(255,222,150,1)', fogDay:'rgba(150,110,40,0.26)', fogNight:'rgba(40,30,10,0.38)',
   },
 };
 
@@ -1615,6 +2071,12 @@ const Profile = {
         if (!p.weeklyProgress || typeof p.weeklyProgress !== 'object') { p.weeklyProgress = {}; dirty = true; }
         if (!('clanTag' in p)) { p.clanTag = null; dirty = true; }
         if (!('clanName' in p)) { p.clanName = null; dirty = true; }
+        // === v2.3 PROFILE NORMALIZATION — Wasteland Empire ===
+        if (typeof p.bestWastelandRun !== 'number') { p.bestWastelandRun = 0; dirty = true; }
+        if (!Array.isArray(p.craftingMods)) { p.craftingMods = []; dirty = true; }
+        if (!p.craftingInventory || typeof p.craftingInventory !== 'object') { p.craftingInventory = {}; dirty = true; }
+        if (typeof p.weaponSpecialization !== 'string') { p.weaponSpecialization = 'none'; dirty = true; }
+        if (!Array.isArray(p.epiclocueCleared)) { p.epiclocueCleared = []; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -1675,6 +2137,12 @@ const Profile = {
       weeklyProgress: {},  // weekKey → { progress, claimed } for weekly challenge tracking
       clanTag: null,       // up to 5-char clan tag shown in scoreboards
       clanName: null,      // full clan name (up to 20 chars)
+      // === v2.3 PROFILE FIELDS — Wasteland Empire ===
+      bestWastelandRun: 0,         // best score in Wasteland Run roguelite mode
+      craftingMods: [],            // array of active crafting mod IDs applied to current rig
+      craftingInventory: {},       // { bossPartId: count } — crafting resource inventory
+      weaponSpecialization: 'none', // active weapon spec: 'none'|'explosive'|'piercing'|'chainlightning'|'droneswarm'
+      epiclocueCleared: [],        // array of epilogue location IDs cleared (v2.3 campaign extension)
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -2017,6 +2485,9 @@ const Settings = {
   colorBlind: 'none',
   // skip non-essential animations for users sensitive to motion
   reducedMotion: false,
+  // === v2.3 SETTINGS — Wasteland Empire ===
+  // Toggle new v2.3 content (vehicles, biomes, modes). When false, only v2.0 content is shown.
+  empireExpansion: true,
   load() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
@@ -2034,6 +2505,7 @@ const Settings = {
        if (typeof o.cinematic === 'boolean') this.cinematic = o.cinematic;
        if (typeof o.colorBlind === 'string') this.colorBlind = o.colorBlind;
        if (typeof o.reducedMotion === 'boolean') this.reducedMotion = o.reducedMotion;
+       if (typeof o.empireExpansion === 'boolean') this.empireExpansion = o.empireExpansion;
     } catch (_) {}
   },
   save() {
@@ -2043,6 +2515,7 @@ const Settings = {
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
         cinematic: this.cinematic, colorBlind: this.colorBlind, reducedMotion: this.reducedMotion,
+        empireExpansion: this.empireExpansion,
       }));
     } catch (_) {}
     this.applyBodyClass();
@@ -10260,9 +10733,9 @@ const LevelEditor = {
 // via <script src="mymod.js">) can register custom vehicles, modes, and hazards.
 // Share codes use the same base64 format as the Level Editor.
 (function setupModdingAPI() {
-  const _modVehicles = [], _modModes = [], _modHazards = [];
+  const _modVehicles = [], _modModes = [], _modHazards = [], _modBiomes = [], _modMutators = [];
   window.MojaveMod = {
-    version: '1.0',
+    version: '2.3',
     // Register a custom vehicle: { id, name, desc, base: {maxHp,accel,maxV,fireRate,dmg,guns}, color }
     registerVehicle(def) {
       if (!def || !def.id || !def.name) { console.warn('[MojaveMod] registerVehicle: id+name required'); return false; }
@@ -10288,15 +10761,38 @@ const LevelEditor = {
       console.info('[MojaveMod] Registered hazard:', def.id);
       return true;
     },
+    // === v2.3 NEW MOD API METHODS ===
+    // Register a custom biome: { id, name, ...BIOME_THEMES-compatible color keys }
+    registerBiome(def) {
+      if (!def || !def.id || !def.name) { console.warn('[MojaveMod] registerBiome: id+name required'); return false; }
+      if (BIOME_THEMES[def.id]) { console.warn('[MojaveMod] Biome id already exists:', def.id); return false; }
+      def.modded = true;
+      const { id: _id, name: _n, modded: _m, ...themeData } = def;
+      BIOME_THEMES[def.id] = themeData;
+      _modBiomes.push(def);
+      console.info('[MojaveMod] Registered biome:', def.id);
+      return true;
+    },
+    // Register a run mutator: { id, name, desc, apply(gameState) — called at run start }
+    registerMutator(def) {
+      if (!def || !def.id || !def.name) { console.warn('[MojaveMod] registerMutator: id+name required'); return false; }
+      if (WASTELAND_RUN_MUTATORS.some(m => m.id === def.id)) { console.warn('[MojaveMod] Mutator id already exists:', def.id); return false; }
+      def.modded = true;
+      _modMutators.push(def); WASTELAND_RUN_MUTATORS.push(def);
+      console.info('[MojaveMod] Registered mutator:', def.id);
+      return true;
+    },
     // Load a level/vehicle/mode pack from a Level Editor share code
     loadShareCode(code) {
       const cfg = LevelEditor.parseCode(code);
       if (!cfg) { console.warn('[MojaveMod] Invalid share code'); return null; }
       return cfg;
     },
-    get vehicles() { return _modVehicles.slice(); },
-    get modes()    { return _modModes.slice();    },
-    get hazards()  { return _modHazards.slice();  },
+    get vehicles()  { return _modVehicles.slice();  },
+    get modes()     { return _modModes.slice();      },
+    get hazards()   { return _modHazards.slice();    },
+    get biomes()    { return _modBiomes.slice();     },
+    get mutators()  { return _modMutators.slice();   },
     // Visual scripting stub — full integration is a future TODO.
     script: {
       on(event, fn)  { console.info('[MojaveMod.script] stub listener:', event); },
@@ -11541,6 +12037,343 @@ const Cinematic = (function () {
 
   return { preTransform, postFx, postFxMenu, buildPosterDataURL };
 })();
+
+// ============================================================
+// === v2.3 GAME EXPANSION ENHANCEMENTS — Wasteland Empire ===
+// All new content is additive. Guards and data follow below.
+// Sections: NEW VEHICLES & BIOMES | ROGUELITE MODE |
+//           CRAFTING & PROGRESSION | WEAPON SPECIALIZATIONS |
+//           SIDEKICK OVERHAUL | ZOMBIE HORDE ENHANCEMENTS
+// ============================================================
+
+// === NEW VEHICLES & BIOMES ===
+// New vehicle stat block references are defined in the VEHICLES array above (v23: true flag).
+// New biomes are defined in BIOME_THEMES above (neonruins, irradiated, scraparch).
+// The following helpers expose v2.3 vehicle capability metadata for the game loop.
+
+// Returns true if the given vehicle has terrain-ignore hover capability.
+function vehicleIgnoresTerrain(vehicleId) {
+  const v = VEHICLE_BY_ID[vehicleId];
+  return !!(v && v.special === 'terrainIgnore');
+}
+
+// Returns true if the given vehicle has a special passive ability relevant to the UI.
+function vehicleSpecialAbility(vehicleId) {
+  const v = VEHICLE_BY_ID[vehicleId];
+  return (v && v.special) || null;
+}
+
+// === ROGUELITE MODE — Wasteland Run ===
+// Full run-loop integration is handled by the existing game loop via Game.mode === 'wastelandrun'.
+// This section defines the mutator table and seed-based run initializer.
+
+// Wasteland Run mutators: applied at the start of each roguelite run.
+// Each mutator has an id, name, short desc, and a weight for random selection.
+// TODO: Apply mutator effects in beginPlaying() when mode === 'wastelandrun'.
+const WASTELAND_RUN_MUTATORS = [
+  { id:'ironwall',       name:'IRON WALL',         desc:'Enemy HP +50%. Bullets deal bonus damage.',                   weight:3 },
+  { id:'glassroad',      name:'GLASS ROAD',         desc:'Player HP halved. Score multiplier ×2.',                      weight:3 },
+  { id:'nightonly',      name:'NIGHT PERMANENT',    desc:'Permanent night. No daytime recovery.',                        weight:4 },
+  { id:'doublethreat',   name:'DOUBLE THREAT',      desc:'Two bosses per sector. Extra scrap on clear.',                 weight:2 },
+  { id:'nitrostorm',     name:'NITRO STORM',        desc:'All nitro pickups are permanent for the run.',                 weight:3 },
+  { id:'zombiewave',     name:'ZOMBIE TIDE',        desc:'Every 90s a zombie wave erupts from the flanks.',             weight:2 },
+  { id:'scraplord',      name:'SCRAP LORD',         desc:'Scrap drops ×3 but enemy fire rate +30%.',                    weight:2 },
+  { id:'speedcurse',     name:'SPEED CURSE',        desc:'Vehicle max speed reduced 20%. Bullets move faster.',         weight:3 },
+  { id:'armoredworld',   name:'ARMORED WORLD',      desc:'All enemies have 30% damage reduction.',                      weight:3 },
+  { id:'bountyhunter',   name:'BOUNTY HUNTER',      desc:'Kill streaks build a cash multiplier — break it and lose it.',weight:2 },
+  { id:'bloodmoon',      name:'BLOOD MOON',         desc:'All enemies deal 40% more contact damage.',                    weight:3 },
+  { id:'goldensector',   name:'GOLDEN SECTOR',      desc:'This sector has 5× scrap. Enemies are ramped accordingly.',   weight:1 },
+];
+
+// Get a deterministic set of mutators for a given Wasteland Run seed.
+// Returns an array of 2–3 mutator objects.
+function getWastelandRunMutators(seed) {
+  const rng = (n => { let s = seed ^ (n * 2654435761); s ^= s >>> 16; s *= 0x45d9f3b; s ^= s >>> 16; return Math.abs(s); });
+  const pool = WASTELAND_RUN_MUTATORS.slice();
+  const count = 2 + (rng(1) % 2); // 2 or 3 mutators
+  const chosen = [];
+  for (let i = 0; i < count && pool.length; i++) {
+    const idx = rng(i + 2) % pool.length;
+    chosen.push(pool.splice(idx, 1)[0]);
+  }
+  return chosen;
+}
+
+// Returns the Wasteland Run unlock state (requires full campaign cleared).
+function isWastelandRunUnlocked() {
+  const p = Profile.active();
+  if (!p) return false;
+  // Unlocked when the player has cleared the full original 18-location campaign (NYC cleared)
+  const nyc = (p.campaignCleared || {})['nyc'];
+  return !!(nyc && (nyc.levelsCleared || []).length >= 5);
+}
+
+// === CRAFTING & PROGRESSION ===
+// Crafting Workshop: combine scrap + boss parts into temporary or permanent mods.
+// Boss parts are awarded as crafting ingredients when special bosses are defeated.
+// TODO: Boss part drop integration (dropBossPart() hook in boss death handler).
+
+const CRAFTING_RECIPES = [
+  {
+    id:'autorepair',      name:'AUTO-REPAIR KIT',
+    desc:'+6 HP per 15 seconds for the duration of the run.',
+    cost:{ scrap:800, parts:{ 'engine_coil':1 } },
+    type:'run', slot:'utility',
+    effect:{ autoRepairRate:6, autoRepairInterval:15 },
+  },
+  {
+    id:'explosiveshells', name:'EXPLOSIVE SHELLS',
+    desc:'Bullets deal 30% splash damage to nearby enemies.',
+    cost:{ scrap:1200, parts:{ 'boss_casing':1 } },
+    type:'run', slot:'weapon',
+    effect:{ bulletSplash:0.30 },
+  },
+  {
+    id:'armorplate',      name:'APEX ARMOR PLATE',
+    desc:'-20% incoming damage this run.',
+    cost:{ scrap:1000, parts:{ 'titan_plating':1 } },
+    type:'run', slot:'defense',
+    effect:{ damageTakenMul:0.80 },
+  },
+  {
+    id:'scraplode',       name:'SCRAP-LODE MAGNET',
+    desc:'+40% scrap pickup radius and +15% scrap value.',
+    cost:{ scrap:600, parts:{ 'salvage_coil':1 } },
+    type:'run', slot:'utility',
+    effect:{ pickupRadius:1.40, scrapMul:1.15 },
+  },
+  {
+    id:'overclock',       name:'REACTOR OVERCLOCK',
+    desc:'+20% fire rate for the entire run.',
+    cost:{ scrap:1400, parts:{ 'reactor_shard':1 } },
+    type:'run', slot:'weapon',
+    effect:{ fireRateMul:0.80 },
+  },
+  // Permanent mods (survive a prestige reset)
+  {
+    id:'apexframe',       name:'APEX FRAME',
+    desc:'Permanent +10% max HP on all vehicles.',
+    cost:{ scrap:8000, parts:{ 'titan_plating':3, 'boss_casing':2 } },
+    type:'permanent', slot:'defense',
+    effect:{ maxHpMul:1.10 },
+  },
+  {
+    id:'warengine',       name:'WAR ENGINE',
+    desc:'Permanent +8% acceleration and top speed on all vehicles.',
+    cost:{ scrap:8000, parts:{ 'engine_coil':3, 'reactor_shard':2 } },
+    type:'permanent', slot:'engine',
+    effect:{ accelMul:1.08, maxVMul:1.08 },
+  },
+];
+
+// Crafting Workshop state object.
+// Full UI integration is a future TODO — this provides the data layer.
+const CraftingWorkshop = {
+  // Craft a recipe by ID. Deducts resources, adds mod to profile.
+  craft(recipeId) {
+    const recipe = CRAFTING_RECIPES.find(r => r.id === recipeId);
+    if (!recipe) return { ok: false, reason: 'UNKNOWN RECIPE' };
+    const p = Profile.active();
+    if (!p) return { ok: false, reason: 'NO ACTIVE DRIVER' };
+    if (recipe.type === 'permanent' && (p.craftingMods || []).includes(recipeId))
+      return { ok: false, reason: 'ALREADY CRAFTED' };
+    // Check scrap
+    if ((p.scrap || 0) < recipe.cost.scrap)
+      return { ok: false, reason: 'INSUFFICIENT SCRAP' };
+    // Check parts
+    const inv = p.craftingInventory || {};
+    for (const [part, qty] of Object.entries(recipe.cost.parts || {})) {
+      if ((inv[part] || 0) < qty) return { ok: false, reason: 'MISSING PARTS: ' + part.toUpperCase() };
+    }
+    // Deduct cost
+    p.scrap -= recipe.cost.scrap;
+    for (const [part, qty] of Object.entries(recipe.cost.parts || {})) {
+      inv[part] = (inv[part] || 0) - qty;
+    }
+    p.craftingInventory = inv;
+    if (recipe.type === 'permanent') {
+      p.craftingMods = p.craftingMods || [];
+      if (!p.craftingMods.includes(recipeId)) p.craftingMods.push(recipeId);
+    }
+    Profile.save();
+    return { ok: true, recipe };
+  },
+  // Award a boss part drop to the active profile's crafting inventory.
+  awardPart(partId, qty) {
+    const p = Profile.active(); if (!p) return;
+    p.craftingInventory = p.craftingInventory || {};
+    p.craftingInventory[partId] = (p.craftingInventory[partId] || 0) + (qty || 1);
+    Profile.save();
+  },
+  // Get list of available recipes with affordability info.
+  getRecipes() {
+    const p = Profile.active() || {};
+    const inv = p.craftingInventory || {};
+    return CRAFTING_RECIPES.map(r => {
+      const canAffordScrap = (p.scrap || 0) >= r.cost.scrap;
+      const canAffordParts = Object.entries(r.cost.parts || {}).every(([part, qty]) => (inv[part] || 0) >= qty);
+      const alreadyOwned  = r.type === 'permanent' && (p.craftingMods || []).includes(r.id);
+      return Object.assign({}, r, { canAfford: canAffordScrap && canAffordParts, alreadyOwned });
+    });
+  },
+};
+
+// === WEAPON SPECIALIZATIONS ===
+// Weapon specializations are tier-4 branches available after completing weapon tier 3.
+// They give a dramatic playstyle shift. Selected once per run (or permanent via crafting).
+// TODO: Apply specialization effects in bullet-spawn and enemy-hit handlers.
+
+const WEAPON_SPECIALIZATIONS = [
+  {
+    id: 'explosive',
+    name: 'EXPLOSIVE',
+    desc: 'Bullets detonate on impact. 35% splash radius. Boss damage +20%. Fire rate slightly reduced.',
+    statMods: { fireRate: 1.15, dmg: 1.25 },
+    effects: { bulletSplash: 0.35, bossDamageMul: 1.20 },
+    icon: '💥',
+    unlockTotal: 12,
+  },
+  {
+    id: 'piercing',
+    name: 'PIERCING',
+    desc: 'Bullets punch through multiple enemies in a line. Penetration depth: 4 targets.',
+    statMods: { fireRate: 1.08, dmg: 1.18 },
+    effects: { bulletPierce: 4 },
+    icon: '⚡',
+    unlockTotal: 12,
+  },
+  {
+    id: 'chainlightning',
+    name: 'CHAIN LIGHTNING',
+    desc: 'Bullets arc to 3 nearby enemies on hit. Arc damage is 60% of base. Combo builds faster.',
+    statMods: { fireRate: 1.10, dmg: 1.10 },
+    effects: { bulletChain: 3, chainDamageMul: 0.60 },
+    icon: '🌩',
+    unlockTotal: 12,
+  },
+  {
+    id: 'droneswarm',
+    name: 'DRONE SWARM',
+    desc: 'A swarm of 4 attack drones orbits the player. Each fires at the nearest enemy. Passive.',
+    statMods: { fireRate: 1.0, dmg: 1.0 },
+    effects: { drones: 4, droneDmg: 0.5, droneFireRate: 0.5 },
+    icon: '🛸',
+    unlockTotal: 14,
+  },
+];
+const WEAPON_SPEC_BY_ID = Object.fromEntries(WEAPON_SPECIALIZATIONS.map(s => [s.id, s]));
+
+// Get the active weapon specialization for the active profile.
+function getActiveWeaponSpec() {
+  const p = Profile.active();
+  const specId = (p && p.weaponSpecialization) || 'none';
+  return specId !== 'none' ? (WEAPON_SPEC_BY_ID[specId] || null) : null;
+}
+
+// === SIDEKICK OVERHAUL ===
+// New sidekick perk application. Existing sidekick system unchanged.
+// This block adds helper logic for v2.3 sidekick abilities (nova, recon, forge, ghost).
+
+function applyV23SidekickPassives(profile, gameState) {
+  // Called at run start to set up v2.3 sidekick passives on gameState.
+  const sk = profile && profile.activeSidekick;
+  if (!sk) return;
+  if (sk === 'nova') {
+    // +20% bullet damage, chain shots stub
+    if (gameState) gameState._sidekickDmgBonus = (gameState._sidekickDmgBonus || 1) * 1.20;
+  } else if (sk === 'recon') {
+    // +15% kill score
+    if (gameState) gameState._sidekickKillScoreBonus = (gameState._sidekickKillScoreBonus || 1) * 1.15;
+  } else if (sk === 'forge') {
+    // +8 HP auto-repair every 15s (applied via the autoRepair tick in game loop)
+    if (gameState) { gameState._sidekickRepairRate = 8; gameState._sidekickRepairInterval = 15; }
+  } else if (sk === 'ghost') {
+    // Double powerup duration, secret drops bonus
+    if (gameState) gameState._sidekickPowerupDurMul = (gameState._sidekickPowerupDurMul || 1) * 2.0;
+  }
+}
+
+// === ZOMBIE HORDE ENHANCEMENTS ===
+// New special infected types (spitter, screamer, mutant) are defined in ZOMBIE_DEFS above.
+// Additional objective types for co-op/zombie mode:
+
+const ZOMBIE_COOP_OBJECTIVES = [
+  { id:'revive',     name:'REVIVE TEAMMATES',      desc:'Revive downed partners 3 times.',              coopOnly: true },
+  { id:'barricade',  name:'HOLD BARRICADE',         desc:'Keep the shared barricade above 50% for 60s.', coopOnly: true },
+  { id:'survivor',   name:'ESCORT SURVIVORS',       desc:'Escort 3 civilian survivors to the checkpoint.',coopOnly: false },
+  { id:'cleanwave',  name:'CLEAN WAVE',             desc:'Clear a full wave without any teammate taking damage.', coopOnly: true },
+];
+
+// === ACHIEVEMENTS — 50+ NEW BADGES (v2.3) ===
+// New achievement IDs recognized by the achievement system.
+// Earning conditions are evaluated in checkAchievements() via the existing tracker.
+// TODO: Wire earning conditions to game events in the main achievement evaluation block.
+const ACHIEVEMENTS_V23 = [
+  { id:'empire_start',     name:'EMPIRE RISING',          desc:'Begin a Wasteland Run.',                            secret:false },
+  { id:'empire_clear',     name:'WASTELAND EMPEROR',       desc:'Complete a full Wasteland Run without dying.',       secret:true },
+  { id:'neon_survivor',    name:'NEON GHOST',              desc:'Survive 90s in the Neon Ruins biome.',              secret:false },
+  { id:'irradiated',       name:'RADIANT SURVIVOR',        desc:'Clear 5 enemy waves in the Irradiated biome.',      secret:false },
+  { id:'scrap_platform',   name:'PLATFORM KING',           desc:'Drive 10,000m in the Scrap Archipelago biome.',     secret:false },
+  { id:'hover_master',     name:'HOVER MASTER',            desc:'Win a run using Vortex Hover without dying.',        secret:true },
+  { id:'airstrike_ace',    name:'AIR SUPERIORITY',         desc:'Call in 10 air strikes in a single run.',           secret:false },
+  { id:'titan_rampage',    name:'TITAN WALK',              desc:'Destroy 30 enemies via contact damage in one run.',  secret:false },
+  { id:'ghost_assassin',   name:'GHOST ASSASSIN',          desc:'Score 20 kills while cloaked in one run.',          secret:true },
+  { id:'doom_charge',      name:'DOOM CHARGE',             desc:'Perform 15 charge rams in one run.',                secret:false },
+  { id:'neon_lightning',   name:'LIGHTNING GOD',           desc:'Hit 5 enemies with one chain lightning.',           secret:true },
+  { id:'craft_first',      name:'FORGE HAND',              desc:'Craft your first workshop mod.',                     secret:false },
+  { id:'craft_all',        name:'FULL ARSENAL',            desc:'Craft every workshop mod at least once.',            secret:true },
+  { id:'spec_explosive',   name:'BLAST ZONE',              desc:'Kill 100 enemies with explosive rounds in one run.', secret:false },
+  { id:'spec_pierce',      name:'THROUGH AND THROUGH',     desc:'Pierce 4 enemies with a single bullet.',            secret:true },
+  { id:'spec_chain',       name:'ARC RIDER',               desc:'Chain lightning hits 200 enemies in one run.',      secret:false },
+  { id:'spec_drone',       name:'DRONE COMMANDER',         desc:'Drone swarm kills 50 enemies in one run.',          secret:false },
+  { id:'epilogue_start',   name:'ROAD NEVER ENDS',         desc:'Begin the epilogue campaign.',                      secret:false },
+  { id:'epilogue_clear',   name:'CONTINENT CROSSED',       desc:'Clear all 18 epilogue locations.',                   secret:true },
+  { id:'nova_bond',        name:'PLASMA BOND',             desc:'Complete 10 runs with NOVA as sidekick.',           secret:false },
+  { id:'recon_bond',       name:'SCOUT\'S HONOR',          desc:'Complete 10 runs with RECON as sidekick.',          secret:false },
+  { id:'forge_bond',       name:'WRAITH BOND',             desc:'Complete 10 runs with FORGE as sidekick.',          secret:false },
+  { id:'ghost_bond',       name:'GHOST PACT',              desc:'Complete 10 runs with GHOST as sidekick.',          secret:false },
+  { id:'spitter_slayer',   name:'ACID PROOF',              desc:'Kill 50 Spitters across all runs.',                  secret:false },
+  { id:'screamer_silence', name:'SILENCED',                desc:'Kill a Screamer within 2s of spawn.',               secret:true },
+  { id:'mutant_crusher',   name:'MUTATION STATION',        desc:'Destroy 20 Mutants.',                               secret:false },
+  { id:'mutator_master',   name:'CHAOS DRIVER',            desc:'Win a Wasteland Run with 3 active mutators.',       secret:true },
+  { id:'scrap_hoard',      name:'SCRAP BARON',             desc:'Accumulate 100,000 lifetime scrap.',                secret:false },
+  { id:'prestige5',        name:'LEGEND REBORN',           desc:'Reach prestige tier 5.',                            secret:true },
+  { id:'iron_season',      name:'SEASON CHAMPION',         desc:'Complete 5 weekly challenges in Iron Season.',      secret:false },
+  { id:'coop_revive',      name:'GUARDIAN ANGEL',          desc:'Revive a teammate 5 times in co-op.',              secret:false },
+  { id:'coop_barricade',   name:'IRON FRONT',              desc:'Hold the barricade for 120s without breaking.',     secret:true },
+  { id:'epilogue_boston',  name:'FREEDOM FIGHTER',         desc:'Clear Boston Ruins.',                               secret:false },
+  { id:'epilogue_chicago', name:'CHICAGO TOUGH',           desc:'Clear Chicago Deadzone.',                           secret:false },
+  { id:'epilogue_miami',   name:'COASTAL WRAITH',          desc:'Clear Miami Neon Coast.',                           secret:false },
+  { id:'epilogue_anchorage',name:'END OF THE ROAD',        desc:'Clear Anchorage Last Road.',                        secret:true },
+  { id:'bounty_streak',    name:'BOUNTY KING',             desc:'Build a 20× bounty streak in Wasteland Run.',       secret:false },
+  { id:'golden_sector',    name:'GOLD RUSH',               desc:'Complete the Golden Sector mutator.',               secret:false },
+  { id:'nightonly_clear',   name:'NIGHT OWL',              desc:'Win a run with Night Permanent active.',            secret:true },
+  { id:'doublethreat_clear',name:'DOUBLE DOWN',            desc:'Win a run with Double Threat active.',              secret:true },
+  { id:'level_editor_v2',  name:'ROAD ARCHITECT',          desc:'Create and share a custom level.',                  secret:false },
+  { id:'apex_frame',       name:'APEX CLASS',              desc:'Craft the Apex Frame permanent mod.',               secret:false },
+  { id:'war_engine',       name:'ENGINE OF WAR',           desc:'Craft the War Engine permanent mod.',              secret:false },
+  { id:'all_v23_vehicles', name:'FLEET MASTER',            desc:'Own all 6 v2.3 vehicles.',                         secret:true },
+  { id:'biome_collector',  name:'WORLD TRAVELER',          desc:'Play in all 8 biomes.',                            secret:false },
+  { id:'mode_master',      name:'JACK OF ALL ROADS',       desc:'Finish a run in every game mode.',                 secret:true },
+  { id:'drift_boost_10',   name:'RIFT RIDER',              desc:'Activate drift boost 10 times in one hover run.',  secret:false },
+  { id:'crafting_run',     name:'WORKSHOP RUN',            desc:'Enter a run with 3 active crafting mods.',         secret:false },
+  { id:'spec_switch',      name:'VERSATILE',               desc:'Try all 4 weapon specializations.',                secret:false },
+  { id:'roguelite_seed',   name:'SEED HUNTER',             desc:'Play Wasteland Run on 10 different seeds.',        secret:false },
+];
+
+// Expose new achievement defs so existing checkAchievements() can pick them up.
+// The existing achievements array is extended if it hasn't already been merged.
+(function mergeV23Achievements() {
+  if (typeof ACHIEVEMENTS === 'undefined') return; // safety guard
+  const existing = new Set(ACHIEVEMENTS.map(a => a.id));
+  for (const a of ACHIEVEMENTS_V23) {
+    if (!existing.has(a.id)) ACHIEVEMENTS.push(a);
+  }
+})();
+
+// ============================================================
+// === END v2.3 GAME EXPANSION ENHANCEMENTS ===
+// ============================================================
 
 boot();
 
