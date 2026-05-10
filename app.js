@@ -2692,6 +2692,8 @@ const SETTINGS_KEY = 'mojaveRun_settings_v1';
 const Settings = {
   // master volume multiplier 0..1
   master: 1.0,
+  // music/ambient volume multiplier 0..1 (combines with master)
+  music: 0.72,
   // SFX volume multiplier 0..1 (combines with master)
   sfx: 1.0,
   // screen-shake intensity multiplier 0..1.5
@@ -2725,6 +2727,7 @@ const Settings = {
       if (!raw) return;
       const o = JSON.parse(raw);
       if (typeof o.master === 'number')    this.master    = clampSet(o.master, 0, 1);
+      if (typeof o.music === 'number')     this.music     = clampSet(o.music, 0, 1);
       if (typeof o.sfx === 'number')       this.sfx       = clampSet(o.sfx, 0, 1);
        if (typeof o.shake === 'number')     this.shake     = clampSet(o.shake, 0, 1.5);
        if (typeof o.particles === 'number') this.particles = clampSet(o.particles, 0, 1.5);
@@ -2742,7 +2745,7 @@ const Settings = {
   save() {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-        master: this.master, sfx: this.sfx, shake: this.shake,
+        master: this.master, music: this.music, sfx: this.sfx, shake: this.shake,
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
         cinematic: this.cinematic, colorBlind: this.colorBlind, reducedMotion: this.reducedMotion,
@@ -3028,113 +3031,308 @@ if (window.visualViewport) {
 // AUDIO
 // ============================================================
 let audioCtx = null;
-const GUNSHOT_PITCH_JITTER_WIDTH = 32;
-const GUNSHOT_CRACK_MIN_SAMPLES = 64;
-const GUNSHOT_CRACK_FILTER_BASE_FREQ = 2600;
-const GUNSHOT_CRACK_FILTER_FREQ_VARIANCE = 500;
-const GUNSHOT_CRACK_FILTER_Q = 0.7;
-const gunshotCrackBufferCache = new Map();
+let audioMasterGain = null;
+let audioSfxGain = null;
+let audioMusicGain = null;
+let audioCompressor = null;
+const noiseBufferCache = new Map();
+const loopNoiseBufferCache = new Map();
+const musicState = {
+  mode: 'menu',
+  nextBeatTime: 0,
+  step: 0,
+};
+const ambientState = {
+  src: null,
+  filter: null,
+  gain: null,
+};
+const MUSIC_LOOKAHEAD_SECONDS = 0.24;
+const MUSIC_MIN_NOTE = 35;
+const MUSIC_MAX_NOTE = 3200;
+const MUSIC_STATE_PRESETS = {
+  menu: {
+    bpm: 82,
+    root: 174,
+    wave: 'triangle',
+    seq: [0, 2, 4, 3, 2, 5, 4, 2],
+    bassSeq: [0, 0, 4, 3],
+    scale: [0, 2, 3, 5, 7, 10],
+    noteDur: 0.2,
+    gain: 0.024,
+  },
+  loading: {
+    bpm: 96,
+    root: 184,
+    wave: 'square',
+    seq: [0, 1, 3, 4, 2, 4, 5, 3],
+    bassSeq: [0, 1, 2, 1],
+    scale: [0, 2, 5, 7, 9, 10],
+    noteDur: 0.16,
+    gain: 0.023,
+  },
+  playing: {
+    bpm: 112,
+    root: 156,
+    wave: 'sawtooth',
+    seq: [0, 2, 1, 3, 2, 4, 1, 5],
+    bassSeq: [0, 0, 3, 2],
+    scale: [0, 2, 3, 5, 7, 8, 10],
+    noteDur: 0.14,
+    gain: 0.02,
+  },
+  boss: {
+    bpm: 138,
+    root: 110,
+    wave: 'sawtooth',
+    seq: [0, 1, 0, 2, 0, 3, 1, 2],
+    bassSeq: [0, 0, 1, 0],
+    scale: [0, 1, 3, 5, 6, 8, 10],
+    noteDur: 0.12,
+    gain: 0.026,
+  },
+  pause: {
+    bpm: 58,
+    root: 146,
+    wave: 'sine',
+    seq: [0, 2, 1, 2],
+    bassSeq: [0, 0],
+    scale: [0, 3, 5, 7, 10],
+    noteDur: 0.3,
+    gain: 0.016,
+  },
+  victory: {
+    bpm: 126,
+    root: 220,
+    wave: 'triangle',
+    seq: [0, 2, 4, 6, 4, 7, 6, 4],
+    bassSeq: [0, 4, 3, 5],
+    scale: [0, 2, 4, 5, 7, 9, 11],
+    noteDur: 0.19,
+    gain: 0.03,
+  },
+  gameover: {
+    bpm: 74,
+    root: 123,
+    wave: 'triangle',
+    seq: [0, 2, 1, 0, 3, 2, 1, 0],
+    bassSeq: [0, 0, 2, 1],
+    scale: [0, 1, 3, 5, 6, 8, 10],
+    noteDur: 0.24,
+    gain: 0.022,
+  },
+};
+const BIOME_MUSIC_ROOT_MUL = {
+  wastes: 1,
+  saltflats: 1.08,
+  ash: 0.92,
+  redcanyon: 0.9,
+  midnight: 0.86,
+  neonruins: 1.2,
+  irradiated: 0.95,
+  scraparch: 1.05,
+};
+
+function initAudioGraph() {
+  if (!audioCtx || audioMasterGain) return;
+  audioMasterGain = audioCtx.createGain();
+  audioSfxGain = audioCtx.createGain();
+  audioMusicGain = audioCtx.createGain();
+  audioCompressor = audioCtx.createDynamicsCompressor();
+  audioCompressor.threshold.value = -21;
+  audioCompressor.knee.value = 22;
+  audioCompressor.ratio.value = 2.5;
+  audioCompressor.attack.value = 0.003;
+  audioCompressor.release.value = 0.19;
+  audioSfxGain.connect(audioMasterGain);
+  audioMusicGain.connect(audioMasterGain);
+  audioMasterGain.connect(audioCompressor);
+  audioCompressor.connect(audioCtx.destination);
+  updateAudioMix();
+}
+function updateAudioMix() {
+  if (!audioCtx || !audioMasterGain || !audioSfxGain || !audioMusicGain) return;
+  const t = audioCtx.currentTime;
+  const master = Math.max(0, Math.min(1, Settings.master || 0));
+  const sfx = Math.max(0, Math.min(1, Settings.sfx || 0));
+  const music = Math.max(0, Math.min(1, Settings.music || 0));
+  audioMasterGain.gain.setTargetAtTime(master * master, t, 0.02);
+  audioSfxGain.gain.setTargetAtTime(Math.pow(sfx, 1.25), t, 0.02);
+  audioMusicGain.gain.setTargetAtTime(Math.pow(music, 1.35), t, 0.12);
+}
 function ensureAudio() {
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (audioCtx) initAudioGraph();
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+  updateAudioMix();
 }
-function getGunshotCrackBuffer(length) {
+function getNoiseBuffer(length, tailoff = true) {
   if (!audioCtx || length <= 0) return null;
-  let buf = gunshotCrackBufferCache.get(length);
+  const cache = tailoff ? noiseBufferCache : loopNoiseBufferCache;
+  let buf = cache.get(length);
   if (buf) return buf;
   buf = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
   const data = buf.getChannelData(0);
-  for (let sampleIndex = 0; sampleIndex < data.length; sampleIndex++) data[sampleIndex] = (Math.random() * 2 - 1) * (1 - sampleIndex / data.length);
-  gunshotCrackBufferCache.set(length, buf);
+  for (let sampleIndex = 0; sampleIndex < data.length; sampleIndex++) {
+    const base = (Math.random() * 2 - 1);
+    data[sampleIndex] = tailoff ? base * (1 - sampleIndex / data.length) : base;
+  }
+  cache.set(length, buf);
   return buf;
 }
-function blip(freq, dur, type='square', vol=0.08, slide=0) {
-  if (!audioCtx) return;
-  vol *= Settings.master * Settings.sfx;
+function tone(freq, dur, type='square', vol=0.08, slide=0, when=0, destination=audioSfxGain, q = 0.0001) {
+  if (!audioCtx || !destination) return;
   if (vol <= 0.0001) return;
-  const t = audioCtx.currentTime;
+  const t = Math.max(audioCtx.currentTime, when || 0);
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   o.type = type;
-  o.frequency.setValueAtTime(freq, t);
-  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+  o.frequency.setValueAtTime(Math.max(MUSIC_MIN_NOTE, Math.min(MUSIC_MAX_NOTE, freq)), t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, Math.max(1, freq + slide)), t + dur);
   g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(audioCtx.destination);
+  g.gain.exponentialRampToValueAtTime(Math.max(q, 0.0001), t + dur);
+  o.connect(g).connect(destination);
   o.start(t); o.stop(t + dur);
 }
-function noise(dur, vol=0.12, filterFreq=800) {
-  if (!audioCtx) return;
-  vol *= Settings.master * Settings.sfx;
+function filteredNoise(dur, vol=0.12, filterFreq=800, when=0, destination=audioSfxGain, filterType='lowpass', q=0.8) {
+  if (!audioCtx || !destination) return;
   if (vol <= 0.0001) return;
-  const t = audioCtx.currentTime;
-  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i/data.length);
+  const t = Math.max(audioCtx.currentTime, when || 0);
+  const len = Math.max(64, Math.floor(audioCtx.sampleRate * dur));
+  const buf = getNoiseBuffer(len, true);
+  if (!buf) return;
   const src = audioCtx.createBufferSource(); src.buffer = buf;
-  const f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = filterFreq;
+  const f = audioCtx.createBiquadFilter();
+  f.type = filterType;
+  f.frequency.value = filterFreq;
+  f.Q.value = q;
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  src.connect(f).connect(g).connect(audioCtx.destination);
+  src.connect(f).connect(g).connect(destination);
   src.start(t);
 }
-function gunShot(baseFreq=140, dur=0.07, vol=0.1, crackVol=0.5) {
-  if (!audioCtx) return;
-  const outVol = vol * Settings.master * Settings.sfx;
-  if (outVol <= 0.0001) return;
+function gunShot(baseFreq=132, dur=0.085, vol=0.12, crackVol=0.55) {
+  if (!audioCtx || !audioSfxGain) return;
   const t = audioCtx.currentTime;
-
-  // Low-frequency thump — sub-200 Hz punch felt as impact, not heard as a beep
-  const kick = audioCtx.createOscillator();
-  const kickEnv = audioCtx.createGain();
-  kick.type = 'sine';
-  const kickFreq = baseFreq * (1 + (Math.random() - 0.5) * 0.14);
-  kick.frequency.setValueAtTime(kickFreq, t);
-  kick.frequency.exponentialRampToValueAtTime(Math.max(24, kickFreq * 0.2), t + 0.038);
-  kickEnv.gain.setValueAtTime(outVol, t);
-  kickEnv.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-  kick.connect(kickEnv).connect(audioCtx.destination);
-  kick.start(t); kick.stop(t + 0.045);
-
-  // High-frequency noise crack — crisp, non-tonal shot character
-  const crackDur = Math.max(0.022, dur * 0.5);
-  const crackSamples = Math.max(GUNSHOT_CRACK_MIN_SAMPLES, Math.floor(audioCtx.sampleRate * crackDur));
-  const crackBuf = getGunshotCrackBuffer(crackSamples);
-  if (crackBuf) {
-    const crack = audioCtx.createBufferSource();
-    crack.buffer = crackBuf;
-    const crackFilter = audioCtx.createBiquadFilter();
-    crackFilter.type = 'bandpass';
-    crackFilter.frequency.setValueAtTime(GUNSHOT_CRACK_FILTER_BASE_FREQ + Math.random() * GUNSHOT_CRACK_FILTER_FREQ_VARIANCE, t);
-    crackFilter.Q.value = GUNSHOT_CRACK_FILTER_Q;
-    const crackGain = audioCtx.createGain();
-    crackGain.gain.setValueAtTime(outVol * crackVol, t);
-    crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
-    crack.connect(crackFilter).connect(crackGain).connect(audioCtx.destination);
-    crack.start(t);
+  const outVol = vol;
+  if (outVol <= 0.0001) return;
+  const punch = baseFreq * (1 + (Math.random() - 0.5) * 0.2);
+  tone(punch, 0.045, 'sine', outVol * 1.25, -96, t, audioSfxGain);
+  tone(baseFreq * 2.3, dur, 'triangle', outVol * 0.28, -110, t + 0.004, audioSfxGain);
+  filteredNoise(Math.max(0.018, dur * 0.55), outVol * crackVol, 2800 + Math.random() * 900, t, audioSfxGain, 'bandpass', 1.1);
+  filteredNoise(0.06, outVol * 0.15, 800, t + 0.008, audioSfxGain, 'lowpass', 0.8);
+}
+function musicFreq(root, semitone) {
+  return root * Math.pow(2, semitone / 12);
+}
+function resolveMusicMode() {
+  if (Game.state === 'loading') return 'loading';
+  if (Game.state === 'victory') return 'victory';
+  if (Game.state === 'gameover' || Game.state === 'dying') return 'gameover';
+  if (Game.state === 'playing') {
+    if (Game.paused) return 'pause';
+    if (Game.boss || Game.bossWarning > 0 || Game.mode === 'bossrush' || Game.mode === 'ironthrone') return 'boss';
+    return 'playing';
+  }
+  return 'menu';
+}
+function updateAmbientBed(mode, preset) {
+  if (!audioCtx || !audioMusicGain) return;
+  const playAmbient = mode !== 'menu' && mode !== 'gameover' && mode !== 'victory';
+  const t = audioCtx.currentTime;
+  if (!playAmbient) {
+    if (ambientState.gain) ambientState.gain.gain.setTargetAtTime(0.0001, t, 0.25);
+    return;
+  }
+  if (!ambientState.src) {
+    const src = audioCtx.createBufferSource();
+    src.buffer = getNoiseBuffer(Math.max(2048, Math.floor(audioCtx.sampleRate * 2.4)), false);
+    src.loop = true;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.0001;
+    src.connect(filter).connect(gain).connect(audioMusicGain);
+    src.start();
+    ambientState.src = src;
+    ambientState.filter = filter;
+    ambientState.gain = gain;
+  }
+  const biomeMul = BIOME_MUSIC_ROOT_MUL[Game.biome] || 1;
+  const stormMul = Game.isStorm ? 1.35 : 1;
+  const nightMul = Game.isNight ? 0.78 : 1;
+  const targetFreq = Math.max(120, Math.min(2200, preset.root * 8 * biomeMul * stormMul * nightMul));
+  const targetGain = (mode === 'pause' ? 0.0032 : 0.0065) * (Game.isStorm ? 1.35 : 1);
+  ambientState.filter.frequency.setTargetAtTime(targetFreq, t, 0.35);
+  ambientState.filter.Q.setTargetAtTime(Game.isStorm ? 1.3 : 0.8, t, 0.35);
+  ambientState.gain.gain.setTargetAtTime(targetGain, t, 0.4);
+}
+function scheduleMusicBeat(when, mode, preset) {
+  if (!audioCtx || !audioMusicGain) return;
+  const step = musicState.step;
+  const seqIndex = preset.seq[step % preset.seq.length];
+  const scaleSemitone = preset.scale[seqIndex % preset.scale.length];
+  const biomeMul = BIOME_MUSIC_ROOT_MUL[Game.biome] || 1;
+  const root = preset.root * biomeMul * (Game.isNight ? 0.96 : 1) * (Game.isStorm ? 1.02 : 1);
+  const melodyOct = (step % 4 === 3) ? 12 : 0;
+  const melodyFreq = musicFreq(root, scaleSemitone + melodyOct);
+  const melodyDur = preset.noteDur * (Game.isStorm ? 0.93 : 1);
+  tone(melodyFreq, melodyDur, preset.wave, preset.gain, -18, when, audioMusicGain, 0.0004);
+  if (step % 2 === 0) {
+    const bassIdx = preset.bassSeq[Math.floor(step / 2) % preset.bassSeq.length] % preset.scale.length;
+    const bassSemitone = preset.scale[bassIdx] - 12;
+    tone(musicFreq(root, bassSemitone), Math.max(0.14, melodyDur * 1.2), 'sine', preset.gain * 0.72, -6, when, audioMusicGain, 0.0004);
+  }
+  if (mode === 'boss' && step % 2 === 0) {
+    filteredNoise(0.05, 0.013, 1700 + Math.random() * 600, when, audioMusicGain, 'bandpass', 0.95);
+  }
+  if (mode === 'victory' && step % 4 === 0) {
+    tone(musicFreq(root, 19), 0.16, 'triangle', preset.gain * 0.65, -4, when + 0.05, audioMusicGain, 0.0004);
   }
 }
+const AudioEngine = {
+  update() {
+    if (!audioCtx || !audioMusicGain || !audioSfxGain || !audioMasterGain) return;
+    updateAudioMix();
+    const mode = resolveMusicMode();
+    const preset = MUSIC_STATE_PRESETS[mode] || MUSIC_STATE_PRESETS.menu;
+    if (musicState.mode !== mode) {
+      musicState.mode = mode;
+      musicState.step = 0;
+      musicState.nextBeatTime = audioCtx.currentTime + 0.04;
+    }
+    updateAmbientBed(mode, preset);
+    if ((Settings.music || 0) <= 0.0001 || (Settings.master || 0) <= 0.0001) return;
+    if (!musicState.nextBeatTime || musicState.nextBeatTime < audioCtx.currentTime - 1) musicState.nextBeatTime = audioCtx.currentTime + 0.02;
+    const beat = Math.max(0.08, (60 / preset.bpm) * 0.5);
+    while (musicState.nextBeatTime < audioCtx.currentTime + MUSIC_LOOKAHEAD_SECONDS) {
+      scheduleMusicBeat(musicState.nextBeatTime, mode, preset);
+      musicState.nextBeatTime += beat;
+      musicState.step++;
+    }
+  },
+};
 const SFX = {
-  shoot: () => gunShot(140, 0.07, 0.1, 0.5),
-  bigShot: () => { gunShot(100, 0.12, 0.15, 0.65); noise(0.18, 0.09, 900); },
-  hit:   () => { noise(0.18, 0.18, 1200); blip(120, 0.18, 'sawtooth', 0.06, -60); },
-  pickup:() => { blip(660, 0.06, 'triangle', 0.08); setTimeout(()=>blip(990,0.08,'triangle',0.08),50); },
-  scrap: () => { blip(880, 0.04, 'triangle', 0.06); setTimeout(()=>blip(1320,0.06,'triangle',0.06),40); },
-  explode:() => { noise(0.45, 0.25, 600); blip(80, 0.4, 'sawtooth', 0.1, -40); },
-  bigBoom:() => { noise(0.7, 0.35, 400); blip(50, 0.6, 'sawtooth', 0.15, -30); },
-  death: () => { blip(220,0.4,'sawtooth',0.12,-180); noise(0.6,0.3,500); },
-  start: () => { blip(440,0.08,'square',0.06); setTimeout(()=>blip(660,0.08,'square',0.06),80); setTimeout(()=>blip(880,0.12,'square',0.06),160); },
-  victory:() => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>blip(f,0.18,'square',0.08),i*120)); },
-  levelUp:() => { [659,880].forEach((f,i)=>setTimeout(()=>blip(f,0.12,'triangle',0.08),i*100)); },
-  boss:   () => { blip(110,0.4,'sawtooth',0.12,-30); setTimeout(()=>blip(82,0.4,'sawtooth',0.12,-20),200); },
-  click:  () => blip(550, 0.04, 'square', 0.04),
-  powerUp:() => { [523,659,880,1175].forEach((f,i)=>setTimeout(()=>blip(f,0.09,'triangle',0.08),i*60)); },
-  shieldOn:() => { blip(330,0.18,'sine',0.1); setTimeout(()=>blip(660,0.22,'sine',0.08),80); },
-  nitroOn:() => { noise(0.35,0.18,2200); blip(180,0.25,'sawtooth',0.1,400); },
-  combo:  (tier) => { const f = 440 + Math.min(tier,12) * 80; blip(f, 0.08, 'square', 0.06); blip(f*1.5, 0.05, 'triangle', 0.04); },
-  mortar: () => { blip(60,0.5,'sawtooth',0.08,-20); noise(0.35,0.12,500); },
-  rocket: () => { blip(140,0.35,'square',0.07,-60); noise(0.22,0.1,1800); },
+  shoot: () => gunShot(136, 0.08, 0.1, 0.52),
+  bigShot: () => { gunShot(96, 0.13, 0.16, 0.7); filteredNoise(0.24, 0.08, 1000); tone(72, 0.2, 'sawtooth', 0.06, -36); },
+  hit:   () => { filteredNoise(0.16, 0.14, 1400); tone(170, 0.16, 'sawtooth', 0.055, -90); tone(300, 0.07, 'triangle', 0.026, -120, audioCtx ? audioCtx.currentTime + 0.008 : 0); },
+  pickup:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(720, 0.07, 'triangle', 0.07, 120, t); tone(1040, 0.1, 'triangle', 0.06, 160, t + 0.04); },
+  scrap: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(920, 0.04, 'triangle', 0.055, 80, t); tone(1380, 0.055, 'triangle', 0.045, 120, t + 0.03); },
+  explode:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.5, 0.25, 700, t); tone(74, 0.5, 'sawtooth', 0.11, -48, t); tone(145, 0.2, 'triangle', 0.03, -40, t + 0.02); },
+  bigBoom:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.78, 0.34, 480, t); tone(48, 0.72, 'sawtooth', 0.15, -30, t); filteredNoise(0.2, 0.09, 2000, t + 0.02, audioSfxGain, 'bandpass', 0.9); },
+  death: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(230, 0.45, 'sawtooth', 0.12, -180, t); filteredNoise(0.68, 0.28, 520, t + 0.04); tone(88, 0.3, 'triangle', 0.05, -40, t + 0.05); },
+  start: () => { const t = audioCtx ? audioCtx.currentTime : 0; [440, 620, 880].forEach((f, i) => tone(f, 0.11, 'square', 0.055, 60, t + i * 0.08)); },
+  victory:() => { const t = audioCtx ? audioCtx.currentTime : 0; [523, 659, 784, 1047, 1175].forEach((f, i) => tone(f, 0.2, 'triangle', 0.075, 15, t + i * 0.11)); },
+  levelUp:() => { const t = audioCtx ? audioCtx.currentTime : 0; [659, 880, 1108].forEach((f, i) => tone(f, 0.12, 'triangle', 0.07, 40, t + i * 0.07)); },
+  boss:   () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(110, 0.45, 'sawtooth', 0.13, -28, t); tone(82, 0.45, 'sawtooth', 0.12, -22, t + 0.2); filteredNoise(0.2, 0.07, 1400, t + 0.03, audioSfxGain, 'bandpass', 1.2); },
+  click:  () => tone(560, 0.04, 'square', 0.036, -24),
+  powerUp:() => { const t = audioCtx ? audioCtx.currentTime : 0; [523, 659, 880, 1047, 1319].forEach((f, i) => tone(f, 0.09, 'triangle', 0.072, 60, t + i * 0.05)); },
+  shieldOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(300, 0.2, 'sine', 0.095, 70, t); tone(620, 0.28, 'sine', 0.08, 90, t + 0.08); filteredNoise(0.16, 0.03, 2600, t + 0.02, audioSfxGain, 'highpass', 0.75); },
+  nitroOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.42, 0.18, 2400, t); tone(140, 0.3, 'sawtooth', 0.095, 440, t); tone(320, 0.2, 'triangle', 0.03, 480, t + 0.08); },
+  combo:  (tier) => { const f = 430 + Math.min(tier, 12) * 90; tone(f, 0.09, 'square', 0.058, 40); tone(f * 1.5, 0.06, 'triangle', 0.04, 60, audioCtx ? audioCtx.currentTime + 0.01 : 0); },
+  mortar: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(64, 0.54, 'sawtooth', 0.085, -18, t); filteredNoise(0.42, 0.11, 620, t + 0.01); },
+  rocket: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(150, 0.38, 'square', 0.078, -58, t); filteredNoise(0.24, 0.09, 1900, t + 0.01); },
 };
 
 // ============================================================
@@ -9677,6 +9875,7 @@ const UI = {
     wrap.innerHTML = `
       <h2>AUDIO</h2>
       ${slider('MASTER VOLUME', 'master', 0, 1, 0.05)}
+      ${slider('MUSIC VOLUME',  'music',  0, 1, 0.05)}
       ${slider('SFX VOLUME',    'sfx',    0, 1, 0.05)}
       <h2>VISUAL</h2>
       ${slider('SCREEN SHAKE',  'shake',     0, 1.5, 0.1)}
@@ -10603,6 +10802,7 @@ function frame(now) {
       MP.pruneStale();
       sendMpState();
     }
+    AudioEngine.update();
     render();
     if (window.MP && MP.connected) drawMpGhosts();
     updateHint();
