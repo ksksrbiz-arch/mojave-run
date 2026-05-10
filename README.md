@@ -31,6 +31,8 @@ Mobile-first browser game. Zero build for the client, with an optional Node rela
 
 **Keyboard:** `◄ ►` / `A D` steer · `Space` / `Z` / `X` fire · `R` restart · `P` pause · `F` fullscreen
 
+**Controller (Bluetooth/USB on desktop or mobile):** left stick / D-pad steer · `A` fire · `B` special · `Start` pause
+
 ## Vehicles
 
 | Vehicle    | HP  | Top Speed | Accel | Fire Rate | Damage | Cost |

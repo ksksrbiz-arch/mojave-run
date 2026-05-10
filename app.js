@@ -11289,7 +11289,7 @@ let controlHintMode = IS_TOUCH ? 'touch' : 'keyboard';
 const CONTROL_HINT_TEXT = {
   touch: 'DRAG TO STEER · HOLD TO FIRE',
   keyboard: 'A / D OR ← / → TO STEER · SPACE TO FIRE',
-  gamepad: 'LEFT STICK TO STEER · A TO FIRE · B SPECIAL',
+  gamepad: 'CONTROLLER: LEFT STICK TO STEER · A TO FIRE · B SPECIAL',
 };
 function setControlHintMode(mode) {
   if (mode !== 'touch' && mode !== 'keyboard' && mode !== 'gamepad') return;
@@ -11414,6 +11414,7 @@ function frame(now) {
   last = now;
   const frameStart = now;
   try {
+    if (Game.state !== 'playing') GamepadInput.poll();
     if (Game.state === 'playing' || Game.state === 'loading'
         || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
       update(dt);
@@ -14990,7 +14991,11 @@ const ConsoleInput = {
 
   getPlayerPad(playerIndex) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const idx = this.playerPads[playerIndex];
+    let idx = this.playerPads[playerIndex];
+    if (idx === null || !pads[idx] || !pads[idx].connected) {
+      this.assignGamepads();
+      idx = this.playerPads[playerIndex];
+    }
     return (idx !== null && pads[idx]) ? pads[idx] : null;
   },
 
