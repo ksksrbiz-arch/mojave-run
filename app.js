@@ -13046,7 +13046,7 @@ function applyWastelandRunStartBonuses() {
   if (hasMutator('stormfrontier')) { Game.enemyFireMul *= 0.65; Game.scrapMul *= 1.45; Game.pickupRateMul = Math.max(Game.pickupRateMul || 1, 1.25); }
   if (hasMutator('overclocked')) { Game.enemyHpMul *= 1.20; Game.weaponSpecState.fireRateMul = (Game.weaponSpecState.fireRateMul || 1) * 0.75; }
   if (hasMutator('graveyardshift')) Game.isNight = true;
-  if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; } // intended: all incoming damage types, not contact-only
+  if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; }
 }
 
 function pickWastelandRunBiome(seedKey) {
@@ -13193,7 +13193,7 @@ function updateWastelandRun(dt) {
     if (Game.wastelandGraveShiftT <= 0) {
       Game.wastelandGraveShiftT = 55;
       for (let i = 0; i < 6; i++) spawnEnemy('zombie');
-      announceEvent('GRAVEYARD SURGE', '#b0c8ff');
+      announceEvent('GRAVEYARD SHIFT', '#b0c8ff');
     }
   }
   if (hasMutator('doublethreat') && !Game.boss && !Game.bossDeathSeq && Game.distance > 2500 && Math.floor(Game.distance / 2500) > (Game._wrBossSector || 0)) {
