@@ -2920,7 +2920,7 @@ window.addEventListener('keydown', e => {
     cycleQualityMode();
   }
   if (Game.state === 'gameover') {
-    if (key === 'r' || e.key === 'Enter') UI.act('res-again');
+    if (key === 'r' || key === 'enter') UI.act('res-again');
   }
 }, { passive:false });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
