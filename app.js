@@ -441,6 +441,7 @@ function applyVehicleBranchStats(st, branchDef) {
 
 const MODES = [
   { id: 'classic',    name: 'CLASSIC',     desc: 'Endless run. Survive as long as you can. Difficulty climbs forever.' },
+  { id: 'winding',    name: 'WINDING RUN', desc: 'Procedural winding highway. Faster pace, shifting bends, and no straight shots.' },
   { id: 'campaign',   name: 'CAMPAIGN',    desc: 'Drive coast to coast. 18 US locations, 72 levels, story, bosses & sidekicks.' },
   { id: 'gauntlet',   name: 'GAUNTLET',    desc: '18 tiered sectors. Clear objectives. Multi-biome bosses every 4-6 levels.' },
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
@@ -1549,6 +1550,10 @@ const Profile = {
           p.bestBossRush = 0;
           dirty = true;
         }
+        if (typeof p.bestWinding !== 'number') {
+          p.bestWinding = 0;
+          dirty = true;
+        }
         p.ownedVehicles = p.ownedVehicles || { rustbucket: true };
         p.vehicleUpgrades = p.vehicleUpgrades || {};
         p.vehicleBranches = p.vehicleBranches || {};
@@ -1624,6 +1629,7 @@ const Profile = {
       bestClassic: 0,
       bestTime: 0,
       bestBossRush: 0,
+      bestWinding: 0,
       bestDistance: 0,
       bestZombie: 0,
       bestIronThrone: 0,
@@ -1793,9 +1799,10 @@ const Profile = {
     const p = this.active(); if (!p) return;
     p.runs += 1;
     if (result.mode === 'classic' && result.score > p.bestClassic) p.bestClassic = result.score;
+    if (result.mode === 'winding' && result.score > (p.bestWinding || 0)) p.bestWinding = result.score;
     if (result.mode === 'timeattack' && result.score > p.bestTime) p.bestTime = result.score;
     if (result.mode === 'bossrush' && result.score > (p.bestBossRush || 0)) p.bestBossRush = result.score;
-    if (result.mode === 'classic' && result.distance > p.bestDistance) p.bestDistance = result.distance;
+    if ((result.mode === 'classic' || result.mode === 'winding') && result.distance > p.bestDistance) p.bestDistance = result.distance;
     if (result.mode === 'zombie' && result.score > (p.bestZombie || 0)) p.bestZombie = result.score;
     if ((result.kills || 0) > (p.bestKills || 0)) p.bestKills = result.kills || 0;
     if ((result.comboBest || 0) > (p.bestCombo || 0)) p.bestCombo = result.comboBest || 0;
@@ -2236,7 +2243,8 @@ function resize() {
   ctx.imageSmoothingEnabled = false;
   rebuildGradients();
   if (Game.player) {
-    const { x0, x1 } = roadBounds();
+    const py = Game.player.y || (H - 110);
+    const { x0, x1 } = roadBounds(py);
     Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
     Game.player.y = H - 110;
   }
@@ -2384,11 +2392,29 @@ const PARTICLE_SCALE = IS_MOBILE ? 0.65 : 1;
 function aabb(a,b){return Math.abs(a.x-b.x)*2<(a.w+b.w)&&Math.abs(a.y-b.y)*2<(a.h+b.h);}
 
 function roadBounds() {
+  const y = arguments.length ? arguments[0] : (H * 0.5);
   const roadFrac = W < 600 ? 0.86 : 0.74;
   const roadW = Math.min(W * roadFrac, 720);
-  const x0 = (W - roadW) / 2;
+  const center = W * 0.5 + getWindingRoadShift(y);
+  const minX0 = 8;
+  const maxX0 = Math.max(minX0, W - roadW - 8);
+  const x0 = clamp(center - roadW / 2, minX0, maxX0);
   const x1 = x0 + roadW;
   return { x0, x1, w: roadW };
+}
+
+function getWindingRoadShift(y = H * 0.5) {
+  if (!Game || Game.mode !== 'winding' || !Game.windingRoad) return 0;
+  const wr = Game.windingRoad;
+  const yNorm = clamp(y / Math.max(1, H), 0, 1);
+  const pace = 1 + Math.min(1.35, (Game.distance || 0) / 4500);
+  const ampScale = 0.35 + 0.65 * (1 - yNorm);
+  const amp = wr.amp * ampScale * (1 + Math.min(0.4, (Game.distance || 0) / 14000));
+  const t = (Game.t || 0) * wr.curveSpeed * pace + (Game.distance || 0) * wr.distanceFreq + wr.seed;
+  const swayA = Math.sin(t + yNorm * wr.waveA);
+  const swayB = Math.sin(t * wr.waveMul + yNorm * wr.waveB + wr.seed2);
+  const drift = Math.sin((Game.t || 0) * wr.driftFreq + wr.seed3) * wr.driftAmp;
+  return (swayA * 0.68 + swayB * 0.32) * amp + drift;
 }
 
 function emit(x, y, n, opts = {}) {
@@ -2947,6 +2973,7 @@ const Game = {
   hitFlash: 0,            // brief vehicle hit indicator
   hintTime: 0,
   laneOffset: 0,
+  windingRoad: null,      // procedural curve params for winding mode
   // theme
   isNight: false,
   isStorm: false,
@@ -3164,7 +3191,8 @@ function startRun(mode, level) {
   Game.distance = 0;
   Game.kills = 0;
   Game.civiliansHit = 0;
-  const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1);
+  const speedModeMul = mode === 'winding' ? 1.35 : 1;
+  const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1) * speedModeMul;
   Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
   Game.maxHealth = Math.round(stats.maxHp);
   Game.health = Game.maxHealth;
@@ -3182,6 +3210,24 @@ function startRun(mode, level) {
   Game.popups.length = 0;
   Game.decor.length = 0;
   Game.laneOffset = 0;
+  if (mode === 'winding') {
+    const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
+    Game.windingRoad = {
+      amp: Math.max(24, roadW * 0.22),
+      curveSpeed: 0.95 + rand(-0.12, 0.16),
+      distanceFreq: 0.0018 + rand(0, 0.0012),
+      waveA: 4.8 + rand(-0.8, 1.2),
+      waveB: 9.2 + rand(-1.4, 1.4),
+      waveMul: 1.7 + rand(-0.2, 0.35),
+      driftFreq: 0.32 + rand(0, 0.25),
+      driftAmp: Math.min(54, roadW * 0.16),
+      seed: rand(0, Math.PI * 2),
+      seed2: rand(0, Math.PI * 2),
+      seed3: rand(0, Math.PI * 2),
+    };
+  } else {
+    Game.windingRoad = null;
+  }
   Game._lastStoryDistance = 0; // reset story chapter tracker
   Game.isNight = !!(Game.levelData && Game.levelData.night);
   Game.isStorm = !!(Game.levelData && Game.levelData.storm);
@@ -3272,7 +3318,8 @@ function startRun(mode, level) {
 
 function beginPlaying() {
   Game.state = 'playing';
-  Game.player.x = W * 0.5;
+  const spawnBounds = roadBounds(H - 110);
+  Game.player.x = (spawnBounds.x0 + spawnBounds.x1) * 0.5;
   Game.player.y = H - 110;
   Game.player.vx = 0;
   pauseBtn.classList.add('show');
@@ -4093,7 +4140,8 @@ function updateLoading(dt) {
   const eased = 1 - Math.pow(1 - k, 3);
   const startY = H + 100, endY = H - 110;
   Game.player.y = startY + (endY - startY) * eased;
-  Game.player.x = W * 0.5;
+  const loadBounds = roadBounds(Game.player.y);
+  Game.player.x = (loadBounds.x0 + loadBounds.x1) * 0.5;
   // exhaust trail during entry
   if (Math.random() < 0.85) {
     emitExhaustTrail(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1);
@@ -4403,7 +4451,7 @@ function update(dt) {
   }
 
   // ---- story chapter milestones (classic & zombie modes) ----
-  if (Game.mode === 'classic' || Game.mode === 'zombie') {
+  if (Game.mode === 'classic' || Game.mode === 'winding' || Game.mode === 'zombie') {
     if (!Game._lastStoryDistance) Game._lastStoryDistance = 0;
     const ch = STORY_CHAPTERS.find(c => c.distance > 0 && Game.distance >= c.distance && Game._lastStoryDistance < c.distance);
     if (ch) {
@@ -4494,6 +4542,9 @@ function update(dt) {
   if (Game.mode === 'classic') {
     const lvl = 1 + Math.floor(Game.distance / 1500);
     Game.targetSpeed = 280 + Math.min(420, lvl * 28);
+  } else if (Game.mode === 'winding') {
+    const lvl = 1 + Math.floor(Game.distance / 1200);
+    Game.targetSpeed = 360 + Math.min(460, lvl * 30);
   } else if (Game.mode === 'timeattack') {
     Game.targetSpeed = 360 + Math.min(280, Game.t * 4);
   } else if (Game.levelData) {
@@ -5480,6 +5531,65 @@ function drawBackground() {
 function drawRoad() {
   const t = activeBiomeTheme();
   const { x0, x1, w } = roadBounds();
+  if (Game.mode === 'winding') {
+    const slices = 44;
+    const step = H / slices;
+    const mid = roadBounds(H * 0.5);
+    const roadFill = getRoadGradient(mid.x0, mid.x1);
+
+    ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
+    for (let i = 0; i < slices; i++) {
+      const y = i * step;
+      const b = roadBounds(y + step * 0.5);
+      ctx.fillRect(0, y, b.x0, step + 1);
+      ctx.fillRect(b.x1, y, W - b.x1, step + 1);
+    }
+
+    ctx.fillStyle = roadFill;
+    for (let i = 0; i < slices; i++) {
+      const y = i * step;
+      const b = roadBounds(y + step * 0.5);
+      ctx.fillRect(b.x0, y, b.w, step + 1);
+    }
+
+    ctx.fillStyle = Game.isNight ? t.crackNight : t.crackDay;
+    const crackSeed = Math.floor(Game.laneOffset * 4);
+    for (let i = 0; i < 14; i++) {
+      const cy = ((i * 73 + crackSeed) % (H + 60)) - 30;
+      const b = roadBounds(cy);
+      const cx = b.x0 + ((i * 53 + crackSeed) % Math.max(24, b.w - 24));
+      ctx.fillRect(cx, cy, 24, 2);
+    }
+
+    ctx.fillStyle = '#f5d76e';
+    for (let i = 0; i < slices; i++) {
+      const y = i * step;
+      const b = roadBounds(y + step * 0.5);
+      ctx.fillRect(b.x0 - 2, y, 3, step + 1);
+      ctx.fillRect(b.x1 - 1, y, 3, step + 1);
+    }
+
+    ctx.fillStyle = Game.isNight ? t.lineNight : t.lineDay;
+    const dashH = 28, gap = 32;
+    for (let y = -gap + Game.laneOffset; y < H + gap; y += dashH + gap) {
+      const b = roadBounds(y + dashH * 0.5);
+      const cx = (b.x0 + b.x1) / 2;
+      ctx.fillRect(cx - 3, y, 6, dashH);
+    }
+
+    const lineAlpha = Game.isNight ? 0.30 : 0.18;
+    ctx.fillStyle = `rgba(245,215,110,${lineAlpha})`;
+    const dashH2 = 14, gap2 = 46;
+    for (let y = -gap2 + Game.laneOffset * 0.7; y < H + gap2; y += dashH2 + gap2) {
+      const b = roadBounds(y + dashH2 * 0.5);
+      const lane1x = b.x0 + b.w / 3;
+      const lane2x = b.x0 + (2 * b.w) / 3;
+      ctx.fillRect(lane1x - 1, y, 2, dashH2);
+      ctx.fillRect(lane2x - 1, y, 2, dashH2);
+    }
+    return;
+  }
+
   // shoulder
   ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
   ctx.fillRect(0, 0, x0, H);
@@ -6956,6 +7066,8 @@ function drawHUD() {
   let subL = '';
   if (Game.mode === 'classic') {
     subL = Math.floor(Game.distance) + ' M';
+  } else if (Game.mode === 'winding') {
+    subL = `CURVES ${Math.floor(Game.distance)} M`;
   } else if (Game.mode === 'gauntlet' && Game.levelData) {
     subL = `LV ${Game.levelData.num}/${LEVELS.length}  ${Game.levelData.name}`;
   } else if (Game.mode === 'timeattack') {
@@ -6976,6 +7088,9 @@ function drawHUD() {
   if (Game.mode === 'classic') {
     const lvl = 1 + Math.floor(Game.distance / 1500);
     mainR = 'SECTOR ' + lvl;
+  } else if (Game.mode === 'winding') {
+    const bend = 1 + Math.floor(Game.distance / 1200);
+    mainR = 'BEND ' + bend;
   } else if (Game.mode === 'timeattack') {
     const remain = Math.max(0, 60 - Game.t);
     mainR = remain.toFixed(1) + 'S';
@@ -7205,6 +7320,9 @@ function drawLoadingOverlay() {
   } else if (Game.mode === 'classic') {
     title = 'OPEN ROAD';
     sub = 'ENDLESS · ' + (Game.vehicle ? Game.vehicle.name : '');
+  } else if (Game.mode === 'winding') {
+    title = 'WINDING RUN';
+    sub = 'PROCEDURAL CURVES · ' + (Game.vehicle ? Game.vehicle.name : '');
   } else if (Game.mode === 'zombie') {
     title = 'ZOMBIE HORDE';
     sub = 'THE DEAD ARE COMING · ' + (Game.vehicle ? Game.vehicle.name : '');
@@ -8032,6 +8150,7 @@ const UI = {
       ['SCRAP LIFETIME', p.lifetimeScrap],
       ['RUNS', p.runs],
       ['BEST CLASSIC', p.bestClassic],
+      ['BEST WINDING', p.bestWinding || 0],
       ['BEST TIME ATK', p.bestTime],
       ['BEST BOSS RUSH', p.bestBossRush || 0],
       ['BEST HORDE', p.bestZombie || 0],
@@ -8110,6 +8229,9 @@ const UI = {
     if (Game.mode === 'classic') {
       rows.push(['DISTANCE', Math.floor(Game.distance) + ' M', false]);
       rows.push(['BEST', p.bestClassic, false]);
+    } else if (Game.mode === 'winding') {
+      rows.push(['DISTANCE', Math.floor(Game.distance) + ' M', false]);
+      rows.push(['BEST WINDING', p.bestWinding || 0, false]);
     } else if (Game.mode === 'zombie') {
       rows.push(['DISTANCE', Math.floor(Game.distance) + ' M', false]);
       rows.push(['KILLS', Game.kills, false]);
