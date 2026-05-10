@@ -1123,6 +1123,14 @@ const ACHIEVEMENTS = [
   { id:'wingman',        icon:'\u{1F91D}',     name:'WINGMAN',           desc:'Unlock any sidekick' },
   { id:'scrap_hound',    icon:'\u{1F4B0}',     name:'SCRAP HOUND',       desc:'Earn 10,000 lifetime scrap' },
   { id:'scrap_baron',    icon:'\u{1F48E}',     name:'SCRAP BARON',       desc:'Earn 50,000 lifetime scrap' },
+  { id:'wild_wasteland', icon:'\u{1F3B2}',     name:'WILD WASTELAND',    desc:'Hit a 15-kill streak in a single run', hidden:true, hint:'Get weird enough and the Mojave answers back.' },
+  { id:'big_iron',       icon:'\u{1F920}',     name:'BIG IRON',          desc:'Score 30 kills in a single run', hidden:true, hint:'There is a certain swagger to solving everything with violence.' },
+  { id:'junk_jet',       icon:'\u{1F9F0}',     name:'JUNK JET',          desc:'Earn 1,500 scrap in a single run', hidden:true, hint:'One driver’s roadside trash is another driver’s fortune.' },
+  { id:'lonesome_road',  icon:'\u{1F6E3}\uFE0F', name:'LONESOME ROAD',   desc:'Travel 8,000 m in a single run', hidden:true, hint:'Just keep the motor hot and the ghosts in the rearview.' },
+  { id:'old_world_blues',icon:'\u{1F9E0}',     name:'OLD WORLD BLUES',   desc:'Score 15,000 in Zombie Horde', hidden:true, hint:'The apocalypse can always get sillier.' },
+  { id:'desert_survivalist', icon:'\u{1F343}', name:'DESERT SURVIVALIST', desc:'Finish a run without hitting a single innocent', hidden:true, hint:'Try acting like somebody raised you right.' },
+  { id:'ncr_poster_child', icon:'\u{1F396}\uFE0F', name:'NCR POSTER CHILD', desc:'Finish 5 runs without hitting a single innocent', hidden:true, hint:'Keep your fenders clean long enough and the NCR notices.' },
+  { id:'goodsprings_butcher', icon:'\u{1F62C}', name:'GOODSPRINGS BUTCHER', desc:'Hit 5 innocents in a single run. Even the raiders think that was low.', hidden:true, hint:'Some reputations are earned the hard way.' },
 ];
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
@@ -1175,6 +1183,14 @@ function checkAchievementCondition(id, p) {
       });
     case 'scrap_hound':  return (p.lifetimeScrap || 0) >= 10000;
     case 'scrap_baron':  return (p.lifetimeScrap || 0) >= 50000;
+    case 'wild_wasteland': return (p.bestCombo || 0) >= 15;
+    case 'big_iron':       return (p.bestKills || 0) >= 30;
+    case 'junk_jet':       return (p.bestScrapRun || 0) >= 1500;
+    case 'lonesome_road':  return (p.bestDistance || 0) >= 8000;
+    case 'old_world_blues': return (p.bestZombie || 0) >= 15000;
+    case 'desert_survivalist': return (p.cleanRuns || 0) >= 1;
+    case 'ncr_poster_child': return (p.cleanRuns || 0) >= 5;
+    case 'goodsprings_butcher': return (p.maxCivilianHits || 0) >= 5;
     default: return false;
   }
 }
@@ -1235,6 +1251,12 @@ const Profile = {
         if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
         if (p.activeSidekick === undefined) { p.activeSidekick = null; dirty = true; }
         if (!Array.isArray(p.achievements)) { p.achievements = []; dirty = true; }
+        if (typeof p.bestKills !== 'number') { p.bestKills = 0; dirty = true; }
+        if (typeof p.bestCombo !== 'number') { p.bestCombo = 0; dirty = true; }
+        if (typeof p.bestScrapRun !== 'number') { p.bestScrapRun = 0; dirty = true; }
+        if (typeof p.totalCivilianHits !== 'number') { p.totalCivilianHits = 0; dirty = true; }
+        if (typeof p.maxCivilianHits !== 'number') { p.maxCivilianHits = 0; dirty = true; }
+        if (typeof p.cleanRuns !== 'number') { p.cleanRuns = 0; dirty = true; }
         if (normalizeCosmetics(p, true)) dirty = true;
       });
       if (dirty) this.save();
@@ -1274,6 +1296,12 @@ const Profile = {
       bestBossRush: 0,
       bestDistance: 0,
       bestZombie: 0,
+      bestKills: 0,
+      bestCombo: 0,
+      bestScrapRun: 0,
+      totalCivilianHits: 0,
+      maxCivilianHits: 0,
+      cleanRuns: 0,
       ownedVehicles: { rustbucket: true },
       vehicleUpgrades: { rustbucket: { engine: 0, plating: 0, weapons: 0, reactor: 0 } },
       vehicleBranches: { rustbucket: null },
@@ -1436,6 +1464,12 @@ const Profile = {
     if (result.mode === 'bossrush' && result.score > (p.bestBossRush || 0)) p.bestBossRush = result.score;
     if (result.mode === 'classic' && result.distance > p.bestDistance) p.bestDistance = result.distance;
     if (result.mode === 'zombie' && result.score > (p.bestZombie || 0)) p.bestZombie = result.score;
+    if ((result.kills || 0) > (p.bestKills || 0)) p.bestKills = result.kills || 0;
+    if ((result.comboBest || 0) > (p.bestCombo || 0)) p.bestCombo = result.comboBest || 0;
+    if ((result.scrapEarned || 0) > (p.bestScrapRun || 0)) p.bestScrapRun = result.scrapEarned || 0;
+    p.totalCivilianHits = (p.totalCivilianHits || 0) + (result.civiliansHit || 0);
+    if ((result.civiliansHit || 0) > (p.maxCivilianHits || 0)) p.maxCivilianHits = result.civiliansHit || 0;
+    if ((result.civiliansHit || 0) === 0) p.cleanRuns = (p.cleanRuns || 0) + 1;
     if (result.mode === 'daily' && result.dailySeedKey) {
       p.dailyBest = p.dailyBest || {};
       const prev = p.dailyBest[result.dailySeedKey] || 0;
@@ -2044,6 +2078,18 @@ const RUN_MOMENT_BIG_SCRAP = 1000;
 const RUN_MOMENT_SWEEP_KILLS = 50;
 const RUN_MOMENT_LONG_HAUL_DISTANCE = 2000;
 
+function getWastelandReputation() {
+  if ((Game.civiliansHit || 0) >= 5) return 'GOODSPRINGS BUTCHER';
+  if ((Game.civiliansHit || 0) >= 3) return 'NCR PUBLIC ENEMY';
+  if ((Game.civiliansHit || 0) === 0 && Game.kills >= 30) return 'DESERT SURVIVALIST';
+  if ((Game.comboBest || 0) >= 15) return 'WILD WASTELAND';
+  if (Game.mode === 'zombie' && Game.score >= 15000) return 'OLD WORLD BLUES';
+  if (Game.scrapEarned >= 1500) return 'JUNK JET BARON';
+  if (Game.distance >= 8000) return 'LONESOME ROAD';
+  if (Game.kills >= 30) return 'BIG IRON';
+  return 'MOJAVE DRIFTER';
+}
+
 function comboMult() {
   const c = Game.combo | 0;
   let m = 1;
@@ -2076,6 +2122,7 @@ function applyKill(x, y, baseScore) {
 
 function applyCivilianPenalty(x, y, kind) {
   const penalty = CIVILIAN_PENALTY;
+  Game.civiliansHit = (Game.civiliansHit || 0) + 1;
   Game.score = Math.max(0, Game.score - penalty);
   // break combo
   Game.combo = 0;
@@ -2087,6 +2134,9 @@ function applyCivilianPenalty(x, y, kind) {
     : '⚠ CIVILIAN! -';
   addPopup(label + penalty, x, y - 22, '#4aa8e8', 16);
   shockwave(x, y, 'rgba(74,168,232,0.5)', 80);
+  if (Game.civiliansHit === 1) UI.toast('RADIO: THOSE WERE CIVILIANS', 2200);
+  else if (Game.civiliansHit === 3) UI.toast('NCR DISPATCH: YOU ARE NOW THE STORY', 2500);
+  else if (Game.civiliansHit === 5) UI.toast('EVEN THE RAIDERS THINK THIS IS MESSED UP', 2800);
 }
 
 function isPowerupActive(id) {
@@ -2436,6 +2486,7 @@ const Game = {
   scrapEarned: 0,
   distance: 0,
   kills: 0,
+  civiliansHit: 0,
   speed: 280,
   targetSpeed: 280,
   health: 100,
@@ -2647,6 +2698,7 @@ function startRun(mode, level) {
   Game.scrapEarned = 0;
   Game.distance = 0;
   Game.kills = 0;
+  Game.civiliansHit = 0;
   const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1);
   Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
   Game.maxHealth = Math.round(stats.maxHp);
@@ -2811,6 +2863,10 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     mode: Game.mode,
     score: Math.floor(Game.score),
     distance: Math.floor(Game.distance),
+    kills: Math.floor(Game.kills),
+    comboBest: Math.floor(Game.comboBest || 0),
+    scrapEarned: Math.floor(Game.scrapEarned || 0),
+    civiliansHit: Math.floor(Game.civiliansHit || 0),
     level: Game.level,
     victory: reason === 'victory',
     dailySeedKey: Game.dailySeedKey,
@@ -6898,6 +6954,11 @@ const UI = {
       ['BEST BOSS RUSH', p.bestBossRush || 0],
       ['BEST HORDE', p.bestZombie || 0],
       ['LONGEST RUN', p.bestDistance + ' M'],
+      ['BEST KILL RUN', p.bestKills || 0],
+      ['BEST COMBO', (p.bestCombo || 0) + ' KILL STREAK'],
+      ['BEST SCRAP RUN', p.bestScrapRun || 0],
+      ['INNOCENTS HIT', p.totalCivilianHits || 0],
+      ['CLEAN RUNS', p.cleanRuns || 0],
       ['VEHICLES OWNED', ownedCount + ' / ' + VEHICLES.length],
       ['UPGRADES BUILT', ttlUpgrades],
       ['GAUNTLET', p.gauntletCleared.length + ' / ' + LEVELS.length],
@@ -6929,9 +6990,13 @@ const UI = {
     });
     sorted.forEach(a => {
       const done = earned.has(a.id);
+      const hiddenLocked = !!a.hidden && !done;
       const card = document.createElement('div');
       card.className = 'ach-card' + (done ? ' earned' : '');
-      card.innerHTML = `<div class="ach-icon">${a.icon}</div><div class="ach-body"><div class="ach-name">${escapeHtml(a.name)}</div><div class="ach-desc">${escapeHtml(a.desc)}</div></div>${done ? '<div class="ach-check">\u2713</div>' : ''}`;
+      const icon = hiddenLocked ? '?' : a.icon;
+      const name = hiddenLocked ? 'CLASSIFIED' : a.name;
+      const desc = hiddenLocked ? (a.hint || 'Keep driving. The Mojave gets weird.') : a.desc;
+      card.innerHTML = `<div class="ach-icon">${icon}</div><div class="ach-body"><div class="ach-name">${escapeHtml(name)}</div><div class="ach-desc">${escapeHtml(desc)}</div></div>${done ? '<div class="ach-check">\u2713</div>' : ''}`;
       list.appendChild(card);
     });
     this.show('achievements');
@@ -6984,11 +7049,14 @@ const UI = {
       }
     }
     rows.push(['KILLS', Game.kills, false]);
+    rows.push(['INNOCENTS HIT', Game.civiliansHit || 0, false]);
     rows.push(['TOP COMBO', (Game.comboBest || 0) + ' KILL STREAK', false]);
+    rows.push(['MOJAVE REP', getWastelandReputation(), false]);
     const bestMoment = (() => {
       if (Game.state === 'victory' && Game.mode === 'bossrush') return 'BOSS CHAIN CLEARED';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'boss') return 'BOSS TAKEDOWN';
       if (Game.state === 'victory' && Game.levelData && Game.levelData.obj === 'horde') return 'HORDE BROKEN';
+      if ((Game.civiliansHit || 0) >= 5) return 'THE RADIO HOSTS ARE GOING TO COOK YOU';
       if ((Game.comboBest || 0) >= RUN_MOMENT_LEGENDARY_COMBO) return 'LEGENDARY ×10 MULTIPLIER';
       if ((Game.comboBest || 0) >= RUN_MOMENT_STRONG_COMBO) return 'HIGH-OCTANE COMBO';
       if (Game.scrapEarned >= RUN_MOMENT_BIG_SCRAP) return 'BIG SCRAP HAUL';
