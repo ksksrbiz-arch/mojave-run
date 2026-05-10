@@ -13450,6 +13450,394 @@ const GamepadInput = {
 // === END v2.3 GAME EXPANSION ENHANCEMENTS ===
 // ============================================================
 
+// ============================================================
+// === PHASE 1: MOBILE PLATFORM — PUSH · IAP · CLOUD SYNC ===
+// ============================================================
+
+// --- PUSH NOTIFICATIONS ---
+const PushService = (() => {
+  const PUSH_TOKEN_KEY = 'mojaveRun_push_token';
+  const cap = window.Capacitor;
+  const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+
+  // Notification type definitions — server can target these channels
+  const NOTIFICATION_TYPES = {
+    daily_challenge:  { title: 'DAILY CHALLENGE',       body: 'A new Daily Challenge awaits. Same seed, new glory.' },
+    season_change:    { title: 'NEW SEASON',            body: 'The wasteland shifts. A new season has begun.' },
+    weekly_challenge: { title: 'WEEKLY CHALLENGE',      body: 'This week\'s challenge is live. Earn bonus scrap.' },
+    clan_invite:      { title: 'CLAN INVITE',           body: 'You\'ve been invited to join a clan.' },
+    achievement:      { title: 'ACHIEVEMENT UNLOCKED',  body: 'You earned a new badge!' },
+    iap_reward:       { title: 'PURCHASE COMPLETE',     body: 'Your items are ready in the garage.' },
+  };
+
+  let _token = null;
+  let _permissionGranted = false;
+
+  function savedToken() {
+    try { return localStorage.getItem(PUSH_TOKEN_KEY); } catch (_) { return null; }
+  }
+
+  async function requestPermission() {
+    if (!isNative) return false;
+    try {
+      const PushNotifications = cap.Plugins && cap.Plugins.PushNotifications;
+      if (!PushNotifications) return false;
+      const perm = await PushNotifications.requestPermissions();
+      _permissionGranted = perm.receive === 'granted';
+      if (_permissionGranted) await PushNotifications.register();
+      return _permissionGranted;
+    } catch (e) {
+      console.warn('[push] permission request failed:', e);
+      return false;
+    }
+  }
+
+  function initListeners() {
+    if (!isNative) return;
+    try {
+      const PushNotifications = cap.Plugins && cap.Plugins.PushNotifications;
+      if (!PushNotifications) return;
+
+      PushNotifications.addListener('registration', (token) => {
+        _token = token.value;
+        try { localStorage.setItem(PUSH_TOKEN_KEY, _token); } catch (_) {}
+        registerTokenWithServer(_token);
+      });
+
+      PushNotifications.addListener('registrationError', (err) => {
+        console.warn('[push] registration error:', err);
+      });
+
+      PushNotifications.addListener('pushNotificationReceived', (notification) => {
+        // In-app notification — show as toast
+        const type = notification.data && notification.data.type;
+        const def = NOTIFICATION_TYPES[type];
+        if (def) UI.toast(def.title + ': ' + (notification.body || def.body));
+        else if (notification.body) UI.toast(notification.body);
+      });
+
+      PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        // User tapped notification — deep-link if applicable
+        const data = action.notification && action.notification.data;
+        if (data && data.mode && typeof startRun === 'function') {
+          try { startRun(data.mode); } catch (_) {}
+        }
+      });
+    } catch (e) {
+      console.warn('[push] listener init failed:', e);
+    }
+  }
+
+  function registerTokenWithServer(token) {
+    const base = cloudApiBase();
+    if (!base || !token) return;
+    const cloudId = localStorage.getItem(CLOUD_ID_KEY);
+    const cloudToken = localStorage.getItem(CLOUD_TOKEN_KEY);
+    if (!cloudId || !cloudToken) return;
+    fetch(base + '/api/push/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: cloudId, token: cloudToken, pushToken: token, platform: cap.getPlatform ? cap.getPlatform() : 'unknown' }),
+    }).catch(() => {});
+  }
+
+  return {
+    NOTIFICATION_TYPES,
+    get token() { return _token || savedToken(); },
+    get isAvailable() { return isNative; },
+    get permissionGranted() { return _permissionGranted; },
+    requestPermission,
+    initListeners,
+    registerTokenWithServer,
+  };
+})();
+
+// --- IN-APP PURCHASES ---
+const IAPService = (() => {
+  const cap = window.Capacitor;
+  const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  const IAP_ENTITLEMENTS_KEY = 'mojaveRun_iap_entitlements';
+
+  // Product catalog — IDs must match App Store Connect / Google Play Console
+  const PRODUCTS = [
+    { id: 'com.mojaverun.starter_pack',    type: 'non_consumable', name: 'STARTER PACK',     desc: 'Unlock Sand Viper + 5,000 Scrap',         price: '$2.99',  scrap: 5000,  vehicleUnlock: 'sandviper' },
+    { id: 'com.mojaverun.scrap_500',        type: 'consumable',     name: 'SCRAP CRATE',      desc: '500 Scrap',                                price: '$0.99',  scrap: 500 },
+    { id: 'com.mojaverun.scrap_2500',       type: 'consumable',     name: 'SCRAP HAUL',       desc: '2,500 Scrap',                              price: '$3.99',  scrap: 2500 },
+    { id: 'com.mojaverun.scrap_7500',       type: 'consumable',     name: 'SCRAP FORTUNE',    desc: '7,500 Scrap',                              price: '$9.99',  scrap: 7500 },
+    { id: 'com.mojaverun.premium_pass',     type: 'non_consumable', name: 'WASTELAND PASS',   desc: 'Unlock all vehicles + bonus cosmetics',    price: '$14.99', unlockAllVehicles: true },
+    { id: 'com.mojaverun.no_ads',           type: 'non_consumable', name: 'AD-FREE',          desc: 'Remove all ads forever',                   price: '$4.99',  adFree: true },
+  ];
+
+  let _entitlements = {};
+  let _purchaseInProgress = false;
+
+  function loadEntitlements() {
+    try {
+      _entitlements = JSON.parse(localStorage.getItem(IAP_ENTITLEMENTS_KEY) || '{}');
+    } catch (_) { _entitlements = {}; }
+  }
+
+  function saveEntitlements() {
+    try { localStorage.setItem(IAP_ENTITLEMENTS_KEY, JSON.stringify(_entitlements)); } catch (_) {}
+  }
+
+  function hasEntitlement(productId) {
+    return !!_entitlements[productId];
+  }
+
+  function grantEntitlement(productId) {
+    const product = PRODUCTS.find(p => p.id === productId);
+    if (!product) return;
+    const p = Profile.active();
+    if (!p) return;
+
+    if (product.scrap) {
+      p.scrap = (p.scrap || 0) + product.scrap;
+      p.lifetimeScrap = (p.lifetimeScrap || 0) + product.scrap;
+    }
+    if (product.vehicleUnlock) {
+      p.ownedVehicles = p.ownedVehicles || {};
+      p.ownedVehicles[product.vehicleUnlock] = true;
+    }
+    if (product.unlockAllVehicles) {
+      p.ownedVehicles = p.ownedVehicles || {};
+      if (typeof VEHICLES !== 'undefined') {
+        VEHICLES.forEach(v => { p.ownedVehicles[v.id] = true; });
+      }
+    }
+    if (product.adFree) {
+      p.adFree = true;
+    }
+
+    // Non-consumables are tracked permanently
+    if (product.type === 'non_consumable') {
+      _entitlements[productId] = { grantedAt: Date.now() };
+      saveEntitlements();
+    }
+
+    Profile.save();
+  }
+
+  async function purchase(productId) {
+    if (_purchaseInProgress) { UI.toast('PURCHASE IN PROGRESS…'); return { ok: false, reason: 'busy' }; }
+    if (!isNative) { UI.toast('PURCHASES ONLY AVAILABLE IN THE APP'); return { ok: false, reason: 'not_native' }; }
+
+    const product = PRODUCTS.find(p => p.id === productId);
+    if (!product) return { ok: false, reason: 'unknown_product' };
+    if (product.type === 'non_consumable' && hasEntitlement(productId)) {
+      UI.toast('ALREADY OWNED');
+      return { ok: false, reason: 'already_owned' };
+    }
+
+    _purchaseInProgress = true;
+    try {
+      const InAppPurchases = cap.Plugins && cap.Plugins.InAppPurchases;
+      if (!InAppPurchases) throw new Error('IAP plugin not available');
+
+      UI.toast('PROCESSING PURCHASE…');
+      const result = await InAppPurchases.purchase({ productId });
+
+      if (result && result.transactionId) {
+        // Validate receipt with server
+        const validated = await validateReceipt(productId, result);
+        if (validated) {
+          grantEntitlement(productId);
+          await InAppPurchases.finish({ transactionId: result.transactionId });
+          UI.toast('PURCHASE COMPLETE! ' + product.name);
+          return { ok: true };
+        } else {
+          UI.toast('PURCHASE VALIDATION FAILED — CONTACT SUPPORT');
+          return { ok: false, reason: 'validation_failed' };
+        }
+      }
+      return { ok: false, reason: 'no_transaction' };
+    } catch (e) {
+      const msg = (e && e.message) || 'Unknown error';
+      if (msg.includes('cancel') || msg.includes('Cancel')) {
+        UI.toast('PURCHASE CANCELLED');
+      } else {
+        UI.toast('PURCHASE FAILED: ' + msg);
+        console.warn('[iap] purchase error:', e);
+      }
+      return { ok: false, reason: msg };
+    } finally {
+      _purchaseInProgress = false;
+    }
+  }
+
+  async function validateReceipt(productId, purchaseResult) {
+    const base = cloudApiBase();
+    if (!base) return true; // offline-first: grant without server validation
+    try {
+      const resp = await fetch(base + '/api/iap/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId,
+          transactionId: purchaseResult.transactionId,
+          receipt: purchaseResult.receipt || purchaseResult.originalJson,
+          platform: cap.getPlatform ? cap.getPlatform() : 'unknown',
+        }),
+      });
+      const data = await resp.json();
+      return data && data.ok;
+    } catch (_) {
+      return true; // network failure — grant optimistically, server can reconcile later
+    }
+  }
+
+  async function restorePurchases() {
+    if (!isNative) { UI.toast('RESTORE ONLY AVAILABLE IN THE APP'); return; }
+    try {
+      const InAppPurchases = cap.Plugins && cap.Plugins.InAppPurchases;
+      if (!InAppPurchases) return;
+      UI.toast('RESTORING PURCHASES…');
+      const result = await InAppPurchases.restore();
+      const restored = (result && result.transactions) || [];
+      let count = 0;
+      for (const tx of restored) {
+        if (tx.productId && !hasEntitlement(tx.productId)) {
+          grantEntitlement(tx.productId);
+          count++;
+        }
+      }
+      UI.toast(count > 0 ? count + ' PURCHASE(S) RESTORED' : 'NO PURCHASES TO RESTORE');
+    } catch (e) {
+      UI.toast('RESTORE FAILED: ' + ((e && e.message) || 'Unknown'));
+    }
+  }
+
+  loadEntitlements();
+
+  return {
+    PRODUCTS,
+    get isAvailable() { return isNative; },
+    hasEntitlement,
+    purchase,
+    restorePurchases,
+    grantEntitlement,
+    loadEntitlements,
+  };
+})();
+
+// --- CLOUD SYNC HARDENING ---
+const CLOUD_SYNC_SCHEMA_VERSION = 1;
+const CLOUD_AUTO_SYNC_INTERVAL = 300000; // 5 minutes
+let _cloudAutoSyncTimer = null;
+
+function cloudSyncPackage() {
+  const profiles = Profile.list();
+  return {
+    schemaVersion: CLOUD_SYNC_SCHEMA_VERSION,
+    savedAt: Date.now(),
+    deviceId: getDeviceId(),
+    profiles,
+    entitlements: (() => { try { return JSON.parse(localStorage.getItem('mojaveRun_iap_entitlements') || '{}'); } catch (_) { return {}; } })(),
+    settings: (() => { try { return JSON.parse(localStorage.getItem('mojaveRunSettings') || '{}'); } catch (_) { return {}; } })(),
+  };
+}
+
+function getDeviceId() {
+  const key = 'mojaveRun_device_id';
+  let id = null;
+  try { id = localStorage.getItem(key); } catch (_) {}
+  if (!id) {
+    id = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    try { localStorage.setItem(key, id); } catch (_) {}
+  }
+  return id;
+}
+
+function cloudSyncMerge(local, remote) {
+  // Conflict strategy: per-profile last-write-wins based on timestamps.
+  // If remote schema is newer, accept remote wholesale. If older, keep local.
+  if (!remote) return local;
+  if ((remote.schemaVersion || 0) > (local.schemaVersion || 0)) return remote;
+
+  const merged = Object.assign({}, local);
+  merged.profiles = merged.profiles || [];
+  const localMap = new Map((merged.profiles || []).map(p => [p.id, p]));
+
+  // Merge remote profiles — prefer whichever has more runs or higher scrap (heuristic for "more progressed")
+  (remote.profiles || []).forEach(rp => {
+    const lp = localMap.get(rp.id);
+    if (!lp) {
+      localMap.set(rp.id, rp);
+    } else {
+      const localProgress = (lp.runs || 0) + (lp.lifetimeScrap || 0);
+      const remoteProgress = (rp.runs || 0) + (rp.lifetimeScrap || 0);
+      if (remoteProgress > localProgress) localMap.set(rp.id, rp);
+    }
+  });
+  merged.profiles = Array.from(localMap.values());
+
+  // Merge entitlements — union (never lose a purchase)
+  merged.entitlements = Object.assign({}, local.entitlements || {}, remote.entitlements || {});
+
+  return merged;
+}
+
+function cloudAutoSync() {
+  const base = cloudApiBase();
+  if (!base) return;
+  const id = localStorage.getItem(CLOUD_ID_KEY);
+  const token = localStorage.getItem(CLOUD_TOKEN_KEY);
+  if (!id || !token) return;
+
+  const data = cloudSyncPackage();
+  fetch(base + '/api/accounts/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, token, data }),
+  }).catch(() => {}); // silent background sync
+}
+
+function startCloudAutoSync() {
+  stopCloudAutoSync();
+  _cloudAutoSyncTimer = setInterval(cloudAutoSync, CLOUD_AUTO_SYNC_INTERVAL);
+  // Also sync on visibility change (app returning from background)
+  document.addEventListener('visibilitychange', _onVisibilityForSync);
+}
+
+function stopCloudAutoSync() {
+  if (_cloudAutoSyncTimer) { clearInterval(_cloudAutoSyncTimer); _cloudAutoSyncTimer = null; }
+  document.removeEventListener('visibilitychange', _onVisibilityForSync);
+}
+
+function _onVisibilityForSync() {
+  if (document.visibilityState === 'visible') {
+    // Debounce — wait 2s after returning to foreground before syncing
+    setTimeout(cloudAutoSync, 2000);
+  }
+}
+
+// Wire Phase 1 actions into UI.act
+const _origActPhase1 = UI.act.bind(UI);
+UI.act = function(action, data) {
+  if (action === 'push-enable') {
+    SFX.click();
+    PushService.requestPermission().then(ok => {
+      UI.toast(ok ? 'PUSH NOTIFICATIONS ENABLED' : 'PUSH PERMISSION DENIED');
+    });
+    return;
+  }
+  if (action === 'iap-purchase') {
+    SFX.click();
+    IAPService.purchase(data).then(() => {});
+    return;
+  }
+  if (action === 'iap-restore') {
+    SFX.click();
+    IAPService.restorePurchases();
+    return;
+  }
+  return _origActPhase1(action, data);
+};
+
+// ============================================================
+// === END PHASE 1: MOBILE PLATFORM ===
+// ============================================================
+
 boot();
 
 })();

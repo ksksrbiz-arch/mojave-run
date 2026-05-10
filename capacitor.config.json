@@ -27,6 +27,12 @@
     },
     "App": {
       "launchUrl": "index.html"
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "InAppPurchases": {
+      "autoFinish": false
     }
   },
   "android": {
