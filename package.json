@@ -1,6 +1,6 @@
 {
   "name": "mojave-run",
-  "version": "1.0.0",
+  "version": "3.0.1",
   "private": true,
   "description": "MOJAVE RUN — multiplayer relay + static host",
   "scripts": {

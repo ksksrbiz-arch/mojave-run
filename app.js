@@ -14732,6 +14732,107 @@ UI.act = function(action, data) {
   return _origActPhase1(action, data);
 };
 
+// --- ANDROID HARDWARE BACK BUTTON ---
+// Capacitor fires 'backButton' on the App plugin; on web we listen for popstate.
+// Both route through the same SCREEN_ESCAPE_ACTION map used by Escape key.
+(() => {
+  const cap = window.Capacitor;
+  const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+
+  function handleBack() {
+    // If a modal is open, close it first
+    const modal = document.getElementById('modal');
+    const cloudModal = document.getElementById('cloud-modal');
+    if (modal && modal.classList.contains('show')) { UI.act('modal-cancel'); return true; }
+    if (cloudModal && cloudModal.style.display !== 'none') {
+      const cancel = document.getElementById('cloud-modal-cancel');
+      if (cancel) cancel.click();
+      return true;
+    }
+    // If playing, pause instead of exiting
+    if (Game.state === 'playing') {
+      if (typeof togglePause === 'function') togglePause();
+      return true;
+    }
+    // Navigate back via screen escape map
+    const backAction = typeof SCREEN_ESCAPE_ACTION !== 'undefined' && UI.current
+      ? SCREEN_ESCAPE_ACTION[UI.current] : null;
+    if (backAction) { UI.act(backAction); return true; }
+    return false; // nothing to go back to — allow default (minimize/exit)
+  }
+
+  if (isNative) {
+    try {
+      const App = cap.Plugins && cap.Plugins.App;
+      if (App && App.addListener) {
+        App.addListener('backButton', (evt) => {
+          const handled = handleBack();
+          if (!handled && evt && typeof evt.canGoBack !== 'undefined' && !evt.canGoBack) {
+            // At root screen with nowhere to go — minimize the app
+            try { App.minimizeApp(); } catch (_) {}
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  // Web fallback: treat browser back as game back when history state exists
+  if (!isNative && typeof history !== 'undefined') {
+    window.addEventListener('popstate', () => {
+      handleBack();
+    });
+  }
+})();
+
+// --- DEEP LINK / APP URL ROUTING ---
+// Handles deep links from push notifications, store links, etc.
+// Supports: mojaverun://play?mode=daily, ?mode=zombie, ?continue=1
+(() => {
+  const cap = window.Capacitor;
+  const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+
+  // Delay before acting on deep links — allows boot() to finish initializing
+  // game state, profile system, and UI before we try to start a run or show a screen.
+  const DEEP_LINK_INIT_DELAY = 500;
+
+  function routeDeepLink(url) {
+    try {
+      const u = new URL(url, 'https://mojaverun.game');
+      const mode = u.searchParams.get('mode');
+      const cont = u.searchParams.get('continue');
+      if (mode && typeof startRun === 'function') {
+        setTimeout(() => { try { startRun(mode); } catch (_) {} }, DEEP_LINK_INIT_DELAY);
+        return true;
+      }
+      if (cont) {
+        setTimeout(() => { try { UI.showScreen('menu'); } catch (_) {} }, DEEP_LINK_INIT_DELAY);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // Check URL params on initial load (web + native)
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const cont = params.get('continue');
+    if (mode || cont) routeDeepLink(window.location.href);
+  } catch (_) {}
+
+  // Capacitor deep link listener
+  if (isNative) {
+    try {
+      const App = cap.Plugins && cap.Plugins.App;
+      if (App && App.addListener) {
+        App.addListener('appUrlOpen', (data) => {
+          if (data && data.url) routeDeepLink(data.url);
+        });
+      }
+    } catch (_) {}
+  }
+})();
+
 // ============================================================
 // === END PHASE 1: MOBILE PLATFORM ===
 // ============================================================
@@ -15169,7 +15270,7 @@ const PlatformCompliance = {
   getVersionInfo() {
     return {
       game: 'Mojave Run',
-      version: '3.0.0',
+      version: '3.0.1',
       platform: PlatformServices.platform,
       build: Date.now().toString(36),
     };
