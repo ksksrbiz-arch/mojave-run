@@ -2017,6 +2017,11 @@ const ENEMY_SCORE = { buggy: 150, bike: 200, mortar: 250, drone: 200, tank: 350,
 const ELITE_SCORE_MULTIPLIER = 1.8;
 const AMBUSH_SPAWN_MULTIPLIER = 0.72;
 const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
+// Spinout tuning constants
+const SPINOUT_DURATION    = 2.2;  // seconds the player is out of control
+const SPINOUT_ROT_DECAY   = 0.18; // pow base for angular velocity exponential decay per dt
+const SPINOUT_OSC_FREQ    = 4.8;  // oscillation frequency (rad/s) of the side-to-side drift
+const HITCHHIKER_DRIFT_SPEED = 5; // px/s at which hitchhikers wander toward the road center
 // Obstacle kinds that represent innocents (must be missed). Kids and big-wheel
 // riders share the civilian penalty/collision behavior — they're just
 // pedestrians/toy cars rather than full civilian vehicles.
@@ -2082,11 +2087,10 @@ function applyCivilianPenalty(x, y, kind) {
   Game.comboT = 0;
   SFX.hit();
   Game.flash = Math.max(Game.flash, 0.6);
-  const label = (kind === 'kid' || kind === 'bigwheel')
-    ? '⚠ KID! -'
-    : kind === 'hitchhiker'
-    ? '⚠ HITCHHIKER! -'
-    : '⚠ CIVILIAN! -';
+  let label;
+  if (kind === 'kid' || kind === 'bigwheel') label = '⚠ KID! -';
+  else if (kind === 'hitchhiker') label = '⚠ HITCHHIKER! -';
+  else label = '⚠ CIVILIAN! -';
   addPopup(label + penalty, x, y - 22, '#4aa8e8', 16);
   shockwave(x, y, 'rgba(74,168,232,0.5)', 80);
 }
@@ -2100,7 +2104,7 @@ function startSpinout(hitX, hitY) {
   const dir = (Game.player && hitX < Game.player.x) ? -1 : 1;
   Game.spinout = {
     t:       0,
-    dur:     2.2,
+    dur:     SPINOUT_DURATION,
     rot:     0,
     rotV:    (7 + Math.random() * 6) * dir,  // radians/s initial spin
     kickDir: dir,
@@ -3143,12 +3147,12 @@ function spawnEnemy(forceKind, forceElite) {
     const allowKids = isCampaign && campLocIdx >= LATE_CAMPAIGN_LOC_IDX;
     const kidChance = allowKids ? Math.min(0.07, 0.02 + (campLocIdx - LATE_CAMPAIGN_LOC_IDX) * 0.01) : 0;
     // Hitchhikers appear from 500 m onward in classic/campaign — 3-7% chance, earlier than civs
-    const hitchChance = allowCivs ? Math.min(0.07, 0.01 + dist / 80000) : 0;
+    const hitchhikerChance = allowCivs ? Math.min(0.07, 0.01 + dist / 80000) : 0;
     if (allowCivs && dist > 800 && r < civChance) {
       pick = 'civilian';
     } else if (allowKids && dist > 600 && r < civChance + kidChance) {
       pick = Math.random() < 0.55 ? 'kid' : 'bigwheel';
-    } else if (allowCivs && dist > 500 && r < civChance + kidChance + hitchChance) {
+    } else if (allowCivs && dist > 500 && r < civChance + kidChance + hitchhikerChance) {
       pick = 'hitchhiker';
     } else if (unlockTank   && r < 0.07) pick = 'tank';
     else if (unlockMortar   && r < 0.14) pick = 'mortar';
@@ -3885,11 +3889,11 @@ function update(dt) {
     sp.t += dt;
     const phase = Math.min(1, sp.t / sp.dur);
     // Angular velocity decays exponentially; car slows its spin over time
-    sp.rotV *= Math.pow(0.18, dt);
+    sp.rotV *= Math.pow(SPINOUT_ROT_DECAY, dt);
     sp.rot  += sp.rotV * dt;
     // Side-to-side oscillating drift — amplitude fades as control returns
     const driftAmp = 300 * (1 - phase * phase);
-    p.vx = Math.sin(sp.t * 4.8) * driftAmp * sp.kickDir;
+    p.vx = Math.sin(sp.t * SPINOUT_OSC_FREQ) * driftAmp * sp.kickDir;
     p.x += p.vx * dt;
     const { x0: sx0, x1: sx1 } = roadBounds();
     if (p.x - p.w/2 < sx0 + 4) { p.x = sx0 + 4 + p.w/2; p.vx *= -0.55; Game.shake = Math.max(Game.shake, 0.6); }
@@ -3978,7 +3982,7 @@ function update(dt) {
       // hitchhikers wander side-to-side AND drift slowly toward the road center
       if (o.kind === 'hitchhiker' && o.wanderAmp) {
         o.wanderT = (o.wanderT || 0) + dt;
-        const drift = (o.driftDir || 1) * o.wanderT * 5; // slow inward drift
+        const drift = (o.driftDir || 1) * o.wanderT * HITCHHIKER_DRIFT_SPEED; // slow inward drift
         o.x = clamp((o.baseX || o.x) + Math.sin(o.wanderT * (o.wanderSpeed || 0.9)) * o.wanderAmp + drift,
                     o.w/2 + 4, W - o.w/2 - 4);
       }
