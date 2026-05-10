@@ -4355,7 +4355,7 @@ function update(dt) {
         // wrap to [-π, π]
         while (dA >  Math.PI) dA -= 2 * Math.PI;
         while (dA < -Math.PI) dA += 2 * Math.PI;
-        const maxTurn = 3.5 * dt; // rad/s turn rate
+        const maxTurn = 3.5 * dt; // 3.5 rad/s turn rate applied per frame
         const turn = Math.max(-maxTurn, Math.min(maxTurn, dA));
         const newAngle = currentAngle + turn;
         b.vx = Math.cos(newAngle) * spd;
