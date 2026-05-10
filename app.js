@@ -2916,7 +2916,7 @@ window.addEventListener('keydown', e => {
   // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
   // persists the choice in localStorage. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
-  if (key === 'q' && document.activeElement !== document.getElementById('modal-input')) {
+  if (key === 'q' && !isTypingField(document.activeElement)) {
     cycleQualityMode();
   }
   if (Game.state === 'gameover') {
