@@ -85,6 +85,15 @@ const VEHICLES = [
     base: { maxHp: 650, accel: 900, maxV: 290, fireRate: 0.08, dmg: 9, guns: 2, bigShot: true },
     color: { body:'#1a1a12', hood:'#0d0d08', cab:'#23231a', windshield:'#3a6a3a', glow:'#7aff5a' },
   },
+  {
+    id: 'apexwarlord', name: 'APEX WARLORD',
+    desc: 'Cosmetic Wasteland Legend frame. Prestige 10+ only; tuned like the Rust Bucket to avoid pay-to-win power creep.',
+    cost: 0,
+    apexVehicle: true,
+    prestigeUnlock: 10,
+    base: { maxHp: 100, accel: 1800, maxV: 460, fireRate: 0.18, dmg: 1, guns: 2, bigShot: false },
+    color: { body:'#2a123a', hood:'#160820', cab:'#08040e', windshield:'#ffd86b', glow:'#ff40d0' },
+  },
   // === v2.3 NEW VEHICLES — Wasteland Empire ===
   {
     id: 'vortexhover', name: 'VORTEX HOVER',
@@ -615,6 +624,8 @@ const MODES = [
   { id: 'ironthrone',  name: 'IRON THRONE',      desc: 'Full mastery unlocks the boss campaign. Eight Warlords with different weapons and armored rigs. No survivors.' },
   // === v2.3 NEW MODES — Wasteland Empire ===
   { id: 'wastelandrun', name: 'WASTELAND RUN',   desc: 'Roguelite endless mode. Procedural runs with random mutators, escalating difficulty, and high-score leaderboards per seed. Unlocked after full campaign.' },
+  { id: 'extraction',  name: 'EXTRACTION',      desc: 'Escort a convoy through zombie and raider waves. Keep the rig alive until the evac marker.' },
+  { id: 'custom',      name: 'CUSTOM RUN',      desc: 'Play a share-code level from the in-browser editor.' },
 ];
 
 // Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
@@ -1992,6 +2003,34 @@ function checkAchievementCondition(id, p) {
     case 'full_mastery':
       return Profile.isFullMasteryUnlocked();
     case 'throne_claimed': return (p.ironThroneCleared || []).length >= IRON_THRONE_STAGES.length;
+    case 'empire_start': return (p.bestWastelandRun || 0) > 0 || ((p.lastRunMeta || {}).mode === 'wastelandrun');
+    case 'empire_clear': return !!((p.lastRunMeta || {}).mode === 'wastelandrun' && (p.lastRunMeta || {}).victory && !(p.lastRunMeta || {}).died);
+    case 'hover_master': return !!((p.lastRunMeta || {}).vehicleId === 'vortexhover' && (p.lastRunMeta || {}).victory && !(p.lastRunMeta || {}).died);
+    case 'craft_first': return (p.v23Counters && (p.v23Counters.crafts || 0) >= 1) || (p.craftingMods || []).length >= 1;
+    case 'craft_all': return (p.v23Counters && (p.v23Counters.crafts || 0) >= CRAFTING_RECIPES.length);
+    case 'spec_explosive': return ((p.v23Counters || {}).explosiveKills || 0) >= 100;
+    case 'spec_pierce': return ((p.v23Counters || {}).maxPierceHits || 0) >= 4;
+    case 'spec_chain': return ((p.v23Counters || {}).chainHits || 0) >= 200;
+    case 'spec_drone': return ((p.v23Counters || {}).droneKills || 0) >= 50;
+    case 'epilogue_start': return (p.epilogueCleared || []).length >= 1;
+    case 'epilogue_clear': return (p.epilogueCleared || []).length >= 18;
+    case 'spitter_slayer': return ((p.v23Counters || {}).spitterKills || 0) >= 50;
+    case 'screamer_silence': return ((p.v23Counters || {}).fastScreamerKills || 0) >= 1;
+    case 'mutant_crusher': return ((p.v23Counters || {}).mutantKills || 0) >= 20;
+    case 'mutator_master': return !!((p.lastRunMeta || {}).mode === 'wastelandrun' && (p.lastRunMeta || {}).victory && ((p.lastRunMeta || {}).mutators || []).length >= 3);
+    case 'scrap_hoard': return (p.lifetimeScrap || 0) >= 100000;
+    case 'prestige5': return (p.prestigeTokens || 0) >= 5;
+    case 'bounty_streak': return ((p.v23Counters || {}).bestBountyStreak || 0) >= 20;
+    case 'golden_sector': return ((p.v23Counters || {}).goldenSectorClears || 0) >= 1;
+    case 'nightonly_clear': return !!((p.lastRunMeta || {}).victory && ((p.lastRunMeta || {}).mutators || []).includes('nightonly'));
+    case 'doublethreat_clear': return !!((p.lastRunMeta || {}).victory && ((p.lastRunMeta || {}).mutators || []).includes('doublethreat'));
+    case 'level_editor_v2': return ((p.v23Counters || {}).customLevelsCreated || 0) >= 1;
+    case 'apex_frame': return (p.craftingMods || []).includes('apexframe');
+    case 'war_engine': return (p.craftingMods || []).includes('warengine');
+    case 'all_v23_vehicles': return ['vortexhover','bloodravenbomber','irontitan','spectrestealth','doomhauler','neonphantom'].every(id => (p.ownedVehicles || {})[id]);
+    case 'biome_collector': return (p.biomesVisited || []).length >= Math.min(8, BIOME_KEYS.length);
+    case 'mode_master': return ['classic','winding','timeattack','daily','bossrush','zombie','wastelandrun','extraction'].every(id => (p.modesCompleted || []).includes(id));
+    case 'roguelite_seed': return (p.wastelandSeedsPlayed || []).length >= 10;
     default: return false;
   }
 }
@@ -2077,6 +2116,12 @@ const Profile = {
         if (!p.craftingInventory || typeof p.craftingInventory !== 'object') { p.craftingInventory = {}; dirty = true; }
         if (typeof p.weaponSpecialization !== 'string') { p.weaponSpecialization = 'none'; dirty = true; }
         if (!Array.isArray(p.epilogueCleared)) { p.epilogueCleared = []; dirty = true; }
+        if (!Array.isArray(p.modesCompleted)) { p.modesCompleted = []; dirty = true; }
+        if (!Array.isArray(p.biomesVisited)) { p.biomesVisited = []; dirty = true; }
+        if (!Array.isArray(p.wastelandSeedsPlayed)) { p.wastelandSeedsPlayed = []; dirty = true; }
+        if (!p.v23Counters || typeof p.v23Counters !== 'object') { p.v23Counters = {}; dirty = true; }
+        if (!p.weeklyStreak || typeof p.weeklyStreak !== 'object') { p.weeklyStreak = { count:0, lastClaimed:null }; dirty = true; }
+        if (!('wastelandPass' in p)) { p.wastelandPass = false; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2143,6 +2188,12 @@ const Profile = {
       craftingInventory: {},       // { bossPartId: count } — crafting resource inventory
       weaponSpecialization: 'none', // active weapon spec: 'none'|'explosive'|'piercing'|'chainlightning'|'droneswarm'
       epilogueCleared: [],         // array of epilogue location IDs cleared (v2.3 campaign extension)
+      modesCompleted: [],          // modes cleared at least once for V3 achievement tracking
+      biomesVisited: [],           // biomes visited across runs
+      wastelandSeedsPlayed: [],    // unique Wasteland Run seeds played
+      v23Counters: {},             // granular V3 counters (spec kills, active ability uses, etc.)
+      weeklyStreak: { count:0, lastClaimed:null },
+      wastelandPass: false,        // optional cosmetic-only pass flag (web honor-system fallback)
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -2181,6 +2232,7 @@ const Profile = {
     const p = this.active(); if (!p) return false;
     const v = VEHICLE_BY_ID[vehicleId]; if (!v) return false;
     if (p.ownedVehicles[vehicleId]) return false;
+    if (v.apexVehicle && (p.prestigeTokens || 0) < (v.prestigeUnlock || 10)) return false;
     if (p.scrap < v.cost) return false;
     p.scrap -= v.cost;
     p.ownedVehicles[vehicleId] = true;
@@ -2284,6 +2336,7 @@ const Profile = {
     const st = Object.assign({}, v.base);
     UPGRADE_TRACKS.forEach(t => t.apply(st, ups[t.id] || 0));
     applyVehicleBranchStats(st, branch);
+    applyPermanentCraftingStats(st, p);
     st.branchId = branch ? branch.id : null;
     st.branchName = branch ? branch.name : null;
     st.branchDesc = branch ? branch.desc : '';
@@ -2309,7 +2362,19 @@ const Profile = {
       p.dailyBest = p.dailyBest || {};
       const prev = p.dailyBest[result.dailySeedKey] || 0;
       if (result.score > prev) p.dailyBest[result.dailySeedKey] = result.score;
+      recordDailyLeagueScore(p, result.dailySeedKey, result.score);
     }
+    if (result.mode === 'wastelandrun') {
+      if (result.score > (p.bestWastelandRun || 0)) p.bestWastelandRun = result.score;
+      p.wastelandSeedsPlayed = p.wastelandSeedsPlayed || [];
+      if (result.wastelandSeedKey && !p.wastelandSeedsPlayed.includes(result.wastelandSeedKey)) p.wastelandSeedsPlayed.push(result.wastelandSeedKey);
+      recordWastelandRunScore(p, result.wastelandSeedKey, result.score);
+    }
+    p.modesCompleted = p.modesCompleted || [];
+    if (result.victory && result.mode && !p.modesCompleted.includes(result.mode)) p.modesCompleted.push(result.mode);
+    p.biomesVisited = p.biomesVisited || [];
+    if (result.biome && !p.biomesVisited.includes(result.biome)) p.biomesVisited.push(result.biome);
+    p.lastRunMeta = Object.assign({}, result);
     if (result.mode === 'gauntlet' && result.victory && result.level && !p.gauntletCleared.includes(result.level)) {
       p.gauntletCleared.push(result.level);
       p.gauntletCleared.sort((a,b)=>a-b);
@@ -3105,7 +3170,12 @@ function applyKill(x, y, baseScore) {
   if (Game.combo > Game.comboBest) Game.comboBest = Game.combo;
   const mult = comboMult();
   const x2 = isPowerupActive('x2') ? 2 : 1;
-  const score = Math.round(baseScore * mult * x2);
+  if (Game.runMutators.some(m => m.id === 'bountyhunter')) {
+    Game.bountyStreak = (Game.bountyStreak || 0) + 1;
+    Game.bountyMul = Math.min(4, 1 + Game.bountyStreak * 0.08);
+    Game.v23RunStats.bestBountyStreak = Math.max(Game.v23RunStats.bestBountyStreak || 0, Game.bountyStreak);
+  }
+  const score = Math.round(baseScore * mult * x2 * (Game.scoreMul || 1) * (Game.bountyMul || 1));
   Game.score += score;
   // tier-up effects
   if (mult > prev) {
@@ -3519,7 +3589,7 @@ function rollPowerup() {
 // INPUT
 // ============================================================
 const keys = Object.create(null);
-const input = { left:false, right:false, fire:false, touchTargetX: null, touchFire: false };
+const input = { left:false, right:false, fire:false, touchTargetX: null, touchFire: false, special:false };
 const activePointers = new Map();
 const SCREEN_ESCAPE_ACTION = {
   profiles: 'back-title',
@@ -3590,7 +3660,8 @@ window.addEventListener('keydown', e => {
   // persists the choice in localStorage. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
   if (key === 'q' && !isTypingField(document.activeElement)) {
-    cycleQualityMode();
+    if (Game.state === 'playing') triggerVehicleAbility();
+    else cycleQualityMode();
   }
   if (Game.state === 'gameover') {
     if (key === 'r' || key === 'enter') UI.act('res-again');
@@ -3644,6 +3715,7 @@ function readKbd() {
   input.left  = !!(keys['arrowleft']  || keys['a']);
   input.right = !!(keys['arrowright'] || keys['d']);
   input.fire  = !!(keys[' '] || keys['z'] || keys['x']) || input.touchFire;
+  GamepadInput.poll();
 }
 
 // ============================================================
@@ -3902,14 +3974,21 @@ function startRun(mode, level) {
   // it on the same UTC date sees identical world generation. Always restore
   // before any new run so seeding doesn't leak across modes.
   restoreRng();
+  Game.wastelandSeedKey = null;
+  Game.customConfig = null;
   if (mode === 'daily') {
     Game.dailySeedKey = todaySeedString();
     activateSeededRng(seedFromString('mojave-run-daily-' + Game.dailySeedKey));
   } else {
     Game.dailySeedKey = null;
   }
-  const v = VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0];
-  const stats = Profile.effectiveStats(profile.activeVehicle);
+  if (mode === 'wastelandrun') {
+    Game.wastelandSeedKey = 'wr-' + todaySeedString();
+    activateSeededRng(seedFromString('mojave-run-wasteland-' + Game.wastelandSeedKey));
+  }
+  let v = VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0];
+  if (v.apexVehicle && (profile.prestigeTokens || 0) < (v.prestigeUnlock || 10)) v = VEHICLES[0];
+  let stats = Profile.effectiveStats(v.id || profile.activeVehicle);
   const perkState = getCharacterPerkState(profile.characterId);
   Game.mode = mode;
   if (mode === 'ironthrone') {
@@ -3933,6 +4012,16 @@ function startRun(mode, level) {
       reward: _ce.lvl.reward, diff: _ce.lvl.diff, boss: _ce.lvl.boss,
       map: _ce.loc.biome, night: !!_ce.lvl.night, storm: !!_ce.lvl.storm,
     } : null;
+  } else if (mode === 'custom') {
+    const cfg = sanitizeLevelEditorConfig(LevelEditor.loadDraft() || LevelEditor.defaultConfig());
+    Game.customConfig = cfg;
+    Game.campaignLevelId = null;
+    Game.level = 'custom';
+    Game.levelData = {
+      num: 'C', name: cfg.name || 'CUSTOM RUN', obj: cfg.objective || 'score',
+      target: cfg.objective === 'distance' ? 3000 : cfg.objective === 'kills' ? 35 : cfg.objective === 'survive' ? 75 : 50000,
+      reward: 1200, diff: cfg.difficulty || 2, map: cfg.biome || 'wastes'
+    };
   } else {
     Game.campaignLevelId = null;
     Game.level = level || null;
@@ -3940,7 +4029,12 @@ function startRun(mode, level) {
     if (mode !== 'ironthrone') Game.ironThroneStage = 0;
   }
   Game.biome = pickBiome(mode, Game.levelData, Game.dailySeedKey);
-  Game.runMutators = getRunMutators(mode, Game.levelData, Game.dailySeedKey);
+  if (mode === 'wastelandrun') {
+    Game.biome = pickWastelandRunBiome(Game.wastelandSeedKey);
+    Game.runMutators = getWastelandRunMutators(seedFromString(Game.wastelandSeedKey));
+  } else {
+    Game.runMutators = getRunMutators(mode, Game.levelData, Game.dailySeedKey);
+  }
   Game.state = 'loading';
   Game.paused = false;
   Game.t = 0;
@@ -3952,11 +4046,17 @@ function startRun(mode, level) {
   const speedModeMul = mode === 'winding' ? 1.35 : 1;
   const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1) * speedModeMul;
   Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
+  Game.activeWeaponSpec = getActiveWeaponSpec();
+  stats = applyRunStatLayers(stats, profile, mode);
   Game.maxHealth = Math.round(stats.maxHp);
   Game.health = Game.maxHealth;
   Game.fireCooldown = 0;
   Game.spawnTimer = 0.6;
   Game.pickupTimer = 3;
+  if (Game.customConfig) {
+    Game.spawnTimer = Math.max(0.25, 0.8 / (Game.customConfig.enemyDensity || 1));
+    Game.pickupTimer = Math.max(1.2, 3 / (Game.customConfig.pickupRate || 1));
+  }
   Game.shake = 0; Game.flash = 0; Game.hitFlash = 0;
   Game.shakeOX = Game.shakeOY = Game.shakeTX = Game.shakeTY = 0;
   Game.shakeRetargetT = 0;
@@ -4001,6 +4101,7 @@ function startRun(mode, level) {
   Game.contactDamageMul = 1;
   Game.nitroDamageMul = 1;
   Game.branchState = Object.assign({}, stats.branchEffects || null);
+  Game.weaponSpecState = Game.activeWeaponSpec ? Object.assign({}, Game.activeWeaponSpec.effects || null) : {};
   if (Game.branchState.scrapMul) Game.scrapMul *= Game.branchState.scrapMul;
   if (Game.branchState.killScoreMul) Game.killScoreMul *= Game.branchState.killScoreMul;
   if (Game.branchState.pickupScoreMul) Game.pickupScoreMul *= Game.branchState.pickupScoreMul;
@@ -4010,6 +4111,19 @@ function startRun(mode, level) {
   if (Game.branchState.nitroDamageMul) Game.nitroDamageMul *= Game.branchState.nitroDamageMul;
   Game.vehicle = v;
   Game.vehicleStats = stats;
+  Game.activeCraftingMods = getActiveRunCraftingMods(profile);
+  Game.enemyHpMul = 1;
+  Game.enemyFireMul = 1;
+  Game.enemyDamageReduction = 0;
+  Game.enemyContactMul = 1;
+  Game.scoreMul = 1;
+  Game.bountyStreak = 0;
+  Game.bountyMul = 1;
+  Game.wastelandWaveT = 90;
+  Game.extraction = null;
+  Game.drones = [];
+  Game.activeAbility = { cooldown: 0, charge: 0, activeT: 0 };
+  Game.v23RunStats = {};
   Game.cosmetics = cloneCosmeticsState(Profile.equippedCosmetics());
   // sidekick passive effects
   Game.sidekick = profile.activeSidekick || null;
@@ -4018,6 +4132,11 @@ function startRun(mode, level) {
   if (Game.sidekick === 'ratchet') Game.vehicleStats = Object.assign({}, stats, { dmg: stats.dmg * 1.15 });
   if (Game.sidekick === 'mirage')  Game.magnetRangeMul = 1.3;
   if (Game.sidekick === 'vulture') Game.scrapMul = (Game.scrapMul || 1) * 1.2;
+  applySeasonalRunBonuses();
+  applyCraftingRunBonuses();
+  applyWastelandRunStartBonuses();
+  if (mode === 'extraction') startExtractionRun();
+  if (Game.weaponSpecState && Game.weaponSpecState.drones) spawnDroneSwarm(Game.weaponSpecState.drones);
   Game.player = {
     x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
   };
@@ -4089,6 +4208,10 @@ function beginPlaying() {
     if (horn.sfx === 'combo') SFX.combo(3);
     else SFX[horn.sfx]();
   }
+  if (Game.mode === 'wastelandrun' && Game.runMutators.length) {
+    announceEvent('WASTELAND RUN: ' + Game.runMutators.map(m => m.name).join(' · '), '#ff80ff');
+  }
+  if (Game.mode === 'extraction') announceEvent('ESCORT CONVOY TO EXTRACTION', '#7af07a');
   // Spawn boss right away in boss levels
   if (Game.mode === 'ironthrone') {
     spawnIronThroneBoss(Game.ironThroneStage);
@@ -4157,6 +4280,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
   if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
   Profile.earn(Game.scrapEarned);
+  flushV23RunCounters();
   // record stats
   Profile.recordRunResult({
     mode: Game.mode,
@@ -4169,6 +4293,14 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     level: Game.level,
     victory: reason === 'victory',
     dailySeedKey: Game.dailySeedKey,
+    wastelandSeedKey: Game.wastelandSeedKey,
+    vehicleId: Game.vehicle && Game.vehicle.id,
+    biome: Game.biome,
+    specId: Game.activeWeaponSpec && Game.activeWeaponSpec.id,
+    mutators: (Game.runMutators || []).map(m => m.id),
+    droneKills: (Game.v23RunStats && Game.v23RunStats.droneKills) || 0,
+    pierceHits: (Game.v23RunStats && Game.v23RunStats.maxPierceHits) || 0,
+    died: reason === 'death',
     // iron throne: stage number that was just cleared (incremented on boss death)
     ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
   });
@@ -4226,12 +4358,15 @@ function checkObjective() {
     triggerVictory('time');
     return;
   }
-  if (Game.mode !== 'gauntlet' && Game.mode !== 'campaign') return;
+  if (Game.mode === 'wastelandrun' && Game.distance >= 12000) { triggerVictory('objective'); return; }
+  if (Game.mode === 'extraction' && Game.extraction && Game.distance >= Game.extraction.targetDistance && Game.extraction.hp > 0) { triggerVictory('objective'); return; }
+  if (Game.mode !== 'gauntlet' && Game.mode !== 'campaign' && Game.mode !== 'custom') return;
   if (!Game.levelData) return;
   const L = Game.levelData;
   if (L.obj === 'survive' && Game.t >= L.target) triggerVictory('objective');
   else if (L.obj === 'kills' && Game.kills >= L.target) triggerVictory('objective');
   else if (L.obj === 'distance' && Game.distance >= L.target) triggerVictory('objective');
+  else if (L.obj === 'score' && Game.score >= L.target) triggerVictory('objective');
   else if (L.obj === 'horde' && Game.hordeMode && Game.t >= Game.hordeMode.dur) triggerVictory('objective');
   // boss: handled by boss death sequence
 }
@@ -4409,6 +4544,7 @@ function maybeEliteEnemy(enemy, forceElite) {
 
 function spawnEnemy(forceKind, forceElite) {
   if (Game.boss) return; // bosses pause normal spawns mid-fight
+  const v3StartEnemyLen = Game.enemies.length;
   const { x0, x1 } = roadBounds();
   const margin = 32;
   const r = Math.random();
@@ -4456,6 +4592,7 @@ function spawnEnemy(forceKind, forceElite) {
         special: !!def.special, miniBoss: !!def.miniBoss,
       });
     }
+    applyV3SpawnTuning(v3StartEnemyLen);
     return;
   }
 
@@ -4635,6 +4772,7 @@ function spawnEnemy(forceKind, forceElite) {
       });
     }
   }
+  applyV3SpawnTuning(v3StartEnemyLen);
 }
 
 function spawnPickup() {
@@ -4650,6 +4788,7 @@ function spawnPickup() {
   const pk = { kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 };
   if (kind === 'powerup') {
     pk.power = Game.mode === 'zombie' ? ZOMBIE_POWERUP_KEYS[Math.floor(Math.random() * ZOMBIE_POWERUP_KEYS.length)] : rollPowerup();
+    if (Game.runMutators && Game.runMutators.some(m => m.id === 'nitrostorm')) pk.power = 'nitro';
     pk.w = 26; pk.h = 26;
   } else if (kind === 'cache') {
     pk.w = 28; pk.h = 28;
@@ -4807,6 +4946,7 @@ function updateBoss(dt) {
         Game.shake = 1.4;
         const bossScore = 1500 * (Game.levelData ? Game.levelData.diff : 1);
         applyKill(hitBody.x, hitBody.y - 20, Math.floor(bossScore));
+        dropBossPart(b.tier || (Game.levelData && Game.levelData.boss) || Game.bossRushStage || Game.ironThroneStage || 1, hitBody.x, hitBody.y);
         const isBossLevel = !!(Game.levelData && Game.levelData.obj === 'boss' && Game.mode !== 'ironthrone');
         Game.bossDeathSeq = {
           t: 0, dur: 2.0,
@@ -5165,6 +5305,7 @@ function updateVictory(dt) {
 
 function update(dt) {
   Game.animT += dt;
+  if (Game.state === 'replay')  { updateReplayPlayback(dt); return; }
   if (Game.state === 'loading') { updateLoading(dt); return; }
   if (Game.state === 'dying')   { updateDying(dt); return; }
   if (Game.state === 'victory') { updateVictory(dt); return; }
@@ -5183,6 +5324,7 @@ function update(dt) {
   applyMagnet(dt);
   updateSidekick(dt);
   updateZombieWasteland(dt);
+  updateV3Systems(dt);
 
   // nitro modifies effective scroll & score gain
   const nitroMul = isPowerupActive('nitro') ? 1.6 : 1.0;
@@ -5430,7 +5572,8 @@ function update(dt) {
     const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
     const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
     const siegeMul = isPowerupActive('siege') ? 0.45 : 1;
-    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul * siegeMul;
+    const specFireMul = Game.weaponSpecState && Game.weaponSpecState.fireRateMul ? Game.weaponSpecState.fireRateMul : 1;
+    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul * siegeMul * specFireMul;
   }
 
   // ---- bullets ----
@@ -5680,10 +5823,12 @@ function update(dt) {
     for (let j = Game.bullets.length - 1; j >= 0; j--) {
       const b = Game.bullets[j];
       if (aabb(e, b)) {
-        Game.bullets.splice(j,1);
-        const dmg = (b.dmg || 1) * (isPowerupActive('overdrive') ? 1.20 : 1) *
+        if (!consumePiercingHit(b, e)) Game.bullets.splice(j,1);
+        const rawDmg = (b.dmg || 1) * (isPowerupActive('overdrive') ? 1.20 : 1) *
           ((isPowerupActive('nitro') ? Game.nitroDamageMul : 1));
+        const dmg = rawDmg * (1 - (e.damageReduction || 0));
         e.hp -= dmg;
+        applyWeaponSpecHit(b, e, dmg);
         if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', 11);
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
         if (e.hp <= 0) {
@@ -5898,6 +6043,7 @@ function update(dt) {
     if (Game.spawnTimer <= 0) {
       const ambushMul = Game.activeEvent && Game.activeEvent.id === 'ambush' ? AMBUSH_SPAWN_MULTIPLIER : 1;
       const isZombieMode = Game.mode === 'zombie';
+      const customDensityMul = Game.customConfig ? (1 / (Game.customConfig.enemyDensity || 1)) : 1;
       // Zombie mode: shorter spawn intervals that tighten faster (harder escalating horde)
       const zombieInterval = Math.max(0.25, 0.9 - Game.distance / 18000);
       let baseInterval = isZombieMode ? zombieInterval :
@@ -5906,7 +6052,7 @@ function update(dt) {
       if (inHorde) baseInterval = 0.18;
       // also factor score-based difficulty in classic
       const intervalMul = Game.mode === 'classic' ? Math.max(0.4, 1 - Game.distance / 30000) : 1;
-      Game.spawnTimer = rand(baseInterval * 0.7 * intervalMul * ambushMul, baseInterval * 1.2 * intervalMul * ambushMul);
+      Game.spawnTimer = rand(baseInterval * 0.7 * intervalMul * ambushMul * customDensityMul, baseInterval * 1.2 * intervalMul * ambushMul * customDensityMul);
       spawnEnemy();
       // burst spawn in time attack or zombie mode (increasing burst over time)
       if (Game.mode === 'timeattack' && Math.random() < 0.4) spawnEnemy();
@@ -5923,7 +6069,8 @@ function update(dt) {
     Game.pickupTimer -= dt;
     if (Game.pickupTimer <= 0) {
       spawnPickup();
-      Game.pickupTimer = rand(Game.activeEvent && Game.activeEvent.id === 'convoy' ? 1.4 : 2.6, Game.activeEvent && Game.activeEvent.id === 'convoy' ? 2.8 : 4.6);
+      const pickupMul = 1 / ((Game.pickupRateMul || 1) * (Game.customConfig ? (Game.customConfig.pickupRate || 1) : 1));
+      Game.pickupTimer = rand(Game.activeEvent && Game.activeEvent.id === 'convoy' ? 1.4 : 2.6, Game.activeEvent && Game.activeEvent.id === 'convoy' ? 2.8 : 4.6) * pickupMul;
     }
     // Horde-nuke pickups: drop a horde-clearer every ~10s during a horde
     // level so the player can punch through the wall of enemies. Spawned
@@ -5973,6 +6120,11 @@ function fireGuns() {
       dmg: stats.dmg * overdriveMul * mul,
       crit,
       homing: isPowerupActive('homing') || false,
+      splash: Game.weaponSpecState && Game.weaponSpecState.bulletSplash,
+      pierce: Game.weaponSpecState && Game.weaponSpecState.bulletPierce,
+      chain: Game.weaponSpecState && Game.weaponSpecState.bulletChain,
+      chainDamageMul: Game.weaponSpecState && Game.weaponSpecState.chainDamageMul,
+      hitIds: [],
     }, extra);
   };
   const bigShot = v.base.bigShot;
@@ -6055,8 +6207,10 @@ function damagePlayer(amt) {
   Game.health -= amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
-  // taking damage breaks the combo
+  // taking damage breaks the combo and bounty chain
   Game.combo = 0;
+  Game.bountyStreak = 0;
+  Game.bountyMul = 1;
   Game.comboT = 0;
   if (Game.health <= 0) {
     Game.health = 0;
@@ -7916,6 +8070,12 @@ function drawHUD() {
   } else if (Game.mode === 'ironthrone') {
     const itDef = IRON_THRONE_STAGES[Math.min(Game.ironThroneStage, IRON_THRONE_STAGES.length) - 1];
     subL = itDef ? itDef.weapon : 'IRON THRONE';
+  } else if (Game.mode === 'wastelandrun') {
+    subL = 'WASTELAND RUN ' + (Game.wastelandSeedKey || '');
+  } else if (Game.mode === 'extraction') {
+    subL = 'CONVOY HP ' + Math.max(0, Math.round((Game.extraction || {}).hp || 0));
+  } else if (Game.mode === 'custom' && Game.levelData) {
+    subL = 'CUSTOM · ' + Game.levelData.name;
   }
   ctx.fillText(subL, 50, hudH * 0.72);
 
@@ -7948,11 +8108,25 @@ function drawHUD() {
   } else if (Game.mode === 'ironthrone') {
     const itStage = Math.min(Game.ironThroneStage, IRON_THRONE_STAGES.length);
     mainR = `WARLORD ${itStage}/${IRON_THRONE_STAGES.length}`;
+  } else if (Game.mode === 'wastelandrun') {
+    mainR = Math.floor(Game.distance) + '/12000M';
+  } else if (Game.mode === 'extraction') {
+    mainR = Math.floor(Game.distance) + '/' + ((Game.extraction && Game.extraction.targetDistance) || 8000) + 'M';
+  } else if (Game.mode === 'custom' && Game.levelData) {
+    const L = Game.levelData;
+    mainR = L.obj === 'score' ? `${Math.floor(Game.score)}/${L.target}` : L.obj === 'kills' ? `${Game.kills}/${L.target}` : L.obj === 'distance' ? `${Math.floor(Game.distance)}/${L.target}M` : Math.max(0, L.target - Game.t).toFixed(1) + 'S';
   }
   ctx.fillText(mainR, W - 50, hudH * 0.32);
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
   ctx.font = `bold ${fs - 2}px "Courier New", monospace`;
   ctx.fillText('+' + Math.floor(Game.score / 10) + ' SCRAP', W - 50, hudH * 0.72);
+
+  if (Game.mode === 'wastelandrun' && Game.runMutators && Game.runMutators.length) {
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.fillStyle = '#ff80ff';
+    ctx.fillText('MUTATORS ' + Game.runMutators.map(m => m.name.split(' ')[0]).join(' · '), W / 2, hudH + ZOMBIE_HUD_OFFSET_Y);
+  }
 
   if (Game.mode === 'zombie') {
     const zw = Game.zombie || {};
@@ -8321,7 +8495,7 @@ function drawDeathOverlay() {
 
 function render() {
   if (Game.state === 'playing' || Game.state === 'gameover' || Game.state === 'victory'
-      || Game.state === 'loading' || Game.state === 'dying') {
+      || Game.state === 'loading' || Game.state === 'dying' || Game.state === 'replay') {
     ctx.save();
     if (Game.shake > 0 && !Game.paused) {
       // Smoothed shake: interpolate offsets toward a randomly-picked target so
@@ -8432,10 +8606,11 @@ function render() {
     // PerfMon.quality.
     if (typeof Cinematic !== 'undefined') Cinematic.postFx(ctx);
 
-    if (Game.state === 'playing') {
+    if (Game.state === 'playing' || Game.state === 'replay') {
       drawHUD();
       drawPowerupStrip();
       drawComboMeter();
+      if (Game.state === 'replay') drawReplayOverlay();
     }
     if (Game.state === 'playing' && Game.paused) drawPause();
     if (Game.state === 'loading') drawLoadingOverlay();
@@ -10101,9 +10276,10 @@ let controlHintMode = IS_TOUCH ? 'touch' : 'keyboard';
 const CONTROL_HINT_TEXT = {
   touch: 'DRAG TO STEER · HOLD TO FIRE',
   keyboard: 'A / D OR ← / → TO STEER · SPACE TO FIRE',
+  gamepad: 'LEFT STICK TO STEER · A TO FIRE · B SPECIAL',
 };
 function setControlHintMode(mode) {
-  if (mode !== 'touch' && mode !== 'keyboard') return;
+  if (mode !== 'touch' && mode !== 'keyboard' && mode !== 'gamepad') return;
   controlHintMode = mode;
   if (hintEl) hintEl.textContent = CONTROL_HINT_TEXT[controlHintMode];
 }
@@ -10226,7 +10402,7 @@ function frame(now) {
   const frameStart = now;
   try {
     if (Game.state === 'playing' || Game.state === 'loading'
-        || Game.state === 'dying' || Game.state === 'victory') {
+        || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
       update(dt);
       capRuntimeArrays();
     }
@@ -10587,7 +10763,8 @@ const PRESTIGE_TIERS = [
   { tokens: 2,  label: 'DRIFTER',  bonus: '+10% SCRAP',        scrapMult: 1.10 },
   { tokens: 3,  label: 'EXILE',    bonus: '+15% SCRAP',        scrapMult: 1.15 },
   { tokens: 5,  label: 'LEGEND',   bonus: '+20% SCRAP',        scrapMult: 1.20 },
-  { tokens: 10, label: 'GHOST',    bonus: '+25% SCRAP',        scrapMult: 1.25 },
+  { tokens: 10, label: 'WASTELAND LEGEND', bonus: '+25% SCRAP · APEX COSMETICS', scrapMult: 1.25 },
+  { tokens: 15, label: 'APEX MYTH', bonus: '+30% SCRAP · LEGEND AURA', scrapMult: 1.30 },
 ];
 function getPrestigeTier(tokens) {
   let tier = PRESTIGE_TIERS[0];
@@ -11036,6 +11213,10 @@ const PhotoMode = {
     if (!canvas) { UI.toast('NO CANVAS'); return; }
     try {
       const url = canvas.toDataURL('image/png');
+      if (typeof NativeBridge !== 'undefined' && NativeBridge.isNative && NativeBridge.share({ title:'Mojave Run', text:'My wasteland run', url })) {
+        UI.toast('NATIVE SHARE OPENED!');
+        return;
+      }
       const a = document.createElement('a');
       a.href = url;
       a.download = 'mojave-run-' + Date.now() + '.png';
@@ -11110,6 +11291,14 @@ function buildPlatformScreen() {
       </div>
     </div>
 
+    <h2>🛠 CRAFTING WORKSHOP</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">SCRAP + BOSS PARTS</div><div class="set-sub">CRAFT RUN MODS AND PERMANENT APEX UPGRADES</div></div>
+        <button class="btn set-toggle" data-act="platform-crafting">OPEN</button>
+      </div>
+    </div>
+
     <h2>🛠 LEVEL EDITOR</h2>
     <div class="set-row">
       <div class="set-head">
@@ -11138,7 +11327,8 @@ function buildPlatformScreen() {
       </div>
       ${replays.length ? '<div>' + replays.map(r =>
         `<div class="set-head" style="margin-top:6px"><div class="set-name" style="font-size:11px">🎬 ${escapeHtml(r.label)} · ${new Date(r.date).toLocaleDateString()}</div>
-        <div style="display:flex;gap:4px"><button class="btn set-toggle" data-act="platform-export-replay" data-data="${r.date}" style="font-size:9px">SHARE</button>
+        <div style="display:flex;gap:4px"><button class="btn set-toggle" data-act="platform-watch-replay" data-data="${r.date}" style="font-size:9px">WATCH</button>
+        <button class="btn set-toggle" data-act="platform-export-replay" data-data="${r.date}" style="font-size:9px">SHARE</button>
         <button class="btn set-toggle" data-act="platform-remove-replay" data-data="${r.date}" style="font-size:9px">✕</button></div></div>`
       ).join('') + '</div>' : ''}
     </div>
@@ -11174,7 +11364,7 @@ function buildPlatformScreen() {
 
 function buildEditorScreen() {
   const raw = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
-  const VALID_BIOMES = ['wastes','canyon','city','neon'];
+  const VALID_BIOMES = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch'];
   const VALID_OBJECTIVES = ['score','distance','kills','survive'];
   // Sanitize all values from localStorage before inserting into HTML attributes
   const draft = {
@@ -11240,6 +11430,12 @@ UI.showEditor = function() {
   wrap.innerHTML = buildEditorScreen();
   this.show('editor');
 };
+UI.showCrafting = function() {
+  const wrap = document.getElementById('platform-list');
+  if (!wrap) return;
+  wrap.innerHTML = buildCraftingScreen();
+  this.show('platform');
+};
 
 // === PLATFORM ACTION HANDLER ===
 // Extends the existing UI.act chain to handle all platform feature actions.
@@ -11283,6 +11479,10 @@ UI.act = function(action, data) {
       }
       return;
     }
+    case 'platform-crafting':
+      SFX.click();
+      UI.showCrafting();
+      return;
     case 'platform-editor':
       SFX.click();
       UI.showEditor();
@@ -11311,6 +11511,8 @@ UI.act = function(action, data) {
           }, { once: true });
         }
         UI.toast('LEVEL CODE GENERATED!');
+        incrementV23Counter('customLevelsCreated', 1);
+        Profile.checkAchievements().forEach(a => UI.toast(a.icon + ' BADGE: ' + a.name, 2500));
       }
       return;
     }
@@ -11391,6 +11593,37 @@ UI.act = function(action, data) {
       }
       return;
     }
+    case 'platform-watch-replay': {
+      SFX.click();
+      const rdate = parseInt(data || '0', 10);
+      const entry = Replay.list().find(r => r.date === rdate);
+      const rp = entry && Replay.parseReplay(entry.code);
+      if (rp) startReplayPlayback(rp);
+      else UI.toast('REPLAY NOT FOUND');
+      return;
+    }
+    case 'craft-recipe': {
+      SFX.click();
+      const res = CraftingWorkshop.craft(data || '');
+      if (res.ok) {
+        incrementV23Counter('crafts', 1);
+        SFX.levelUp();
+        UI.toast('CRAFTED ' + res.recipe.name);
+        Profile.checkAchievements().forEach(a => UI.toast(a.icon + ' BADGE: ' + a.name, 2500));
+        UI.showCrafting();
+      } else UI.toast(res.reason);
+      return;
+    }
+    case 'select-spec': {
+      SFX.click();
+      setWeaponSpecialization(data || 'none');
+      UI.showCrafting();
+      return;
+    }
+    case 'start-custom-run':
+      SFX.click();
+      startRun('custom');
+      return;
     case 'platform-remove-replay': {
       SFX.click();
       const replayDateToRemove = parseInt(data || '0', 10);
@@ -12105,7 +12338,7 @@ function vehicleSpecialAbility(vehicleId) {
 
 // Wasteland Run mutators: applied at the start of each roguelite run.
 // Each mutator has an id, name, short desc, and a weight for random selection.
-// TODO: Apply mutator effects in beginPlaying() when mode === 'wastelandrun'.
+// V3 wiring applies these effects through applyWastelandRunStartBonuses() and updateWastelandRun().
 const WASTELAND_RUN_MUTATORS = [
   { id:'ironwall',       name:'IRON WALL',         desc:'Enemy HP +50%. Bullets deal bonus damage.',                   weight:3 },
   { id:'glassroad',      name:'GLASS ROAD',         desc:'Player HP halved. Score multiplier ×2.',                      weight:3 },
@@ -12147,7 +12380,7 @@ function isWastelandRunUnlocked() {
 // === CRAFTING & PROGRESSION ===
 // Crafting Workshop: combine scrap + boss parts into temporary or permanent mods.
 // Boss parts are awarded as crafting ingredients when special bosses are defeated.
-// TODO: Boss part drop integration (dropBossPart() hook in boss death handler).
+// V3 wiring drops boss parts through dropBossPart() in the boss death handler.
 
 const CRAFTING_RECIPES = [
   {
@@ -12227,9 +12460,11 @@ const CraftingWorkshop = {
       inv[part] = (inv[part] || 0) - qty;
     }
     p.craftingInventory = inv;
+    p.craftingMods = p.craftingMods || [];
     if (recipe.type === 'permanent') {
-      p.craftingMods = p.craftingMods || [];
       if (!p.craftingMods.includes(recipeId)) p.craftingMods.push(recipeId);
+    } else if (!p.craftingMods.includes(recipeId)) {
+      p.craftingMods.push(recipeId);
     }
     Profile.save();
     return { ok: true, recipe };
@@ -12257,7 +12492,7 @@ const CraftingWorkshop = {
 // === WEAPON SPECIALIZATIONS ===
 // Weapon specializations are tier-4 branches available after completing weapon tier 3.
 // They give a dramatic playstyle shift. Selected once per run (or permanent via crafting).
-// TODO: Apply specialization effects in bullet-spawn and enemy-hit handlers.
+// V3 wiring applies specialization effects in fireGuns() and applyWeaponSpecHit().
 
 const WEAPON_SPECIALIZATIONS = [
   {
@@ -12343,7 +12578,7 @@ const ZOMBIE_COOP_OBJECTIVES = [
 // === ACHIEVEMENTS — 50+ NEW BADGES (v2.3) ===
 // New achievement IDs recognized by the achievement system.
 // Earning conditions are evaluated in checkAchievements() via the existing tracker.
-// TODO: Wire earning conditions to game events in the main achievement evaluation block.
+// V3 achievement conditions are evaluated through checkAchievementCondition() and v23Counters.
 const ACHIEVEMENTS_V23 = [
   { id:'empire_start',     name:'EMPIRE RISING',          desc:'Begin a Wasteland Run.',                            secret:false },
   { id:'empire_clear',     name:'WASTELAND EMPEROR',       desc:'Complete a full Wasteland Run without dying.',       secret:true },
@@ -12406,6 +12641,455 @@ const ACHIEVEMENTS_V23 = [
     if (!existing.has(a.id)) ACHIEVEMENTS.push(a);
   }
 })();
+
+
+
+// ============================================================
+// === V3 PLATFORM EXPANSION WIRING ===
+// Additive glue for the V3 plan: roguelite mutators, crafting,
+// weapon specs, replay playback, extraction, controller/native hooks.
+// ============================================================
+
+function hasMutator(id) { return !!(Game.runMutators || []).some(m => m.id === id); }
+
+function applyPermanentCraftingStats(st, profile) {
+  if (!profile || !Array.isArray(profile.craftingMods)) return;
+  for (const id of profile.craftingMods) {
+    const recipe = CRAFTING_RECIPES.find(r => r.id === id && r.type === 'permanent');
+    const e = recipe && recipe.effect;
+    if (!e) continue;
+    if (e.maxHpMul) st.maxHp *= e.maxHpMul;
+    if (e.accelMul) st.accel *= e.accelMul;
+    if (e.maxVMul) st.maxV *= e.maxVMul;
+    if (e.fireRateMul) st.fireRate *= e.fireRateMul;
+    if (e.dmgMul) st.dmg *= e.dmgMul;
+  }
+}
+
+function getActiveRunCraftingMods(profile) {
+  return (profile && Array.isArray(profile.craftingMods) ? profile.craftingMods : [])
+    .map(id => CRAFTING_RECIPES.find(r => r.id === id && r.type === 'run'))
+    .filter(Boolean);
+}
+
+function applyRunStatLayers(stats, profile, mode) {
+  const st = Object.assign({}, stats);
+  const spec = getActiveWeaponSpec();
+  if (spec && spec.statMods) {
+    if (spec.statMods.fireRate) st.fireRate *= spec.statMods.fireRate;
+    if (spec.statMods.dmg) st.dmg *= spec.statMods.dmg;
+  }
+  if (mode === 'wastelandrun' && Game.runMutators) {
+    if (hasMutator('glassroad')) st.maxHp *= 0.5;
+    if (hasMutator('speedcurse')) st.maxV *= 0.8;
+  }
+  const season = getCurrentSeason();
+  if (season.name === 'CHROME SEASON') st.maxV *= 1.10;
+  if (season.name === 'EMBER SEASON') st.dmg *= 1.15;
+  return st;
+}
+
+function applySeasonalRunBonuses() {
+  const season = getCurrentSeason();
+  Game.season = season;
+  if (season.name === 'GOLD SEASON') Game.scrapMul *= 1.20;
+  if (season.name === 'IRON SEASON') Game.scrapMul *= 1.10;
+  if (season.name === 'ASH SEASON') Game.pickupRateMul = 1.20;
+  else Game.pickupRateMul = 1;
+}
+
+function applyCraftingRunBonuses() {
+  for (const r of Game.activeCraftingMods || []) {
+    const e = r.effect || {};
+    if (e.damageTakenMul) Game.damageTakenMul *= e.damageTakenMul;
+    if (e.pickupRadius) Game.magnetRangeMul *= e.pickupRadius;
+    if (e.scrapMul) Game.scrapMul *= e.scrapMul;
+    if (e.fireRateMul) Game.weaponSpecState.fireRateMul = (Game.weaponSpecState.fireRateMul || 1) * e.fireRateMul;
+    if (e.bulletSplash) Game.weaponSpecState.bulletSplash = Math.max(Game.weaponSpecState.bulletSplash || 0, e.bulletSplash);
+    if (e.autoRepairRate) { Game._craftRepairRate = e.autoRepairRate; Game._craftRepairInterval = e.autoRepairInterval || 15; Game._craftRepairT = Game._craftRepairInterval; }
+  }
+}
+
+function applyWastelandRunStartBonuses() {
+  if (Game.mode !== 'wastelandrun') return;
+  if (hasMutator('ironwall')) { Game.enemyHpMul *= 1.5; Game.vehicleStats.dmg *= 1.15; }
+  if (hasMutator('glassroad')) Game.scoreMul *= 2;
+  if (hasMutator('nightonly')) Game.isNight = true;
+  if (hasMutator('scraplord')) { Game.scrapMul *= 3; Game.enemyFireMul *= 0.7; }
+  if (hasMutator('armoredworld')) Game.enemyDamageReduction = Math.max(Game.enemyDamageReduction, 0.30);
+  if (hasMutator('bloodmoon')) Game.enemyContactMul *= 1.40;
+  if (hasMutator('goldensector')) { Game.scrapMul *= 5; Game.enemyHpMul *= 1.25; Game.enemyFireMul *= 0.85; }
+}
+
+function pickWastelandRunBiome(seedKey) {
+  const pool = ['wastes','redcanyon','midnight','neonruins','irradiated','scraparch'];
+  const seed = seedFromString('wr-biome-' + seedKey);
+  return pool[seed % pool.length];
+}
+
+function applyV3SpawnTuning(startIndex) {
+  for (let i = startIndex; i < Game.enemies.length; i++) {
+    const e = Game.enemies[i];
+    if (!e || e._v3Tuned) continue;
+    e.hp = Math.max(1, e.hp * (Game.enemyHpMul || 1));
+    if (e.fireT && Game.enemyFireMul) e.fireT *= Game.enemyFireMul;
+    if (Game.enemyDamageReduction) e.damageReduction = Game.enemyDamageReduction;
+    if (Game.enemyContactMul && e.contact) e.contact *= Game.enemyContactMul;
+    e._v3Tuned = true;
+  }
+}
+
+function applyWeaponSpecHit(b, e, dmg) {
+  if (!b) return;
+  if (b.splash) v3SplashDamage(e.x, e.y, 70, dmg * b.splash);
+  if (b.chain) chainLightningHit(e, b.chain, (b.chainDamageMul || 0.6) * dmg);
+  if (Game.activeWeaponSpec && Game.activeWeaponSpec.id === 'explosive' && e.hp <= 0) incrementRunCounter('explosiveKills', 1);
+}
+
+function consumePiercingHit(b, e) {
+  if (!b || !b.pierce) return false;
+  b.hitIds = b.hitIds || [];
+  const id = e._pid || (e._pid = 'e' + Math.random().toString(36).slice(2));
+  if (!b.hitIds.includes(id)) b.hitIds.push(id);
+  Game.v23RunStats.maxPierceHits = Math.max(Game.v23RunStats.maxPierceHits || 0, b.hitIds.length);
+  return b.hitIds.length < b.pierce;
+}
+
+function v3SplashDamage(x, y, r, dmg) {
+  for (let i = Game.enemies.length - 1; i >= 0; i--) {
+    const e = Game.enemies[i];
+    if (Math.hypot(e.x - x, e.y - y) >= r) continue;
+    e.hp -= dmg;
+    if (e.hp <= 0) killEnemyAtIndex(i, 'explosiveKills');
+  }
+}
+
+function chainLightningHit(source, count, dmg) {
+  const targets = Game.enemies
+    .filter(e => e !== source)
+    .sort((a,b) => Math.hypot(a.x-source.x,a.y-source.y) - Math.hypot(b.x-source.x,b.y-source.y))
+    .slice(0, count);
+  for (const e of targets) {
+    e.hp -= dmg;
+    Game.v23RunStats.chainHits = (Game.v23RunStats.chainHits || 0) + 1;
+    emit(e.x, e.y, 4, { color:'#80f0ff', speed:180, life:0.25, size:2 });
+    if (e.hp <= 0) {
+      const idx = Game.enemies.indexOf(e);
+      if (idx >= 0) killEnemyAtIndex(idx, 'chainKills');
+    }
+  }
+}
+
+function killEnemyAtIndex(i, counter) {
+  const e = Game.enemies[i]; if (!e) return;
+  applyKill(e.x, e.y, e.zombieScore || ENEMY_SCORE[e.kind] || 120);
+  if (counter) incrementRunCounter(counter, 1);
+  if (e.zombieType === 'spitter') incrementRunCounter('spitterKills', 1);
+  if (e.zombieType === 'mutant') incrementRunCounter('mutantKills', 1);
+  Game.enemies.splice(i, 1);
+  clearEnemyShotsFrom(e);
+}
+
+function incrementRunCounter(key, amt) {
+  Game.v23RunStats = Game.v23RunStats || {};
+  Game.v23RunStats[key] = (Game.v23RunStats[key] || 0) + (amt || 1);
+}
+function incrementV23Counter(key, amt) {
+  const p = Profile.active(); if (!p) return;
+  p.v23Counters = p.v23Counters || {};
+  p.v23Counters[key] = (p.v23Counters[key] || 0) + (amt || 1);
+  Profile.save();
+}
+function flushV23RunCounters() {
+  const p = Profile.active(); if (!p || !Game.v23RunStats) return;
+  p.v23Counters = p.v23Counters || {};
+  for (const [k, v] of Object.entries(Game.v23RunStats)) {
+    if (k.startsWith('best') || k === 'maxPierceHits') p.v23Counters[k] = Math.max(p.v23Counters[k] || 0, v || 0);
+    else p.v23Counters[k] = (p.v23Counters[k] || 0) + (v || 0);
+  }
+  Profile.save();
+}
+
+function spawnDroneSwarm(count) {
+  Game.drones = [];
+  for (let i = 0; i < count; i++) Game.drones.push({ a:(Math.PI*2*i)/count, fireT:0.2 + i*0.12 });
+}
+function updateDroneSwarm(dt) {
+  if (!Game.drones || !Game.drones.length || !Game.player) return;
+  const cx = Game.player.x, cy = Game.player.y;
+  for (const d of Game.drones) {
+    d.a += dt * 2.2;
+    d.x = cx + Math.cos(d.a) * 44;
+    d.y = cy + Math.sin(d.a) * 34;
+    d.fireT -= dt;
+    if (d.fireT <= 0 && Game.enemies.length) {
+      const target = Game.enemies.slice().sort((a,b) => Math.hypot(a.x-d.x,a.y-d.y) - Math.hypot(b.x-d.x,b.y-d.y))[0];
+      const dx = target.x - d.x, dy = target.y - d.y, dist = Math.hypot(dx, dy) || 1;
+      Game.bullets.push({ owner:'p', x:d.x, y:d.y, w:4, h:8, vx:dx/dist*520, vy:dy/dist*520, dmg:Game.vehicleStats.dmg*0.5, drone:true });
+      d.fireT = 0.55;
+    }
+  }
+}
+
+function updateV3Systems(dt) {
+  Game.v23RunStats = Game.v23RunStats || {};
+  if (Game._craftRepairRate) {
+    Game._craftRepairT -= dt;
+    if (Game._craftRepairT <= 0) {
+      Game._craftRepairT = Game._craftRepairInterval || 15;
+      Game.health = Math.min(Game.maxHealth, Game.health + Game._craftRepairRate);
+    }
+  }
+  updateDroneSwarm(dt);
+  updateVehicleAbility(dt);
+  if (Game.mode === 'wastelandrun') updateWastelandRun(dt);
+  if (Game.mode === 'extraction') updateExtraction(dt);
+}
+
+function updateWastelandRun(dt) {
+  if (hasMutator('zombiewave')) {
+    Game.wastelandWaveT -= dt;
+    if (Game.wastelandWaveT <= 0) {
+      Game.wastelandWaveT = 90;
+      for (let i = 0; i < 8; i++) spawnEnemy('zombie');
+      announceEvent('ZOMBIE TIDE', '#7af07a');
+    }
+  }
+  if (hasMutator('doublethreat') && !Game.boss && !Game.bossDeathSeq && Game.distance > 2500 && Math.floor(Game.distance / 2500) > (Game._wrBossSector || 0)) {
+    Game._wrBossSector = Math.floor(Game.distance / 2500);
+    spawnBoss(Math.min(5, 1 + Game._wrBossSector));
+    Game.bossWarning = 2.0;
+    announceEvent('DOUBLE THREAT BOSS', '#ff5050');
+  }
+}
+
+function startExtractionRun() {
+  Game.extraction = { hp: 160, maxHp: 160, targetDistance: 8000, syncT: 0 };
+  Game.hordeMode = { dur: 9999, nukeT: 10 };
+}
+function updateExtraction(dt) {
+  if (!Game.extraction) return;
+  if (Game.t > 3 && Math.random() < dt * 0.9) spawnEnemy(Math.random() < 0.55 ? 'zombie' : null);
+  for (const e of Game.enemies) {
+    if (e.y > H - 175 && Math.abs(e.x - W * 0.5) < W * 0.28) {
+      Game.extraction.hp -= (e.kind === 'zombie' ? 10 : 16) * dt;
+    }
+  }
+  if (Game.extraction.hp <= 0) { Game.extraction.hp = 0; triggerPlayerDeath(); }
+  if (window.MP && MP.connected) {
+    Game.extraction.syncT -= dt;
+    if (Game.extraction.syncT <= 0) {
+      Game.extraction.syncT = 1.0;
+      try { MP.sendEvent && MP.sendEvent({ kind:'convoy-dmg', hp:Game.extraction.hp }); } catch (_) {}
+    }
+  }
+}
+
+function triggerVehicleAbility() {
+  if (!Game.vehicle || !Game.activeAbility || Game.activeAbility.cooldown > 0) return;
+  const special = vehicleSpecialAbility(Game.vehicle.id);
+  if (!special) return;
+  Game.activeAbility.cooldown = 8;
+  incrementRunCounter(special + 'Uses', 1);
+  if (special === 'airstrike') {
+    announceEvent('AIR STRIKE', '#ff8080');
+    for (let i = 0; i < Game.enemies.length; i++) Game.enemies[i].hp -= 8;
+    shockwave(W * 0.5, H * 0.35, 'rgba(255,80,80,0.55)', 260);
+  } else if (special === 'cloak') {
+    Game.activeAbility.activeT = 4;
+    announceEvent('CLOAK ENGAGED', '#c0b0ff');
+  } else if (special === 'chargeRam') {
+    Game.powerups.nitro = { t:2.2, max:2.2 };
+    Game.contactDamageMul *= 1.8;
+    announceEvent('CHARGE RAM', '#ff7722');
+  } else if (special === 'chainLightning') {
+    const source = Game.player || { x:W/2, y:H/2 };
+    chainLightningHit(source, 5, Game.vehicleStats.dmg * 5);
+    announceEvent('CHAIN LIGHTNING', '#00ffcc');
+  } else if (special === 'areaDenial') {
+    Game.activeAbility.field = { x:Game.player.x, y:Game.player.y - 120, r:150, t:5 };
+    announceEvent('AREA DENIAL', '#ff6a10');
+  } else if (special === 'terrainIgnore') {
+    Game.powerups.nitro = { t:3, max:3 };
+    announceEvent('RIFT DRIFT', '#40d8ff');
+  }
+}
+function updateVehicleAbility(dt) {
+  if (!Game.activeAbility) return;
+  Game.activeAbility.cooldown = Math.max(0, Game.activeAbility.cooldown - dt);
+  if (Game.activeAbility.activeT > 0) Game.activeAbility.activeT -= dt;
+  if (Game.activeAbility.field) {
+    const f = Game.activeAbility.field;
+    f.t -= dt;
+    for (const e of Game.enemies) if (Math.hypot(e.x - f.x, e.y - f.y) < f.r) e.vy *= Math.pow(0.45, dt);
+    if (f.t <= 0) Game.activeAbility.field = null;
+  }
+}
+
+function dropBossPart(tier, x, y) {
+  const t = Number(tier) || 1;
+  let part = t <= 2 ? 'engine_coil' : t <= 4 ? 'boss_casing' : t <= 6 ? 'titan_plating' : (Math.random() < 0.5 ? 'reactor_shard' : 'salvage_coil');
+  CraftingWorkshop.awardPart(part, 1);
+  addPopup('PART +' + part.replace(/_/g, ' ').toUpperCase(), x, y - 28, '#d2ff6f', 13);
+}
+
+const WASTELAND_RUN_SCORE_KEY = 'mojave_wasteland_scores_v1';
+function recordWastelandRunScore(profile, seedKey, score) {
+  if (!seedKey) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(WASTELAND_RUN_SCORE_KEY) || '{}');
+    const arr = all[seedKey] || [];
+    arr.push({ name: profile.name, score: Math.floor(score), vehicle: profile.activeVehicle, at: Date.now() });
+    all[seedKey] = arr.sort((a,b)=>b.score-a.score).slice(0, 10);
+    localStorage.setItem(WASTELAND_RUN_SCORE_KEY, JSON.stringify(all));
+  } catch (_) {}
+}
+function recordDailyLeagueScore(profile, seedKey, score) {
+  try {
+    const key = 'mojave_daily_league_v1';
+    const all = JSON.parse(localStorage.getItem(key) || '{}');
+    const week = thisWeekKey();
+    const arr = all[week] || [];
+    arr.push({ name: profile.name, score: Math.floor(score), seed: seedKey, at: Date.now() });
+    all[week] = arr.sort((a,b)=>b.score-a.score).slice(0, 3);
+    localStorage.setItem(key, JSON.stringify(all));
+  } catch (_) {}
+}
+
+function claimWeeklyReward() {
+  const p = Profile.active(); if (!p) return false;
+  const wc = getWeeklyChallenge();
+  const key = wc.weekKey;
+  p.weeklyProgress = p.weeklyProgress || {};
+  const entry = p.weeklyProgress[key];
+  if (!entry || !entry.progress || entry.claimed) return false;
+  entry.claimed = true;
+  p.weeklyStreak = p.weeklyStreak || { count:0, lastClaimed:null };
+  const prev = p.weeklyStreak.lastClaimed;
+  p.weeklyStreak.count = prev && prev !== key ? p.weeklyStreak.count + 1 : Math.max(1, p.weeklyStreak.count || 1);
+  p.weeklyStreak.lastClaimed = key;
+  const streakBonus = (p.weeklyStreak.count || 1) * 500;
+  p.scrap = (p.scrap || 0) + wc.reward + streakBonus;
+  p.lifetimeScrap = (p.lifetimeScrap || 0) + wc.reward + streakBonus;
+  Profile.save();
+  return true;
+}
+
+function canSelectWeaponSpec(profile, id) {
+  if (id === 'none') return true;
+  const spec = WEAPON_SPEC_BY_ID[id]; if (!spec || !profile) return false;
+  const ups = (profile.vehicleUpgrades || {})[profile.activeVehicle] || {};
+  return (ups.weapons || 0) >= 3 || totalUpgradeTiers(ups) >= (spec.unlockTotal || 12);
+}
+function setWeaponSpecialization(id) {
+  const p = Profile.active(); if (!p) return false;
+  if (id !== 'none' && !WEAPON_SPEC_BY_ID[id]) return false;
+  if (!canSelectWeaponSpec(p, id)) { UI.toast('SPECIALIZATION LOCKED — UPGRADE WEAPONS FIRST'); return false; }
+  p.weaponSpecialization = id;
+  Profile.save();
+  return true;
+}
+
+function sanitizeLevelEditorConfig(raw) {
+  const biomes = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch'];
+  const objectives = ['score','distance','kills','survive'];
+  return {
+    name: String(raw && raw.name || 'CUSTOM RUN').slice(0, 20).toUpperCase(),
+    biome: biomes.includes(String(raw && raw.biome)) ? raw.biome : 'wastes',
+    objective: objectives.includes(String(raw && raw.objective)) ? raw.objective : 'score',
+    difficulty: Math.max(1, Math.min(5, Math.round(Number(raw && raw.difficulty) || 2))),
+    enemyDensity: Math.max(0.5, Math.min(2, Number(raw && raw.enemyDensity) || 1)),
+    pickupRate: Math.max(0.5, Math.min(2, Number(raw && raw.pickupRate) || 1)),
+  };
+}
+
+function buildCraftingScreen() {
+  const p = Profile.active() || {};
+  const inv = p.craftingInventory || {};
+  const recipes = CraftingWorkshop.getRecipes();
+  const spec = p.weaponSpecialization || 'none';
+  const specCards = ['none'].concat(WEAPON_SPECIALIZATIONS.map(s => s.id)).map(id => {
+    const s = id === 'none' ? { id:'none', name:'NO SPECIALIZATION', desc:'Standard guns.', icon:'•' } : WEAPON_SPEC_BY_ID[id];
+    const locked = !canSelectWeaponSpec(p, id);
+    return `<button class="btn set-q ${spec===id?'on':''}" data-act="select-spec" data-data="${id}" ${locked?'title="LOCKED"':''}>${s.icon || '⚙'} ${s.name}${locked?' 🔒':''}</button>`;
+  }).join('');
+  return `
+    <h2>🛠 CRAFTING WORKSHOP</h2>
+    <div class="set-row"><div class="set-name">INVENTORY</div><div class="set-sub">${Object.keys(inv).length ? Object.entries(inv).map(([k,v]) => escapeHtml(k.toUpperCase()) + ': ' + v).join(' · ') : 'NO BOSS PARTS YET'}</div></div>
+    <h2>⚡ WEAPON SPECIALIZATION</h2>
+    <div class="set-row"><div class="set-q-row">${specCards}</div></div>
+    <h2>🔩 RECIPES</h2>
+    ${recipes.map(r => {
+      const parts = Object.entries(r.cost.parts || {}).map(([part, qty]) => `${escapeHtml(part.toUpperCase())} ${inv[part]||0}/${qty}`).join(' · ') || 'NO PARTS';
+      return `<div class="set-row"><div class="set-head"><div><div class="set-name">${r.name} · ${r.type.toUpperCase()}</div><div class="set-sub">${r.desc}</div><div class="set-sub">SCRAP ${p.scrap||0}/${r.cost.scrap} · ${parts}</div></div>${r.alreadyOwned ? '<span class="set-val" style="color:var(--good)">OWNED</span>' : `<button class="btn set-toggle ${r.canAfford?'on':''}" data-act="craft-recipe" data-data="${r.id}">CRAFT</button>`}</div></div>`;
+    }).join('')}
+    <div class="set-row"><div class="set-head"><button class="btn set-toggle" data-act="start-custom-run">PLAY CUSTOM DRAFT</button><button class="btn set-toggle" data-act="platform-prestige">BACK</button></div></div>
+  `;
+}
+
+function startReplayPlayback(rp) {
+  if (!rp || !Array.isArray(rp.frames) || !rp.frames.length) return;
+  restoreRng();
+  const meta = rp.meta || {};
+  Game.mode = meta.mode || 'classic';
+  Game.state = 'replay';
+  Game.replay = { data: rp, t: 0, idx: 0 };
+  Game.vehicle = VEHICLE_BY_ID[meta.vehicle] || VEHICLES[0];
+  Game.vehicleStats = Profile.effectiveStats(Game.vehicle.id) || Object.assign({}, Game.vehicle.base);
+  Game.player = { x: W * 0.5, y: H - 110, w:42, h:64, vx:0 };
+  Game.score = 0; Game.kills = 0; Game.health = Game.maxHealth = Math.round(Game.vehicleStats.maxHp || 100);
+  Game.biome = 'wastes'; Game.isNight = false; Game.isStorm = false;
+  Game.bullets.length = Game.enemies.length = Game.obstacles.length = Game.pickups.length = Game.enemyBullets.length = 0;
+  UI.hideAllScreens();
+}
+function updateReplayPlayback(dt) {
+  const r = Game.replay; if (!r) return;
+  r.t += dt;
+  const frames = r.data.frames;
+  const idx = Math.min(frames.length - 1, Math.floor(r.t * REPLAY_FPS));
+  const f = frames[idx];
+  if (f && Game.player) {
+    Game.player.x = f.x; Game.player.y = f.y; Game.score = f.s; Game.kills = f.k; Game.health = f.h;
+  }
+  Game.bgScroll += 120 * dt; Game.laneOffset = (Game.laneOffset + 120 * dt) % 60;
+  if (idx >= frames.length - 1 || keys['escape']) { Game.state = 'menu'; UI.showPlatform(); }
+}
+function drawReplayOverlay() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.62)';
+  ctx.fillRect(W * 0.28, H * 0.12, W * 0.44, 32);
+  ctx.fillStyle = '#ffd86b';
+  ctx.font = 'bold 14px "Courier New", monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('REPLAY THEATER · ESC TO EXIT', W * 0.5, H * 0.12 + 16);
+  ctx.restore();
+}
+
+const NativeBridge = (() => {
+  const cap = window.Capacitor;
+  const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  return {
+    isNative,
+    haptic(type) { try { if (isNative && window.CapacitorHaptics) window.CapacitorHaptics.impact({ style:type || 'MEDIUM' }); } catch (_) {} },
+    share(data) { try { if (isNative && window.CapacitorShare) return window.CapacitorShare.share(data); } catch (_) {} return null; },
+  };
+})();
+
+const GamepadInput = {
+  active:false,
+  poll() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const gp = Array.from(pads || []).find(Boolean);
+    if (!gp || Game.state !== 'playing') return;
+    const ax = (gp.axes && gp.axes[0]) || 0;
+    input.left = input.left || ax < -0.25 || (gp.buttons[14] && gp.buttons[14].pressed);
+    input.right = input.right || ax > 0.25 || (gp.buttons[15] && gp.buttons[15].pressed);
+    input.fire = input.fire || !!(gp.buttons[0] && gp.buttons[0].pressed);
+    if (gp.buttons[1] && gp.buttons[1].pressed && !this._specialHeld) triggerVehicleAbility();
+    this._specialHeld = !!(gp.buttons[1] && gp.buttons[1].pressed);
+    if (!this.active) { this.active = true; setControlHintMode('gamepad'); }
+  }
+};
 
 // ============================================================
 // === END v2.3 GAME EXPANSION ENHANCEMENTS ===
