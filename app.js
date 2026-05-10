@@ -8332,18 +8332,34 @@ function drawObstacle(o) {
 
 function drawEnemyThreatHalos() {
   if (!Game.enemies.length) return;
+  // At low quality skip per-enemy radial gradients (expensive on mobile) and
+  // use a single flat semi-transparent fill instead.
+  const q = (typeof PerfMon !== 'undefined') ? PerfMon.quality : 1;
   ctx.save();
-  for (const e of Game.enemies) {
-    if (e.kind === 'zombie' || e.kind === 'drone') continue; // these have their own clear silhouettes
-    const r = Math.max(e.w, e.h) * 0.65;
-    const g = ctx.createRadialGradient(e.x, e.y + e.h * 0.25, r * 0.2, e.x, e.y + e.h * 0.25, r);
-    g.addColorStop(0, 'rgba(255,40,40,0.45)');
-    g.addColorStop(0.55, 'rgba(255,40,40,0.18)');
-    g.addColorStop(1,   'rgba(255,40,40,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(e.x, e.y + e.h * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
-    ctx.fill();
+  if (q < 0.5) {
+    // Simple flat halo — no gradient objects, much cheaper on mobile GPUs.
+    ctx.fillStyle = 'rgba(255,40,40,0.18)';
+    for (const e of Game.enemies) {
+      if (e.kind === 'zombie' || e.kind === 'drone') continue;
+      const r = Math.max(e.w, e.h) * 0.65;
+      ctx.beginPath();
+      ctx.ellipse(e.x, e.y + e.h * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    // Full gradient halo at medium-high quality.
+    for (const e of Game.enemies) {
+      if (e.kind === 'zombie' || e.kind === 'drone') continue; // these have their own clear silhouettes
+      const r = Math.max(e.w, e.h) * 0.65;
+      const g = ctx.createRadialGradient(e.x, e.y + e.h * 0.25, r * 0.2, e.x, e.y + e.h * 0.25, r);
+      g.addColorStop(0, 'rgba(255,40,40,0.45)');
+      g.addColorStop(0.55, 'rgba(255,40,40,0.18)');
+      g.addColorStop(1,   'rgba(255,40,40,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(e.x, e.y + e.h * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -11866,6 +11882,11 @@ document.addEventListener('visibilitychange', () => {
   if (!PerfMon.hidden) last = performance.now();
 });
 
+// Flag set by the adaptive scale governor when it changes renderScale.
+// Consumed at the TOP of the next frame so resize() runs before render(),
+// preventing a one-frame blank-canvas flash that looks like a freeze.
+let _pendingResize = false;
+
 function frame(now) {
   // When the tab is hidden, skip the frame entirely — saves CPU/battery and
   // prevents the throttled-tab catch-up burst that the dt clamp can only
@@ -11882,21 +11903,26 @@ function frame(now) {
   const dt = (!isFinite(rawDt) || rawDt <= 0) ? 0.016 : Math.min(0.05, rawDt);
   last = now;
   const frameStart = now;
-  try {
-    // === VERSUS MODE FRAME ===
-    if (Game.state === 'versus' || Game.state === 'versus-lobby' || Game.state === 'versus-end') {
+
+  // Apply any pending canvas resize BEFORE rendering this frame so the
+  // render always fills a correctly-sized canvas (no blank-frame flash).
+  if (_pendingResize) {
+    _pendingResize = false;
+    resize();
+  }
+
+  // === VERSUS MODE FRAME ===
+  if (Game.state === 'versus' || Game.state === 'versus-lobby' || Game.state === 'versus-end') {
+    try {
       if (Versus.countdownActive) {
         Versus.countdown -= dt;
         if (Versus.countdown < 0) Versus.countdown = 0;
       }
       versusUpdateInput(dt);
-      // Decay screen effects
       if (Game.shake > 0) Game.shake = Math.max(0, (Game.shake || 0) - dt * 2.4);
       if (Game.hitFlash > 0) Game.hitFlash = Math.max(0, (Game.hitFlash || 0) - dt * 3);
       renderVersus();
-      // Handle "return to menu" from versus-end
       if (Game.state === 'versus-end' && Versus.endData) {
-        // Listen for any input to return
         if (input.fire || input.left || input.right) {
           Versus.active = false;
           Versus.ended = false;
@@ -11906,27 +11932,40 @@ function frame(now) {
           UI.showMode();
         }
       }
-    } else {
-    if (Game.state !== 'playing') GamepadInput.poll();
-    if (Game.state === 'playing' || Game.state === 'loading'
-        || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
-      update(dt);
-      capRuntimeArrays();
+    } catch (err) {
+      console.error('[frame versus]', err);
     }
-    if (window.MP && MP.connected) {
-      MP.pruneStale();
-      sendMpState();
+  } else {
+    // Update (simulation) — isolated try-catch so a simulation exception
+    // never prevents render() from running.  A frozen display is worse than
+    // a frame of stale visuals.
+    try {
+      if (Game.state !== 'playing') GamepadInput.poll();
+      if (Game.state === 'playing' || Game.state === 'loading'
+          || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
+        update(dt);
+        capRuntimeArrays();
+      }
+      if (window.MP && MP.connected) {
+        MP.pruneStale();
+        sendMpState();
+      }
+      AudioEngine.update();
+    } catch (err) {
+      console.error('[frame update]', err);
     }
-    AudioEngine.update();
-    render();
-    if (window.MP && MP.connected) drawMpGhosts();
-    updateHint();
-    if (DEBUG_HUD) drawDebugHud();
-    } // end else (non-versus)
-  } catch (err) {
-    // Never let one bad frame kill the loop. Log + continue.
-    console.error('[frame]', err);
+
+    // Render — always attempted, even when the update above threw.
+    try {
+      render();
+      if (window.MP && MP.connected) drawMpGhosts();
+      updateHint();
+      if (DEBUG_HUD) drawDebugHud();
+    } catch (err) {
+      console.error('[frame render]', err);
+    }
   }
+
   // EWMA of total frame cost — used by the quality governor below and the
   // debug HUD overlay.
   const cost = performance.now() - frameStart;
@@ -11967,7 +12006,9 @@ function frame(now) {
     } else if (PerfMon.ewmaMs < SCALE_THRESHOLD_RECOVER_MS && renderScale < 1) {
       renderScale = Math.min(1, renderScale + SCALE_STEP_UP);
     }
-    if (Math.abs(renderScale - prev) > RENDER_SCALE_CHANGE_THRESHOLD) resize();
+    // Flag for resize at the start of the NEXT frame — avoids the blank
+    // canvas that occurs when resize() clears the buffer after render().
+    if (Math.abs(renderScale - prev) > RENDER_SCALE_CHANGE_THRESHOLD) _pendingResize = true;
   }
   requestAnimationFrame(frame);
 }
