@@ -13838,6 +13838,495 @@ UI.act = function(action, data) {
 // === END PHASE 1: MOBILE PLATFORM ===
 // ============================================================
 
+// ============================================================
+// === PHASE 2: CONSOLE PLATFORM — CONTROLLER · SPLIT-SCREEN · NATIVE ACHIEVEMENTS ===
+// ============================================================
+
+// --- PLATFORM ABSTRACTION LAYER ---
+const PlatformServices = (() => {
+  const cap = window.Capacitor;
+  const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  const isXbox = typeof window.Windows !== 'undefined' && typeof Windows.Gaming !== 'undefined';
+  const isSwitch = typeof window.nn !== 'undefined';
+  const platform = isXbox ? 'xbox' : isSwitch ? 'switch' : isNative ? 'mobile' : 'web';
+
+  const PLATFORM_ACHIEVEMENT_MAP = {
+    xbox: {
+      first_blood: 1, survivor: 2, road_warrior: 3, legend: 4,
+      scorched: 5, inferno: 6, nuclear: 7, drifter: 8,
+      road_king: 9, boss_slayer: 10, apex: 11, forged: 12,
+      iron_run: 13, pathfinder: 14, coast_to_coast: 15,
+      gearhead: 16, fully_loaded: 17, fleet: 18, collector: 19,
+      wingman: 20, scrap_hound: 21, scrap_baron: 22,
+      full_mastery: 23, throne_claimed: 24,
+    },
+    switch: {
+      first_blood: 'ach_first_blood', survivor: 'ach_survivor',
+      road_warrior: 'ach_road_warrior', legend: 'ach_legend',
+      scorched: 'ach_scorched', inferno: 'ach_inferno',
+      nuclear: 'ach_nuclear', drifter: 'ach_drifter',
+      road_king: 'ach_road_king', boss_slayer: 'ach_boss_slayer',
+      apex: 'ach_apex', forged: 'ach_forged',
+      iron_run: 'ach_iron_run', pathfinder: 'ach_pathfinder',
+      coast_to_coast: 'ach_coast_to_coast', gearhead: 'ach_gearhead',
+      fully_loaded: 'ach_fully_loaded', fleet: 'ach_fleet',
+      collector: 'ach_collector', wingman: 'ach_wingman',
+      scrap_hound: 'ach_scrap_hound', scrap_baron: 'ach_scrap_baron',
+      full_mastery: 'ach_full_mastery', throne_claimed: 'ach_throne_claimed',
+    },
+  };
+
+  function unlockAchievement(gameAchId) {
+    if (platform === 'web' || platform === 'mobile') return;
+    const map = PLATFORM_ACHIEVEMENT_MAP[platform];
+    if (!map || !(gameAchId in map)) return;
+    const nativeId = map[gameAchId];
+    try {
+      if (platform === 'xbox' && window.Windows && Windows.Gaming && Windows.Gaming.XboxLive) {
+        Windows.Gaming.XboxLive.Achievements.unlockAchievement(nativeId);
+      } else if (platform === 'switch' && window.nn && nn.achievement) {
+        nn.achievement.unlock(nativeId);
+      }
+    } catch (e) {
+      console.warn('[platform] achievement unlock failed:', gameAchId, e);
+    }
+  }
+
+  function syncAllAchievements() {
+    const p = typeof Profile !== 'undefined' && Profile.active ? Profile.active() : null;
+    if (!p || !Array.isArray(p.achievements)) return;
+    p.achievements.forEach(id => unlockAchievement(id));
+  }
+
+  function platformSave(data) {
+    try {
+      if (platform === 'xbox' && window.Windows && Windows.Storage) {
+        Windows.Storage.ApplicationData.current.localSettings.values['mojaverun_save'] = JSON.stringify(data);
+      } else if (platform === 'switch' && window.nn && nn.fs) {
+        nn.fs.writeFile('save:/mojaverun.json', JSON.stringify(data));
+      }
+    } catch (e) {
+      console.warn('[platform] save failed:', e);
+    }
+  }
+
+  function platformLoad() {
+    try {
+      if (platform === 'xbox' && window.Windows && Windows.Storage) {
+        const raw = Windows.Storage.ApplicationData.current.localSettings.values['mojaverun_save'];
+        return raw ? JSON.parse(raw) : null;
+      } else if (platform === 'switch' && window.nn && nn.fs) {
+        const raw = nn.fs.readFile('save:/mojaverun.json');
+        return raw ? JSON.parse(raw) : null;
+      }
+    } catch (e) {
+      console.warn('[platform] load failed:', e);
+    }
+    return null;
+  }
+
+  function initLifecycle() {
+    if (platform === 'xbox') {
+      try {
+        if (window.Windows && Windows.UI && Windows.UI.WebUI) {
+          Windows.UI.WebUI.WebUIApplication.addEventListener('suspending', () => {
+            Profile.save();
+            platformSave(Profile._data);
+          });
+          Windows.UI.WebUI.WebUIApplication.addEventListener('resuming', () => {
+            Profile.load();
+          });
+        }
+      } catch (_) {}
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        Profile.save();
+        if (platform !== 'web') platformSave(Profile._data);
+      }
+    });
+  }
+
+  return {
+    platform,
+    isXbox, isSwitch, isNative,
+    unlockAchievement,
+    syncAllAchievements,
+    platformSave,
+    platformLoad,
+    initLifecycle,
+    PLATFORM_ACHIEVEMENT_MAP,
+  };
+})();
+
+// --- EXTENDED CONTROLLER SUPPORT ---
+const GAMEPAD_BUTTON_X = 2;
+const GAMEPAD_BUTTON_Y = 3;
+const GAMEPAD_BUTTON_LB = 4;
+const GAMEPAD_BUTTON_RB = 5;
+const GAMEPAD_BUTTON_BACK = 8;
+const GAMEPAD_BUTTON_START = 9;
+const GAMEPAD_BUTTON_LSTICK = 10;
+const GAMEPAD_BUTTON_RSTICK = 11;
+const GAMEPAD_BUTTON_DPAD_UP = 12;
+const GAMEPAD_BUTTON_DPAD_DOWN = 13;
+
+const ConsoleInput = {
+  MAX_PLAYERS: 2,
+  playerPads: [null, null],
+  _prevButtons: [{}, {}],
+  _menuCooldown: 0,
+
+  assignGamepads() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let slot = 0;
+    this.playerPads = [null, null];
+    for (let i = 0; i < pads.length && slot < this.MAX_PLAYERS; i++) {
+      if (pads[i] && pads[i].connected) {
+        this.playerPads[slot] = i;
+        slot++;
+      }
+    }
+  },
+
+  getPlayerPad(playerIndex) {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const idx = this.playerPads[playerIndex];
+    return (idx !== null && pads[idx]) ? pads[idx] : null;
+  },
+
+  isPressed(gp, btnIndex) {
+    return gp && gp.buttons[btnIndex] && gp.buttons[btnIndex].pressed;
+  },
+
+  justPressed(gp, btnIndex, playerIndex) {
+    const now = this.isPressed(gp, btnIndex);
+    const prev = this._prevButtons[playerIndex || 0][btnIndex];
+    return now && !prev;
+  },
+
+  updatePrevState(gp, playerIndex) {
+    if (!gp) return;
+    const prev = this._prevButtons[playerIndex || 0];
+    for (let i = 0; i < gp.buttons.length; i++) {
+      prev[i] = gp.buttons[i] && gp.buttons[i].pressed;
+    }
+  },
+
+  pollMenuNavigation() {
+    const gp = this.getPlayerPad(0);
+    if (!gp) return;
+
+    const now = performance.now();
+    if (now < this._menuCooldown) { this.updatePrevState(gp, 0); return; }
+
+    if (this.justPressed(gp, GAMEPAD_BUTTON_DPAD_UP, 0)) {
+      this._focusMove(-1);
+      this._menuCooldown = now + 180;
+    }
+    if (this.justPressed(gp, GAMEPAD_BUTTON_DPAD_DOWN, 0)) {
+      this._focusMove(1);
+      this._menuCooldown = now + 180;
+    }
+
+    if (this.justPressed(gp, GAMEPAD_BUTTON_A, 0)) {
+      const focused = document.activeElement;
+      if (focused && typeof focused.click === 'function') focused.click();
+      this._menuCooldown = now + 250;
+    }
+
+    if (this.justPressed(gp, GAMEPAD_BUTTON_B, 0)) {
+      const backAction = typeof SCREEN_ESCAPE_ACTION !== 'undefined' && typeof UI !== 'undefined' && UI.current
+        ? SCREEN_ESCAPE_ACTION[UI.current] : null;
+      if (backAction && typeof UI.act === 'function') UI.act(backAction);
+      this._menuCooldown = now + 250;
+    }
+
+    if (this.justPressed(gp, GAMEPAD_BUTTON_START, 0)) {
+      if (typeof Game !== 'undefined' && Game.state === 'playing' && typeof togglePause === 'function') {
+        togglePause();
+      }
+      this._menuCooldown = now + 300;
+    }
+
+    if (this.justPressed(gp, GAMEPAD_BUTTON_Y, 0)) {
+      if (typeof Game !== 'undefined' && Game.state === 'playing' && typeof triggerVehicleAbility === 'function') {
+        triggerVehicleAbility();
+      }
+    }
+
+    if (this.justPressed(gp, GAMEPAD_BUTTON_LB, 0)) {
+      this._tabNavigate(-1);
+    }
+    if (this.justPressed(gp, GAMEPAD_BUTTON_RB, 0)) {
+      this._tabNavigate(1);
+    }
+
+    this.updatePrevState(gp, 0);
+  },
+
+  pollPlayer(playerIndex, inputObj) {
+    const gp = this.getPlayerPad(playerIndex);
+    if (!gp) return;
+    const ax = (gp.axes && gp.axes[0]) || 0;
+    inputObj.left = inputObj.left || ax < -GAMEPAD_AXIS_THRESHOLD || this.isPressed(gp, GAMEPAD_BUTTON_DPAD_LEFT);
+    inputObj.right = inputObj.right || ax > GAMEPAD_AXIS_THRESHOLD || this.isPressed(gp, GAMEPAD_BUTTON_DPAD_RIGHT);
+    inputObj.fire = inputObj.fire || this.isPressed(gp, GAMEPAD_BUTTON_A);
+    if (this.justPressed(gp, GAMEPAD_BUTTON_B, playerIndex) && typeof triggerVehicleAbility === 'function') {
+      triggerVehicleAbility();
+    }
+    this.updatePrevState(gp, playerIndex);
+    if (!GamepadInput.active) { GamepadInput.active = true; setControlHintMode('gamepad'); }
+  },
+
+  _focusMove(dir) {
+    const btns = Array.from(document.querySelectorAll('.screen.active button:not([disabled]), .screen.active [data-act], .screen.active a'));
+    if (btns.length === 0) return;
+    const idx = btns.indexOf(document.activeElement);
+    const next = idx < 0 ? 0 : Math.max(0, Math.min(btns.length - 1, idx + dir));
+    btns[next].focus();
+  },
+
+  _tabNavigate(dir) {
+    const tabs = Array.from(document.querySelectorAll('.screen.active .set-q-row button, .screen.active [data-mode]'));
+    if (tabs.length === 0) return;
+    const active = tabs.find(t => t.classList.contains('on') || t.classList.contains('primary'));
+    const idx = active ? tabs.indexOf(active) : -1;
+    const next = idx < 0 ? 0 : ((idx + dir + tabs.length) % tabs.length);
+    if (tabs[next] && typeof tabs[next].click === 'function') tabs[next].click();
+  },
+};
+
+window.addEventListener('gamepadconnected', () => ConsoleInput.assignGamepads());
+window.addEventListener('gamepaddisconnected', () => ConsoleInput.assignGamepads());
+
+// --- SPLIT-SCREEN CO-OP ---
+const SplitScreen = (() => {
+  let _active = false;
+  let _players = [];
+
+  const LAYOUT = {
+    2: [
+      { x: 0, y: 0, w: 0.5, h: 1 },
+      { x: 0.5, y: 0, w: 0.5, h: 1 },
+    ],
+  };
+
+  function isActive() { return _active; }
+
+  function start(playerCount) {
+    if (playerCount < 2 || playerCount > 2) return false;
+    ConsoleInput.assignGamepads();
+    if (ConsoleInput.playerPads.filter(p => p !== null).length < playerCount) {
+      UI.toast('CONNECT ' + playerCount + ' CONTROLLERS TO START SPLIT-SCREEN');
+      return false;
+    }
+
+    _active = true;
+    _players = [];
+
+    for (let i = 0; i < playerCount; i++) {
+      _players.push({
+        index: i,
+        input: { left: false, right: false, fire: false, touchTargetX: null, touchFire: false, special: false },
+        score: 0,
+        kills: 0,
+        distance: 0,
+        hp: 100,
+        maxHp: 100,
+        x: 0,
+        y: 0,
+        alive: true,
+        vehicle: null,
+        profile: null,
+      });
+    }
+
+    UI.toast('SPLIT-SCREEN CO-OP — ' + playerCount + ' PLAYERS');
+    return true;
+  }
+
+  function stop() {
+    _active = false;
+    _players = [];
+  }
+
+  function getPlayer(index) {
+    return _players[index] || null;
+  }
+
+  function getPlayers() {
+    return _players.slice();
+  }
+
+  function getViewport(playerIndex) {
+    const layout = LAYOUT[_players.length];
+    if (!layout || !layout[playerIndex]) return { x: 0, y: 0, w: 1, h: 1 };
+    return layout[playerIndex];
+  }
+
+  function pollInputs() {
+    if (!_active) return;
+    for (let i = 0; i < _players.length; i++) {
+      const p = _players[i];
+      p.input.left = false;
+      p.input.right = false;
+      p.input.fire = false;
+      p.input.special = false;
+      ConsoleInput.pollPlayer(i, p.input);
+    }
+  }
+
+  function drawDivider(ctx, W, H) {
+    if (!_active || _players.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = '#ffd86b';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#ffd86b';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.5, 0);
+    ctx.lineTo(W * 0.5, H);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPlayerLabel(ctx, playerIndex, W, H) {
+    if (!_active) return;
+    const vp = getViewport(playerIndex);
+    const px = vp.x * W;
+    const py = vp.y * H;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(px + 4, py + 4, 90, 22);
+    ctx.fillStyle = '#ffd86b';
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('P' + (playerIndex + 1), px + 8, py + 8);
+    const p = _players[playerIndex];
+    if (p) {
+      ctx.fillText('HP:' + Math.ceil(p.hp) + ' K:' + (p.kills || 0), px + 28, py + 8);
+    }
+    ctx.restore();
+  }
+
+  return {
+    isActive,
+    start,
+    stop,
+    getPlayer,
+    getPlayers,
+    getViewport,
+    pollInputs,
+    drawDivider,
+    drawPlayerLabel,
+  };
+})();
+
+// --- NATIVE ACHIEVEMENT SYNC ---
+const _origCheckAchievements = Profile.checkAchievements.bind(Profile);
+Profile.checkAchievements = function() {
+  const before = new Set((this.active() || {}).achievements || []);
+  const result = _origCheckAchievements();
+  const after = (this.active() || {}).achievements || [];
+  after.forEach(id => {
+    if (!before.has(id)) PlatformServices.unlockAchievement(id);
+  });
+  return result;
+};
+
+// --- PLATFORM COMPLIANCE ---
+const PlatformCompliance = {
+  runChecklist() {
+    const results = [];
+    try {
+      const testKey = '_mojave_cert_test';
+      localStorage.setItem(testKey, 'ok');
+      const read = localStorage.getItem(testKey);
+      localStorage.removeItem(testKey);
+      results.push({ test: 'localStorage', pass: read === 'ok' });
+    } catch (_) {
+      results.push({ test: 'localStorage', pass: false });
+    }
+    results.push({ test: 'profileSystem', pass: typeof Profile !== 'undefined' && typeof Profile.load === 'function' });
+    const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+    results.push({ test: 'controllerDetected', pass: pads.length > 0 });
+    results.push({ test: 'achievementSystem', pass: typeof ACHIEVEMENTS !== 'undefined' && ACHIEVEMENTS.length > 0 });
+    results.push({ test: 'platformServices', pass: typeof PlatformServices !== 'undefined' && !!PlatformServices.platform });
+    results.push({ test: 'audioContext', pass: typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined' });
+
+    const allPass = results.every(r => r.pass);
+    console.log('[compliance] Certification checklist:', allPass ? 'ALL PASS' : 'SOME FAILED', results);
+    return { pass: allPass, results };
+  },
+
+  initSuspendResume() {
+    PlatformServices.initLifecycle();
+    window.addEventListener('beforeunload', () => {
+      try { Profile.save(); } catch (_) {}
+    });
+  },
+
+  getVersionInfo() {
+    return {
+      game: 'Mojave Run',
+      version: '3.0.0',
+      platform: PlatformServices.platform,
+      build: Date.now().toString(36),
+    };
+  },
+};
+
+// Wire Phase 2 actions into UI.act
+const _origActPhase2 = UI.act.bind(UI);
+UI.act = function(action, data) {
+  if (action === 'split-start') {
+    SFX.click();
+    SplitScreen.start(2);
+    return;
+  }
+  if (action === 'split-stop') {
+    SFX.click();
+    SplitScreen.stop();
+    UI.toast('SPLIT-SCREEN ENDED');
+    return;
+  }
+  if (action === 'compliance-check') {
+    SFX.click();
+    const r = PlatformCompliance.runChecklist();
+    UI.toast(r.pass ? 'ALL CHECKS PASSED ✓' : 'SOME CHECKS FAILED ✗');
+    return;
+  }
+  return _origActPhase2(action, data);
+};
+
+// Patch frame loop to include console input polling + split-screen
+const _origFrame = typeof frame === 'function' ? frame : null;
+if (_origFrame) {
+  const _origGamepadPoll = GamepadInput.poll.bind(GamepadInput);
+  GamepadInput.poll = function() {
+    _origGamepadPoll();
+    if (Game.state !== 'playing') ConsoleInput.pollMenuNavigation();
+    if (SplitScreen.isActive()) SplitScreen.pollInputs();
+  };
+}
+
+// Extend boot to initialize Phase 2 platform services
+const _origBoot = boot;
+boot = function() {
+  _origBoot();
+  PlatformServices.initLifecycle();
+  PlatformServices.syncAllAchievements();
+  PlatformCompliance.initSuspendResume();
+  ConsoleInput.assignGamepads();
+  if (typeof startCloudAutoSync === 'function') startCloudAutoSync();
+};
+
+// ============================================================
+// === END PHASE 2: CONSOLE PLATFORM ===
+// ============================================================
+
 boot();
 
 })();
