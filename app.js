@@ -863,6 +863,14 @@ const CHARACTERS = [
     perk: '+10% SCRAP PAYOUT',
     palette: { skin:'#b18462', skinDark:'#6d442d', hair:'#3d2417', hairHi:'#7d543b', accent:'#ff9d66', cloth:'#38261c', metal:'#74615a', bg1:'#301812', bg2:'#120907' },
   },
+  {
+    id: 'vega',
+    name: 'VEGA',
+    title: 'THE DESERT HAWK',
+    bio: 'Came out of the Smoke Flats alone, silver-haired and grinning. Nobody knows where she was before. Nobody asks twice.',
+    perk: '–12% DAMAGE TAKEN',
+    palette: { skin:'#c4a882', skinDark:'#7a5c3c', hair:'#d8dde4', hairHi:'#ffffff', accent:'#e8c84a', cloth:'#2c2c1e', metal:'#b0a888', bg1:'#1e1c10', bg2:'#0c0b06' },
+  },
 ];
 const CHARACTER_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));
 const DEFAULT_CHARACTER_ID = 'opal';
@@ -1060,9 +1068,251 @@ function characterPortraitSVG(charId) {
       <rect class="spark" x="49" y="62" width="1.6" height="1.6" fill="${p.accent}"/>
       ${dust}
     `;
+  } else if (c.id === 'nox') {
+    // NOX — shaved sides, long top swept back into a wild mohawk, signal-ghost punk.
+    // Tactical headset on left ear, dark tinted wraparound visor pushed up on forehead,
+    // sharp cheekbones, thin lips set in focus.
+    face = `
+      <radialGradient id="g-nox" cx="50%" cy="58%" r="72%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-nox)"/>
+      <!-- signal-blue ember glow top-right -->
+      <circle class="ember" cx="76" cy="18" r="16" fill="${p.accent}" opacity=".38"/>
+      <!-- tech static grid lines (very faint) -->
+      <line x1="0" y1="70" x2="100" y2="70" stroke="${p.accent}" stroke-width=".3" opacity=".12"/>
+      <line x1="0" y1="80" x2="100" y2="80" stroke="${p.accent}" stroke-width=".3" opacity=".1"/>
+      <!-- shaved sides — dark stubble on temples -->
+      <ellipse cx="28" cy="44" rx="8" ry="14" fill="${p.hair}" opacity=".5"/>
+      <ellipse cx="72" cy="44" rx="8" ry="14" fill="${p.hair}" opacity=".5"/>
+      <!-- shoulders / tactical jacket collar -->
+      <g class="breath">
+        <path d="M8 100 L10 82 Q24 66 40 66 L60 66 Q76 66 90 82 L92 100 Z" fill="${p.cloth}"/>
+        <!-- collar detail / comm cable -->
+        <path d="M40 68 Q50 76 60 68" stroke="${p.accent}" stroke-width=".8" fill="none" opacity=".65"/>
+        <rect x="48" y="66" width="4" height="5" fill="${p.metal}"/>
+        <!-- neck -->
+        <rect x="44" y="60" width="12" height="12" fill="${p.skin}"/>
+      </g>
+      <!-- head -->
+      <ellipse cx="50" cy="46" rx="21" ry="24" fill="${p.skin}"/>
+      <!-- jaw shadow — sharp angle for high cheekbones -->
+      <path d="M32 52 Q50 68 68 52 L68 60 Q50 74 32 60 Z" fill="${p.skinDark}" opacity=".3"/>
+      <!-- mohawk — tall swept-back spikes, animated sway -->
+      <g class="hair">
+        <path d="M38 28 Q40 6 50 2 Q60 6 62 28 Q56 18 50 14 Q44 18 38 28 Z" fill="${p.hair}"/>
+        <!-- mohawk highlight streaks -->
+        <path d="M47 28 Q49 12 50 4 Q51 12 53 28" stroke="${p.hairHi}" stroke-width=".7" fill="none" opacity=".65"/>
+        <!-- side tufts of the mohawk -->
+        <path d="M36 30 Q34 16 42 12 Q44 22 40 32 Z" fill="${p.hair}" opacity=".8"/>
+        <path d="M64 30 Q66 16 58 12 Q56 22 60 32 Z" fill="${p.hair}" opacity=".8"/>
+      </g>
+      <!-- visor band pushed up on forehead -->
+      <rect x="29" y="34" width="42" height="5" rx="2.5" fill="${p.metal}" opacity=".9"/>
+      <rect x="31" y="35" width="38" height="2.5" rx="1.2" fill="${p.hairHi}" opacity=".35"/>
+      <!-- ear -->
+      <ellipse cx="29" cy="48" rx="3" ry="5" fill="${p.skinDark}"/>
+      <!-- tactical headset on left ear -->
+      <circle cx="26" cy="46" r="4" fill="${p.cloth}" stroke="${p.metal}" stroke-width=".8"/>
+      <circle cx="26" cy="46" r="2" fill="${p.metal}" opacity=".8"/>
+      <line x1="26" y1="42" x2="26" y2="36" stroke="${p.metal}" stroke-width=".9"/>
+      <!-- mic arm curving from headset -->
+      <path d="M24 44 Q18 46 20 52" stroke="${p.accent}" stroke-width=".7" fill="none"/>
+      <circle cx="20" cy="52" r="1.2" fill="${p.accent}" opacity=".85"/>
+      <!-- eyes — narrow, focused, dark tinted -->
+      <g>
+        <ellipse cx="40" cy="47" rx="3.5" ry="2.1" fill="#b0cce0"/>
+        <circle cx="40" cy="47" r="1.4" fill="${p.hair}"/>
+        <ellipse cx="60" cy="47" rx="3.5" ry="2.1" fill="#b0cce0"/>
+        <circle cx="60" cy="47" r="1.4" fill="${p.hair}"/>
+        <rect class="eyelid"   x="37" y="45" width="7" height="4" fill="${p.skinDark}"/>
+        <rect class="eyelid b" x="57" y="45" width="7" height="4" fill="${p.skinDark}"/>
+      </g>
+      <!-- thin sharp brows -->
+      <rect x="37" y="42" width="7" height="1.2" fill="${p.hair}" transform="rotate(-4,40,42)"/>
+      <rect x="56" y="42" width="7" height="1.2" fill="${p.hair}" transform="rotate(4,60,42)"/>
+      <!-- nose — sharp aquiline -->
+      <path d="M50 49 L48 57 L52 57 Z" fill="${p.skinDark}" opacity=".38"/>
+      <!-- set mouth — slight smirk -->
+      <path d="M44 62 Q52 66 58 62" stroke="${p.skinDark}" stroke-width="1" fill="none"/>
+      <!-- signal spark at collar -->
+      <circle class="spark" cx="72" cy="74" r="1.5" fill="${p.accent}"/>
+      ${dust}
+    `;
+  } else if (c.id === 'ram') {
+    // RAM — thick shaggy wavy hair, heavy stubble/beard, rugged mechanic. No-nonsense face.
+    // Bandana around neck, cracked lip, mechanic grease on brow, chain scar.
+    face = `
+      <radialGradient id="g-ram" cx="50%" cy="52%" r="68%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-ram)"/>
+      <!-- ember warm glow — ember orange for ram -->
+      <circle class="ember" cx="22" cy="22" r="18" fill="${p.accent}" opacity=".42"/>
+      <!-- back of hair — wide, thick, wavy -->
+      <g class="hair s">
+        <path d="M24 30 Q16 50 20 88 L36 88 Q28 55 34 32 Z" fill="${p.hair}"/>
+        <path d="M76 30 Q84 50 80 88 L64 88 Q72 55 66 32 Z" fill="${p.hair}"/>
+        <!-- wave highlights -->
+        <path d="M25 42 Q22 58 24 74" stroke="${p.hairHi}" stroke-width=".7" fill="none" opacity=".5"/>
+        <path d="M75 42 Q78 58 76 74" stroke="${p.hairHi}" stroke-width=".7" fill="none" opacity=".5"/>
+        <path d="M32 38 Q29 54 31 68" stroke="${p.hairHi}" stroke-width=".4" fill="none" opacity=".35"/>
+        <path d="M68 38 Q71 54 69 68" stroke="${p.hairHi}" stroke-width=".4" fill="none" opacity=".35"/>
+      </g>
+      <!-- shoulders / heavy canvas jacket -->
+      <g class="breath">
+        <path d="M6 100 L8 78 Q20 60 40 60 L60 60 Q80 60 92 78 L94 100 Z" fill="${p.cloth}"/>
+        <!-- collar chain welded on -->
+        <path d="M40 62 Q50 72 60 62" stroke="${p.metal}" stroke-width="1.4" fill="none" opacity=".8"/>
+        <!-- bandana fold at collar -->
+        <path d="M38 66 Q50 74 62 66 L60 70 Q50 78 40 70 Z" fill="${p.accent}" opacity=".6"/>
+        <!-- neck -->
+        <rect x="43" y="58" width="14" height="10" fill="${p.skin}"/>
+      </g>
+      <!-- wide head — broader jaw for the convoy hammer build -->
+      <ellipse cx="50" cy="46" rx="24" ry="25" fill="${p.skin}"/>
+      <!-- jaw square shadow -->
+      <path d="M28 56 Q50 74 72 56 L72 64 Q50 80 28 64 Z" fill="${p.skinDark}" opacity=".4"/>
+      <!-- thick shaggy hair top — animated waves -->
+      <g class="hair">
+        <!-- main mass -->
+        <path d="M26 32 Q28 12 50 8 Q72 12 74 32 Q64 22 50 18 Q36 22 26 32 Z" fill="${p.hair}"/>
+        <!-- wavy locks falling over brow -->
+        <path d="M28 32 Q32 24 30 38 Z" fill="${p.hair}" opacity=".9"/>
+        <path d="M35 28 Q38 18 36 36 Z" fill="${p.hair}" opacity=".85"/>
+        <path d="M60 28 Q64 18 62 36 Z" fill="${p.hair}" opacity=".85"/>
+        <path d="M68 30 Q72 22 70 38 Z" fill="${p.hair}" opacity=".8"/>
+        <!-- wave highlights in hair -->
+        <path d="M36 30 Q44 16 50 10" stroke="${p.hairHi}" stroke-width=".7" fill="none" opacity=".55"/>
+        <path d="M58 28 Q52 16 50 10" stroke="${p.hairHi}" stroke-width=".6" fill="none" opacity=".45"/>
+      </g>
+      <!-- ear — slightly hidden by hair -->
+      <ellipse cx="26" cy="48" rx="3.5" ry="5.5" fill="${p.skinDark}"/>
+      <!-- stubble beard — heavy coverage over jaw -->
+      <ellipse cx="50" cy="62" rx="16" ry="8" fill="${p.skinDark}" opacity=".55"/>
+      <!-- stubble dots scattered across jaw for texture -->
+      <circle cx="40" cy="60" r="1" fill="${p.hair}" opacity=".45"/>
+      <circle cx="44" cy="64" r="1" fill="${p.hair}" opacity=".4"/>
+      <circle cx="50" cy="66" r="1.2" fill="${p.hair}" opacity=".45"/>
+      <circle cx="56" cy="64" r="1" fill="${p.hair}" opacity=".4"/>
+      <circle cx="60" cy="60" r="1" fill="${p.hair}" opacity=".45"/>
+      <circle cx="36" cy="58" r=".9" fill="${p.hair}" opacity=".4"/>
+      <circle cx="64" cy="58" r=".9" fill="${p.hair}" opacity=".4"/>
+      <!-- upper-lip mustache line -->
+      <path d="M42 59 Q50 62 58 59" stroke="${p.hair}" stroke-width="1.4" fill="none" opacity=".6"/>
+      <!-- eyes — deep set, heavy brow -->
+      <g>
+        <ellipse cx="41" cy="47" rx="3.2" ry="2" fill="#e8d0b8"/>
+        <circle cx="41" cy="47" r="1.4" fill="${p.cloth}"/>
+        <ellipse cx="59" cy="47" rx="3.2" ry="2" fill="#e8d0b8"/>
+        <circle cx="59" cy="47" r="1.4" fill="${p.cloth}"/>
+        <rect class="eyelid"   x="38" y="45" width="6" height="4" fill="${p.skinDark}"/>
+        <rect class="eyelid b" x="56" y="45" width="6" height="4" fill="${p.skinDark}"/>
+      </g>
+      <!-- heavy brows — bushy -->
+      <path d="M36 42 Q41 39 46 42" stroke="${p.hair}" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <path d="M54 42 Q59 39 64 42" stroke="${p.hair}" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <!-- brow grease smudge -->
+      <ellipse cx="42" cy="41" rx="3" ry=".8" fill="${p.cloth}" opacity=".55" transform="rotate(-6,42,41)"/>
+      <!-- nose — broad, mechanic's nose -->
+      <path d="M50 49 L47 57 L53 57 Z" fill="${p.skinDark}" opacity=".42"/>
+      <!-- cracked-lip set jaw -->
+      <path d="M43 62 Q50 65 57 62" stroke="${p.skinDark}" stroke-width="1.3" fill="none"/>
+      <path d="M50 62 L50 64" stroke="${p.accent}" stroke-width=".7" opacity=".6"/>
+      <!-- knuckle scar line across cheek -->
+      <path d="M30 54 L26 60" stroke="${p.metal}" stroke-width="1" opacity=".5"/>
+      <path d="M28 56 L30 60" stroke="${p.metal}" stroke-width=".7" opacity=".35"/>
+      <!-- spark at jaw — welding ember -->
+      <circle class="spark" cx="24" cy="70" r="1.6" fill="${p.accent}"/>
+      ${dust}
+    `;
+  } else if (c.id === 'vega') {
+    // VEGA — The Desert Hawk. Wild flowing silver-white hair, sharp eye-wrap,
+    // sun-bronzed skin, crescent scar at brow, hawk feather braided in hair.
+    face = `
+      <radialGradient id="g-vega" cx="50%" cy="55%" r="70%">
+        <stop offset="0%" stop-color="${p.bg1}"/>
+        <stop offset="100%" stop-color="${p.bg2}"/>
+      </radialGradient>
+      <rect width="100" height="100" fill="url(#g-vega)"/>
+      <!-- desert gold ember -->
+      <circle class="ember" cx="68" cy="18" r="20" fill="${p.accent}" opacity=".4"/>
+      <circle class="ember" cx="24" cy="28" r="10" fill="${p.metal}" opacity=".3"/>
+      <!-- wild hair flowing behind — wide animated mass -->
+      <g class="hair s">
+        <path d="M22 28 Q10 50 14 90 L32 90 Q24 56 30 30 Z" fill="${p.hair}"/>
+        <path d="M78 28 Q90 50 86 90 L68 90 Q76 56 70 30 Z" fill="${p.hair}"/>
+        <!-- silver highlight streaks -->
+        <path d="M23 36 Q18 56 22 76" stroke="${p.hairHi}" stroke-width=".9" fill="none" opacity=".65"/>
+        <path d="M77 36 Q82 56 78 76" stroke="${p.hairHi}" stroke-width=".9" fill="none" opacity=".65"/>
+        <path d="M29 32 Q25 52 28 70" stroke="${p.hairHi}" stroke-width=".5" fill="none" opacity=".45"/>
+        <path d="M71 32 Q75 52 72 70" stroke="${p.hairHi}" stroke-width=".5" fill="none" opacity=".45"/>
+      </g>
+      <!-- shoulders / desert wrap -->
+      <g class="breath">
+        <path d="M8 100 L10 82 Q22 66 40 66 L60 66 Q78 66 90 82 L92 100 Z" fill="${p.cloth}"/>
+        <!-- shoulder wrap trim in gold accent -->
+        <path d="M14 86 Q50 76 86 86" stroke="${p.accent}" stroke-width=".7" fill="none" opacity=".5"/>
+        <rect x="44" y="62" width="12" height="10" fill="${p.skin}"/>
+      </g>
+      <!-- head -->
+      <ellipse cx="50" cy="45" rx="22" ry="25" fill="${p.skin}"/>
+      <!-- jaw shadow — angular, hawk-like -->
+      <path d="M30 52 Q50 70 70 52 L70 60 Q50 74 30 60 Z" fill="${p.skinDark}" opacity=".32"/>
+      <!-- wild silver hair top — sweeping, layered -->
+      <g class="hair">
+        <!-- main swept mass -->
+        <path d="M28 30 Q30 8 50 4 Q70 8 72 30 Q62 16 50 12 Q38 16 28 30 Z" fill="${p.hair}"/>
+        <!-- windswept locks fanning left -->
+        <path d="M30 28 Q22 14 26 6 Q30 16 34 28 Z" fill="${p.hair}" opacity=".85"/>
+        <path d="M26 32 Q14 18 18 8 Q24 18 28 34 Z" fill="${p.hair}" opacity=".7"/>
+        <!-- windswept locks fanning right -->
+        <path d="M70 28 Q78 14 74 6 Q70 16 66 28 Z" fill="${p.hair}" opacity=".85"/>
+        <path d="M74 32 Q86 18 82 8 Q76 18 72 34 Z" fill="${p.hair}" opacity=".7"/>
+        <!-- bright silver highlights -->
+        <path d="M42 28 Q46 14 50 6 Q52 14 56 28" stroke="${p.hairHi}" stroke-width=".9" fill="none" opacity=".7"/>
+        <path d="M36 30 Q38 18 42 10" stroke="${p.hairHi}" stroke-width=".6" fill="none" opacity=".5"/>
+        <path d="M64 30 Q62 18 58 10" stroke="${p.hairHi}" stroke-width=".6" fill="none" opacity=".5"/>
+        <!-- hawk feather braid on right side -->
+        <path d="M68 28 Q74 34 72 44 Q68 36 64 28 Z" fill="${p.accent}" opacity=".7"/>
+        <path d="M69 30 L71 38" stroke="${p.hairHi}" stroke-width=".4" fill="none" opacity=".7"/>
+      </g>
+      <!-- ear -->
+      <ellipse cx="28" cy="47" rx="3" ry="5" fill="${p.skinDark}"/>
+      <!-- ear cuff — gold ring -->
+      <circle cx="27" cy="44" r="2" fill="none" stroke="${p.accent}" stroke-width="1.2"/>
+      <!-- eye-wrap scar line across bridge / tactical eyewrap half-bar on right -->
+      <path d="M54 42 L76 40" stroke="${p.cloth}" stroke-width="3.5" stroke-linecap="round" opacity=".82"/>
+      <path d="M55 42 L75 40" stroke="${p.accent}" stroke-width=".6" stroke-linecap="round" opacity=".5"/>
+      <!-- crescent scar at brow left -->
+      <path d="M32 38 Q36 34 40 38" stroke="${p.accent}" stroke-width=".9" fill="none" opacity=".7"/>
+      <!-- eyes — hawk yellow-gold irises -->
+      <g>
+        <ellipse cx="40" cy="47" rx="3.5" ry="2.2" fill="#f0e0a0"/>
+        <circle cx="40" cy="47" r="1.4" fill="${p.cloth}"/>
+        <ellipse cx="60" cy="47" rx="3.5" ry="2.2" fill="#f0e0a0"/>
+        <circle cx="60" cy="47" r="1.4" fill="${p.cloth}"/>
+        <rect class="eyelid"   x="37" y="45" width="7" height="4" fill="${p.skinDark}"/>
+        <rect class="eyelid b" x="57" y="45" width="7" height="4" fill="${p.skinDark}"/>
+      </g>
+      <!-- sharp brows — arched -->
+      <path d="M36 42 Q40 38 45 42" stroke="${p.hair}" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M55 42 Q60 38 64 42" stroke="${p.hair}" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <!-- nose — straight and proud -->
+      <path d="M50 49 L48 57 L52 57 Z" fill="${p.skinDark}" opacity=".4"/>
+      <!-- half-smile — confident -->
+      <path d="M44 62 Q52 67 58 62" stroke="${p.skinDark}" stroke-width="1.1" fill="none"/>
+      <!-- desert sun burn flush on cheek -->
+      <ellipse cx="36" cy="54" rx="4" ry="2" fill="${p.accent}" opacity=".22"/>
+      <ellipse cx="64" cy="54" rx="4" ry="2" fill="${p.accent}" opacity=".22"/>
+      <!-- hawk feather spark accent -->
+      <circle class="spark" cx="76" cy="72" r="1.5" fill="${p.accent}"/>
+      ${dust}
+    `;
   } else {
-    // Generic fallback portrait intentionally used for characters without
-    // bespoke art variants (including newly added roster entries).
+    // Generic fallback portrait — used for any future characters without bespoke art.
     face = `
       <radialGradient id="g-generic" cx="50%" cy="55%" r="68%">
         <stop offset="0%" stop-color="${p.bg1}"/>
@@ -1662,6 +1912,7 @@ function getCharacterPerkState(characterId) {
     abigail: { scrapMul: 1.00, killScoreMul: 1.05, nightVisionMul: 1.00 },
     nox:     { scrapMul: 1.00, killScoreMul: 1.08, nightVisionMul: 1.10 },
     ram:     { scrapMul: 1.10, killScoreMul: 1.00, nightVisionMul: 1.00 },
+    vega:    { scrapMul: 1.00, killScoreMul: 1.00, nightVisionMul: 1.00, damageTakenMul: 0.88 },
   };
   return perks[characterId] ?? perks[DEFAULT_CHARACTER_ID];
 }
@@ -2708,7 +2959,7 @@ function startRun(mode, level) {
   Game.killScoreMul = perkState.killScoreMul || 1;
   Game.nightVisionMul = perkState.nightVisionMul || 1;
   Game.pickupScoreMul = 1;
-  Game.damageTakenMul = 1;
+  Game.damageTakenMul = perkState.damageTakenMul || 1;
   Game.bossDamageMul = 1;
   Game.contactDamageMul = 1;
   Game.nitroDamageMul = 1;
