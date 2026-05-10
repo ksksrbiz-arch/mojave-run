@@ -26,6 +26,7 @@ const GAMEPAD_BUTTON_A = 0;
 const GAMEPAD_BUTTON_B = 1;
 const GAMEPAD_BUTTON_DPAD_LEFT = 14;
 const GAMEPAD_BUTTON_DPAD_RIGHT = 15;
+const GRAVEYARD_SHIFT_WAVE_INTERVAL = 55;
 const MAX_ACTIVE_CRAFTING_MODS = 3;
 const BOSS_PART_TIERS = [
   { max: 2, parts: ['engine_coil'] },
@@ -163,6 +164,34 @@ const VEHICLES = [
     base: { maxHp: 55, accel: 2800, maxV: 680, fireRate: 0.09, dmg: 2, guns: 4, bigShot: false },
     color: { body:'#0a0a2a', hood:'#04041c', cab:'#02020e', windshield:'#40ffb0', glow:'#00ffcc' },
     special: 'chainLightning',
+  },
+  // === v2.4 NEW VEHICLES — Storm Frontier ===
+  {
+    id: 'stormreaver', name: 'STORM REAVER',
+    desc: 'Tempest chaser rig with EMP shell relays and a high-voltage reactor spine.',
+    cost: 33000,
+    v24: true,
+    base: { maxHp: 120, accel: 1900, maxV: 500, fireRate: 0.12, dmg: 2, guns: 3, bigShot: false },
+    color: { body:'#1a2a4a', hood:'#101a34', cab:'#060c1a', windshield:'#80d0ff', glow:'#50a0ff' },
+    special: 'chainLightning',
+  },
+  {
+    id: 'gravewarden', name: 'GRAVE WARDEN',
+    desc: 'Fortress plow with cryo armor. Slower, heavier, and built for attrition.',
+    cost: 36000,
+    v24: true,
+    base: { maxHp: 420, accel: 980, maxV: 285, fireRate: 0.34, dmg: 5, guns: 1, bigShot: true },
+    color: { body:'#3a404e', hood:'#262c36', cab:'#12161e', windshield:'#b0d8ff', glow:'#88c0ff' },
+    special: 'areaDenial',
+  },
+  {
+    id: 'sunlancer', name: 'SUN LANCER',
+    desc: 'Prototype spearhead racer. Blinding speed and precision burst weaponry.',
+    cost: 39000,
+    v24: true,
+    base: { maxHp: 70, accel: 3000, maxV: 720, fireRate: 0.08, dmg: 2, guns: 3, bigShot: false },
+    color: { body:'#4a2c08', hood:'#301c06', cab:'#180e04', windshield:'#ffe080', glow:'#ffc840' },
+    special: 'terrainIgnore',
   },
 ];
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map(v => [v.id, v]));
@@ -561,6 +590,61 @@ const VEHICLE_BRANCHES = {
       unlockTotal: 8,
       statMods: { accel: 1.14, maxV: 1.12 },
       effects: { nitroDamageMul: 1.45, critChance: 0.12, critMul: 1.9 },
+    },
+  ],
+  // === v2.4 NEW VEHICLE BRANCHES — Storm Frontier ===
+  stormreaver: [
+    {
+      id: 'thunderhead',
+      name: 'THUNDERHEAD',
+      desc: 'Overcharged relays. Higher fire cadence and stronger chain discharges.',
+      unlockTotal: 10,
+      statMods: { fireRate: 0.86, dmg: 1.14 },
+      effects: { critChance: 0.14, critMul: 2.0 },
+    },
+    {
+      id: 'cycloneframe',
+      name: 'CYCLONE FRAME',
+      desc: 'Stormproof shell with reinforced intake shields for sustained runs.',
+      unlockTotal: 10,
+      statMods: { maxHp: 1.20, maxV: 1.04 },
+      effects: { damageTakenMul: 0.85, pickupRadius: 90 },
+    },
+  ],
+  gravewarden: [
+    {
+      id: 'coldbastion',
+      name: 'COLD BASTION',
+      desc: 'Deep-freeze armor lattice that shrugs off direct contact pressure.',
+      unlockTotal: 10,
+      statMods: { maxHp: 1.24, dmg: 1.06 },
+      effects: { damageTakenMul: 0.76, contactDamageMul: 1.50 },
+    },
+    {
+      id: 'shattercannon',
+      name: 'SHATTER CANNON',
+      desc: 'Cryo-penetrator rounds built to crack elite armor and boss plating.',
+      unlockTotal: 10,
+      statMods: { dmg: 1.20, fireRate: 0.92 },
+      effects: { bossDamageMul: 1.30, critChance: 0.12, critMul: 1.95 },
+    },
+  ],
+  sunlancer: [
+    {
+      id: 'flareline',
+      name: 'FLARELINE',
+      desc: 'Aggressive launch profile with faster acceleration and higher top speed.',
+      unlockTotal: 10,
+      statMods: { accel: 1.18, maxV: 1.10 },
+      effects: { nitroDamageMul: 1.35, critChance: 0.10, critMul: 1.85 },
+    },
+    {
+      id: 'solarvein',
+      name: 'SOLAR VEIN',
+      desc: 'Precision output tuning for cleaner crit chains and steadier boss damage.',
+      unlockTotal: 10,
+      statMods: { fireRate: 0.92, dmg: 1.12 },
+      effects: { bossDamageMul: 1.18, critChance: 0.16, critMul: 2.1 },
     },
   ],
 };
@@ -1232,6 +1316,12 @@ const SIDEKICKS = [
     bio:'Dropped off the map before the war started. Finds power-ups no one else can see.',
     perk:'DOUBLE POWERUP DURATION · SECRET DROPS +40%', unlockLoc:'chicago', color:'#c0c0ff', v23: true,
   },
+  // === v2.4 NEW SIDEKICK — Storm Frontier ===
+  {
+    id:'ember',   name:'EMBER',   title:'STORM GUNNER',
+    bio:'Rides the turret ring in acid rain and calls every shot like it owes her scrap.',
+    perk:'+12% BOSS DAMAGE · +10% SCORE FROM ELITES', unlockLoc:'seattle', color:'#ffc860', v24: true,
+  },
 ];
 const SIDEKICK_BY_ID = Object.fromEntries(SIDEKICKS.map(s => [s.id, s]));
 
@@ -1388,6 +1478,45 @@ const BIOME_THEMES = {
     skullDay:'#d8c090', skullNight:'#a89060',
     stormLine:'rgba(200,160,60,0.22)', stormHaze:'rgba(160,120,40,0.08)',
     cloudDay:'rgba(255,222,150,1)', fogDay:'rgba(150,110,40,0.26)', fogNight:'rgba(40,30,10,0.38)',
+  },
+  // === v2.4 NEW BIOMES — Storm Frontier ===
+  thunderplains: {
+    skyDayTop:'#1a2238', skyDayMid:'#23304f', skyDayBottom:'#2e4068',
+    skyStormTop:'#131b30', skyStormMid:'#1c2844',
+    skyNightTop:'#070c18', skyNightMid:'#101a30', skyNightBottom:'#1a2540',
+    skyNightStormTop:'#090f1e', skyNightStormMid:'#121f38',
+    farDay:'rgba(26,42,78,0.66)', farNight:'rgba(10,16,38,0.84)',
+    mountainDay:'#1c2c4a', mountainNight:'#0b1530',
+    hillsDay:'#2a3a5c', hillsNight:'#141f3d',
+    shoulderDay:'#253554', shoulderNight:'#151f30',
+    crackDay:'rgba(140,190,255,0.15)', crackNight:'rgba(110,170,255,0.20)',
+    lineDay:'rgba(190,226,255,0.72)', lineNight:'rgba(190,226,255,0.92)',
+    roadDayA:'#17233a', roadDayB:'#1f2d46',
+    roadNightA:'#090f1c', roadNightB:'#10192c',
+    cactusDay:'#3a4f70', cactusNight:'#25354e',
+    wreckDay:'#2f3e5f', wreckNight:'#1a253b',
+    skullDay:'#c2d8f2', skullNight:'#90a8ca',
+    stormLine:'rgba(130,180,255,0.28)', stormHaze:'rgba(110,160,255,0.10)',
+    cloudDay:'rgba(198,220,255,1)', fogDay:'rgba(60,98,168,0.26)', fogNight:'rgba(8,16,40,0.46)',
+  },
+  frostwaste: {
+    skyDayTop:'#3a4458', skyDayMid:'#4b5770', skyDayBottom:'#66738a',
+    skyStormTop:'#2a3242', skyStormMid:'#384258',
+    skyNightTop:'#101624', skyNightMid:'#1a2538', skyNightBottom:'#2a3244',
+    skyNightStormTop:'#121a2a', skyNightStormMid:'#1e2a3e',
+    farDay:'rgba(70,84,110,0.62)', farNight:'rgba(22,30,46,0.82)',
+    mountainDay:'#44526a', mountainNight:'#1c2738',
+    hillsDay:'#54647d', hillsNight:'#2a364a',
+    shoulderDay:'#5a6a80', shoulderNight:'#2f3a4a',
+    crackDay:'rgba(220,240,255,0.18)', crackNight:'rgba(180,210,240,0.12)',
+    lineDay:'rgba(240,250,255,0.74)', lineNight:'rgba(240,250,255,0.90)',
+    roadDayA:'#384352', roadDayB:'#465466',
+    roadNightA:'#1a2230', roadNightB:'#253042',
+    cactusDay:'#6d7d8f', cactusNight:'#4a5a70',
+    wreckDay:'#5f6d84', wreckNight:'#364253',
+    skullDay:'#f2f6ff', skullNight:'#c0ccd8',
+    stormLine:'rgba(220,236,255,0.24)', stormHaze:'rgba(180,210,240,0.08)',
+    cloudDay:'rgba(245,250,255,1)', fogDay:'rgba(170,190,220,0.22)', fogNight:'rgba(26,36,56,0.34)',
   },
 };
 
@@ -2046,6 +2175,14 @@ function checkAchievementCondition(id, p) {
     case 'biome_collector': return (p.biomesVisited || []).length >= Math.min(8, BIOME_KEYS.length);
     case 'mode_master': return ALL_COMPLETABLE_MODES.every(id => (p.modesCompleted || []).includes(id));
     case 'roguelite_seed': return (p.wastelandSeedsPlayed || []).length >= 10;
+    case 'v24_start': return ['stormreaver','gravewarden','sunlancer'].includes((p.lastRunMeta || {}).vehicleId);
+    case 'v24_fleet': return ['stormreaver','gravewarden','sunlancer'].every(id => (p.ownedVehicles || {})[id]);
+    case 'thunder_road': return (p.biomesVisited || []).includes('thunderplains');
+    case 'frost_runner': return (p.biomesVisited || []).includes('frostwaste');
+    case 'stormfront_clear': return !!((p.lastRunMeta || {}).victory && ((p.lastRunMeta || {}).mutators || []).includes('stormfrontier'));
+    case 'overclocked_clear': return !!((p.lastRunMeta || {}).victory && ((p.lastRunMeta || {}).mutators || []).includes('overclocked'));
+    case 'graveyardshift_clear': return !!((p.lastRunMeta || {}).victory && ((p.lastRunMeta || {}).mutators || []).includes('graveyardshift'));
+    case 'craft_titanreactor': return (p.craftingMods || []).includes('titanreactor');
     default: return false;
   }
 }
@@ -4164,6 +4301,10 @@ function startRun(mode, level) {
   if (Game.sidekick === 'ratchet') Game.vehicleStats = Object.assign({}, stats, { dmg: stats.dmg * 1.15 });
   if (Game.sidekick === 'mirage')  Game.magnetRangeMul = 1.3;
   if (Game.sidekick === 'vulture') Game.scrapMul = (Game.scrapMul || 1) * 1.2;
+  if (Game.sidekick === 'ember') {
+    Game.bossDamageMul = (Game.bossDamageMul || 1) * 1.12;
+    Game.killScoreMul = (Game.killScoreMul || 1) * 1.10;
+  }
   applySeasonalRunBonuses();
   applyCraftingRunBonuses();
   applyWastelandRunStartBonuses();
@@ -12461,6 +12602,11 @@ const WASTELAND_RUN_MUTATORS = [
   { id:'bountyhunter',   name:'BOUNTY HUNTER',      desc:'Kill streaks build a cash multiplier — break it and lose it.',weight:2 },
   { id:'bloodmoon',      name:'BLOOD MOON',         desc:'All enemies deal 40% more contact damage.',                    weight:3 },
   { id:'goldensector',   name:'GOLDEN SECTOR',      desc:'This sector has 5× scrap. Enemies are ramped accordingly.',   weight:1 },
+  // === v2.4 NEW MUTATORS ===
+  { id:'stormfrontier',  name:'STORM FRONTIER',     desc:'Enemy shot cooldowns shorten, but scrap and pickups are richer.',weight:2 },
+  { id:'overclocked',    name:'OVERCLOCKED',        desc:'Player shot cooldowns shorten sharply. Enemy durability rises.', weight:2 },
+  { id:'graveyardshift', name:'GRAVEYARD SHIFT',    desc:'Night never ends and zombie raids pulse in extended waves.',     weight:2 },
+  { id:'convoytax',      name:'CONVOY TAX',         desc:'Extra scrap income, but incoming damage is increased.',         weight:2 },
 ];
 
 // Get a deterministic set of mutators for a given Wasteland Run seed.
@@ -12541,6 +12687,28 @@ const CRAFTING_RECIPES = [
     cost:{ scrap:8000, parts:{ 'engine_coil':3, 'reactor_shard':2 } },
     type:'permanent', slot:'engine',
     effect:{ accelMul:1.08, maxVMul:1.08 },
+  },
+  // === v2.4 NEW CRAFTING RECIPES ===
+  {
+    id:'scavengerlens',   name:'SCAVENGER LENS',
+    desc:'+25% pickup radius and +25% scrap value this run.',
+    cost:{ scrap:1800, parts:{ 'salvage_coil':2 } },
+    type:'run', slot:'utility',
+    effect:{ pickupRadius:1.25, scrapMul:1.25 },
+  },
+  {
+    id:'shockmesh',       name:'SHOCK MESH',
+    desc:'-12% incoming damage and minor arc retaliation this run.',
+    cost:{ scrap:2100, parts:{ 'boss_casing':1, 'reactor_shard':1 } },
+    type:'run', slot:'defense',
+    effect:{ damageTakenMul:0.88 },
+  },
+  {
+    id:'titanreactor',    name:'TITAN REACTOR',
+    desc:'Permanent +8% weapon damage on every vehicle.',
+    cost:{ scrap:9500, parts:{ 'reactor_shard':3, 'engine_coil':2 } },
+    type:'permanent', slot:'weapon',
+    effect:{ dmgMul:1.08 },
   },
 ];
 
@@ -12641,6 +12809,25 @@ const WEAPON_SPECIALIZATIONS = [
     icon: '🛸',
     unlockTotal: 14,
   },
+  // === v2.4 NEW WEAPON SPECIALIZATIONS ===
+  {
+    id: 'overdrive',
+    name: 'OVERDRIVE',
+    desc: 'Hyper-cyclic barrels. Very high fire rate with lighter per-shot impact and shallow pierce.',
+    statMods: { fireRate: 0.82, dmg: 0.95 },
+    effects: { bulletPierce: 2 },
+    icon: '🔥',
+    unlockTotal: 14,
+  },
+  {
+    id: 'siegebeam',
+    name: 'SIEGE BEAM',
+    desc: 'Heavy capacitor lances. Slower cadence, but explosive impact with stronger boss pressure.',
+    statMods: { fireRate: 1.25, dmg: 1.35 },
+    effects: { bulletSplash: 0.45, bossDamageMul: 1.25 },
+    icon: '🔆',
+    unlockTotal: 16,
+  },
 ];
 const WEAPON_SPEC_BY_ID = Object.fromEntries(WEAPON_SPECIALIZATIONS.map(s => [s.id, s]));
 
@@ -12683,6 +12870,8 @@ const ZOMBIE_COOP_OBJECTIVES = [
   { id:'barricade',  name:'HOLD BARRICADE',         desc:'Keep the shared barricade above 50% for 60s.', coopOnly: true },
   { id:'survivor',   name:'ESCORT SURVIVORS',       desc:'Escort 3 civilian survivors to the checkpoint.',coopOnly: false },
   { id:'cleanwave',  name:'CLEAN WAVE',             desc:'Clear a full wave without any teammate taking damage.', coopOnly: true },
+  { id:'siphon',     name:'POWER SIPHON',           desc:'Capture 3 reactor nodes before they overload.', coopOnly: false },
+  { id:'stormhold',  name:'HOLD STORM GATE',        desc:'Defend a lightning gate for 75 seconds.',      coopOnly: true },
 ];
 
 // === ACHIEVEMENTS — 50+ NEW BADGES (v2.3) ===
@@ -12742,12 +12931,32 @@ const ACHIEVEMENTS_V23 = [
   { id:'roguelite_seed',   name:'SEED HUNTER',             desc:'Play Wasteland Run on 10 different seeds.',        secret:false },
 ];
 
+// === ACHIEVEMENTS — v2.4 STORM FRONTIER PASS ===
+const ACHIEVEMENTS_V24 = [
+  { id:'v24_start', name:'STORM FRONTIER', desc:'Start a run with any v2.4 vehicle.', secret:false },
+  { id:'v24_fleet', name:'FRONTIER FLEET', desc:'Own all 3 v2.4 vehicles.', secret:true },
+  { id:'thunder_road', name:'THUNDER ROAD', desc:'Drive in the Thunder Plains biome.', secret:false },
+  { id:'frost_runner', name:'FROST RUNNER', desc:'Drive in the Frostwaste biome.', secret:false },
+  { id:'stormfront_clear', name:'EYE OF THE STORM', desc:'Win a run with Storm Frontier mutator active.', secret:true },
+  { id:'overclocked_clear', name:'REDLINE SURVIVOR', desc:'Win a run with Overclocked mutator active.', secret:true },
+  { id:'graveyardshift_clear', name:'NIGHT SHIFT', desc:'Win a run with Graveyard Shift mutator active.', secret:true },
+  { id:'craft_titanreactor', name:'TITAN CORE', desc:'Craft the Titan Reactor permanent mod.', secret:false },
+];
+
 // Expose new achievement defs so existing checkAchievements() can pick them up.
 // The existing achievements array is extended if it hasn't already been merged.
 (function mergeV23Achievements() {
   if (typeof ACHIEVEMENTS === 'undefined') return; // safety guard
   const existing = new Set(ACHIEVEMENTS.map(a => a.id));
   for (const a of ACHIEVEMENTS_V23) {
+    if (!existing.has(a.id)) ACHIEVEMENTS.push(a);
+  }
+})();
+
+(function mergeV24Achievements() {
+  if (typeof ACHIEVEMENTS === 'undefined') return; // safety guard
+  const existing = new Set(ACHIEVEMENTS.map(a => a.id));
+  for (const a of ACHIEVEMENTS_V24) {
     if (!existing.has(a.id)) ACHIEVEMENTS.push(a);
   }
 })();
@@ -12827,6 +13036,7 @@ function applyCraftingRunBonuses() {
 
 function applyWastelandRunStartBonuses() {
   if (Game.mode !== 'wastelandrun') return;
+  const weaponSpecState = Game.weaponSpecState || (Game.weaponSpecState = {});
   if (hasMutator('ironwall')) { Game.enemyHpMul *= 1.5; Game.vehicleStats.dmg *= 1.15; }
   if (hasMutator('glassroad')) Game.scoreMul *= 2;
   if (hasMutator('nightonly')) Game.isNight = true;
@@ -12834,10 +13044,14 @@ function applyWastelandRunStartBonuses() {
   if (hasMutator('armoredworld')) Game.enemyDamageReduction = Math.max(Game.enemyDamageReduction, 0.30);
   if (hasMutator('bloodmoon')) Game.enemyContactMul *= 1.40;
   if (hasMutator('goldensector')) { Game.scrapMul *= 5; Game.enemyHpMul *= 1.25; Game.enemyFireMul *= 0.85; }
+  if (hasMutator('stormfrontier')) { Game.enemyFireMul *= 0.65; Game.scrapMul *= 1.45; Game.pickupRateMul = Math.max(Game.pickupRateMul || 1, 1.25); }
+  if (hasMutator('overclocked')) { Game.enemyHpMul *= 1.20; weaponSpecState.fireRateMul = (weaponSpecState.fireRateMul || 1) * 0.75; }
+  if (hasMutator('graveyardshift')) Game.isNight = true;
+  if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; }
 }
 
 function pickWastelandRunBiome(seedKey) {
-  const pool = ['wastes','redcanyon','midnight','neonruins','irradiated','scraparch'];
+  const pool = ['wastes','redcanyon','midnight','neonruins','irradiated','scraparch','thunderplains','frostwaste'];
   const seed = seedFromString('wr-biome-' + seedKey);
   return pool[seed % pool.length];
 }
@@ -12973,6 +13187,14 @@ function updateWastelandRun(dt) {
       Game.wastelandWaveT = 90;
       for (let i = 0; i < 8; i++) spawnEnemy('zombie');
       announceEvent('ZOMBIE TIDE', '#7af07a');
+    }
+  }
+  if (hasMutator('graveyardshift')) {
+    Game.wastelandGraveShiftT = (Game.wastelandGraveShiftT || GRAVEYARD_SHIFT_WAVE_INTERVAL) - dt;
+    if (Game.wastelandGraveShiftT <= 0) {
+      Game.wastelandGraveShiftT = GRAVEYARD_SHIFT_WAVE_INTERVAL;
+      for (let i = 0; i < 6; i++) spawnEnemy('zombie');
+      announceEvent('GRAVEYARD SHIFT', '#b0c8ff');
     }
   }
   if (hasMutator('doublethreat') && !Game.boss && !Game.bossDeathSeq && Game.distance > 2500 && Math.floor(Game.distance / 2500) > (Game._wrBossSector || 0)) {
@@ -13112,7 +13334,7 @@ function setWeaponSpecialization(id) {
 }
 
 function sanitizeLevelEditorConfig(raw) {
-  const biomes = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch'];
+  const biomes = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch','thunderplains','frostwaste'];
   const objectives = ['score','distance','kills','survive'];
   return {
     name: String(raw && raw.name || 'CUSTOM RUN').toUpperCase().replace(/[^A-Z0-9 ._\-]/g, '').slice(0, 20) || 'CUSTOM RUN',
