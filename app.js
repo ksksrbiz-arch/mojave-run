@@ -4257,8 +4257,15 @@ function forEachBossBody(b, fn) {
 
 function getBossBodyHit(b, x, y, w = 0, h = 0) {
   let hit = null;
+  let bestDist = Infinity;
   forEachBossBody(b, (bx, by) => {
-    if (!hit && Math.abs(x - bx) * 2 < b.w + w && Math.abs(y - by) * 2 < b.h + h) hit = { x: bx, y: by };
+    if (Math.abs(x - bx) * 2 < b.w + w && Math.abs(y - by) * 2 < b.h + h) {
+      const dist = Math.hypot(x - bx, y - by);
+      if (dist < bestDist) {
+        bestDist = dist;
+        hit = { x: bx, y: by };
+      }
+    }
   });
   return hit;
 }
