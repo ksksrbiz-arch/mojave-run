@@ -2959,7 +2959,7 @@ function startRun(mode, level) {
   Game.killScoreMul = perkState.killScoreMul || 1;
   Game.nightVisionMul = perkState.nightVisionMul || 1;
   Game.pickupScoreMul = 1;
-  Game.damageTakenMul = perkState.damageTakenMul || 1;
+  Game.damageTakenMul = perkState.damageTakenMul ?? 1;
   Game.bossDamageMul = 1;
   Game.contactDamageMul = 1;
   Game.nitroDamageMul = 1;
