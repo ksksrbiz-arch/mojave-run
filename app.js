@@ -7478,6 +7478,15 @@ function drawWeather() {
   }
 }
 
+// Lighten (+amt) or darken (-amt) a #rrggbb hex colour by a fixed per-channel amount.
+function shade(hex, amt) {
+  const n = parseInt((hex || '#808080').replace('#', ''), 16);
+  const r = Math.max(0, Math.min(255, (n >> 16) + amt));
+  const g = Math.max(0, Math.min(255, ((n >> 8) & 0xff) + amt));
+  const b = Math.max(0, Math.min(255, (n & 0xff) + amt));
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+
 function drawWheelTopdown(x, y, r, spin, tire = '#121212', rim = '#7f8590', spoke = '#dbe2f3') {
   ctx.save();
   ctx.translate(x, y);
