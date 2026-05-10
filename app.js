@@ -1586,6 +1586,7 @@ const Profile = {
         if (typeof p.cleanRuns !== 'number') { p.cleanRuns = 0; dirty = true; }
         if (typeof p.bestIronThrone !== 'number') { p.bestIronThrone = 0; dirty = true; }
         if (!Array.isArray(p.ironThroneCleared)) { p.ironThroneCleared = []; dirty = true; }
+        if (!('bankedPowerup' in p)) { p.bankedPowerup = null; dirty = true; }
         if (normalizeCosmetics(p, true)) dirty = true;
       });
       if (dirty) this.save();
@@ -1640,6 +1641,7 @@ const Profile = {
       ironThroneCleared: [], // array of cleared Iron Throne stage numbers
       achievements: [],    // array of earned achievement IDs
       cosmetics: defaultCosmetics(),
+      bankedPowerup: null, // power-up id to activate at the start of next run
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -1911,6 +1913,20 @@ const Profile = {
   isSidekickUnlocked(id) {
     const sk = SIDEKICK_BY_ID[id]; if (!sk) return false;
     return this.isCampaignLocationCleared(sk.unlockLoc);
+  },
+  // Bank a power-up id to be activated at the start of the next run.
+  bankPowerup(id) {
+    const p = this.active(); if (!p) return;
+    p.bankedPowerup = id;
+    this.save();
+  },
+  // Consume and return the banked power-up id (or null). Clears the slot.
+  consumeBankedPowerup() {
+    const p = this.active(); if (!p || !p.bankedPowerup) return null;
+    const id = p.bankedPowerup;
+    p.bankedPowerup = null;
+    this.save();
+    return id;
   },
   // Check all achievements and award any not yet earned. Returns newly earned array.
   checkAchievements() {
@@ -2415,6 +2431,10 @@ const POWERUPS = {
   // levels. Doubles damage, fires center super-laser + side miniguns.
   // Effectively permanent for the duration of the horde fight.
   siege:     { name:'SIEGE MODE',color:'#ffd86b', dur:90.0, glyph:'⚡' },
+  // Homing: bullets curve toward the nearest enemy — great crowd-clearing tool.
+  homing:    { name:'HOMING SHOTS', color:'#ff6fff', dur:10.0, glyph:'⊙' },
+  // Armor: plating absorbs half incoming damage for its duration.
+  armor:     { name:'ARMOR PLATING', color:'#b8c8ff', dur:12.0, glyph:'▣' },
 };
 const POWERUP_KEYS = Object.keys(POWERUPS);
 const SALVAGE_MAGNET_BONUS = 40;
@@ -2981,7 +3001,7 @@ const Game = {
   comboT: 0,
   comboBest: 0,
   // power-ups: id -> { t, max } | null
-  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null },
+  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null, homing: null, armor: null },
   // tire skid marks (drawn under road decals)
   skidMarks: [],
   // far parallax peaks (deepest layer)
@@ -3004,6 +3024,8 @@ const Game = {
   cosmetics: defaultCosmetics(),
   // spinout: set when the player hits a hitchhiker; car loses control temporarily
   spinout: null,   // { t, dur, rot, rotV, kickDir } | null
+  // power-up banked from a previous run to activate at game start
+  _pendingBankedPowerup: null,
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -3206,6 +3228,8 @@ function startRun(mode, level) {
   Game._pendingBadges = [];
   Game._pendingCosmetics = [];
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
+  // Consume any banked power-up — it will be activated when play begins
+  Game._pendingBankedPowerup = Profile.consumeBankedPowerup();
   Game.activeEvent = null;
   Game.eventTimer = 0;
   Game.eventCooldown = rand(12, 18);
@@ -3288,6 +3312,16 @@ function beginPlaying() {
     announceEvent('HORDE INCOMING — SIEGE MODE', '#ffd86b');
     SFX.boss && SFX.boss();
     Haptics.bossWarn && Haptics.bossWarn();
+  }
+  // Apply a power-up banked from a previous run
+  if (Game._pendingBankedPowerup) {
+    const _bId = Game._pendingBankedPowerup;
+    const _bDef = POWERUPS[_bId];
+    Game._pendingBankedPowerup = null;
+    if (_bDef && !SPECIAL_POWERUP_KEYS[_bId]) {
+      activatePowerup(_bId, null);
+      setTimeout(() => announceEvent('BANKED: ' + _bDef.name, _bDef.color), 800);
+    }
   }
 }
 
@@ -3784,17 +3818,23 @@ function spawnEnemy(forceKind, forceElite) {
 function spawnPickup() {
   const { x0, x1 } = roadBounds();
   const r = Math.random();
-  // 10% power-up, 16% repair, 12% cache, 62% scrap
+  // 4% reserve (bank a power-up for next run), 9% power-up, 15% repair, 12% cache, rest scrap
   let kind;
-  if (r < 0.10) kind = 'powerup';
-  else if (r < 0.26) kind = 'repair';
-  else if (r < 0.38) kind = 'cache';
+  if (r < 0.04) kind = 'reserve';
+  else if (r < 0.13) kind = 'powerup';
+  else if (r < 0.28) kind = 'repair';
+  else if (r < 0.40) kind = 'cache';
   else kind = 'scrap';
   const pk = { kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 };
   if (kind === 'powerup') {
     pk.power = rollPowerup();
     pk.w = 26; pk.h = 26;
   } else if (kind === 'cache') {
+    pk.w = 28; pk.h = 28;
+  } else if (kind === 'reserve') {
+    // Assign the banked power-up type now (so the visual can show it)
+    const eligible = POWERUP_KEYS.filter(k => !SPECIAL_POWERUP_KEYS[k]);
+    pk.power = eligible[Math.floor(Math.random() * eligible.length)];
     pk.w = 28; pk.h = 28;
   }
   Game.pickups.push(pk);
@@ -4534,6 +4574,32 @@ function update(dt) {
   // ---- bullets ----
   for (let i = Game.bullets.length - 1; i >= 0; i--) {
     const b = Game.bullets[i];
+    // Homing: steer toward nearest enemy or boss at a limited turn rate
+    if (b.homing && (Game.enemies.length > 0 || Game.boss)) {
+      let tx = null, ty = null, bestDist = Infinity;
+      for (const e of Game.enemies) {
+        const d = Math.hypot(e.x - b.x, e.y - b.y);
+        if (d < bestDist) { bestDist = d; tx = e.x; ty = e.y; }
+      }
+      if (Game.boss) {
+        const bd = Math.hypot(Game.boss.x - b.x, Game.boss.y - b.y);
+        if (bd < bestDist) { tx = Game.boss.x; ty = Game.boss.y; }
+      }
+      if (tx !== null) {
+        const spd = Math.hypot(b.vx || 0, b.vy);
+        const desiredAngle = Math.atan2(ty - b.y, tx - b.x);
+        const currentAngle = Math.atan2(b.vy, b.vx || 0);
+        let dA = desiredAngle - currentAngle;
+        // wrap to [-π, π]
+        while (dA >  Math.PI) dA -= 2 * Math.PI;
+        while (dA < -Math.PI) dA += 2 * Math.PI;
+        const maxTurn = 3.5 * dt; // 3.5 rad/s turn rate applied per frame
+        const turn = Math.max(-maxTurn, Math.min(maxTurn, dA));
+        const newAngle = currentAngle + turn;
+        b.vx = Math.cos(newAngle) * spd;
+        b.vy = Math.sin(newAngle) * spd;
+      }
+    }
     b.y += b.vy * dt;
     if (b.vx) b.x += b.vx * dt;
     if (b.y < -20 || b.y > H + 20 || b.x < -20 || b.x > W + 20) Game.bullets.splice(i,1);
@@ -4894,6 +4960,15 @@ function update(dt) {
       } else if (pk.kind === 'powerup') {
         activatePowerup(pk.power, pk);
         Haptics.pickup();
+      } else if (pk.kind === 'reserve') {
+        // Bank this power-up for the start of the next run
+        const def = POWERUPS[pk.power];
+        Profile.bankPowerup(pk.power);
+        emit(pk.x, pk.y, 22, { color:'#ffb3ff', speed:280, life:0.6, size:4 });
+        shockwave(pk.x, pk.y, 'rgba(255,179,255,0.5)', 70);
+        addPopup('BANKED: ' + (def ? def.name : pk.power), pk.x, pk.y - 16, '#ffb3ff', 13);
+        SFX.powerUp();
+        Haptics.pickup();
       }
       Game.pickups.splice(i,1);
     }
@@ -5017,6 +5092,7 @@ function fireGuns() {
       owner:'p',
       dmg: stats.dmg * overdriveMul * mul,
       crit,
+      homing: isPowerupActive('homing') || false,
     }, extra);
   };
   const bigShot = v.base.bigShot;
@@ -5093,6 +5169,8 @@ function damagePlayer(amt) {
     return;
   }
   amt *= Game.damageTakenMul;
+  // Armor plating absorbs half of incoming damage
+  if (isPowerupActive('armor')) amt *= 0.5;
   if (Settings.damageNumbers) addPopup('-' + Math.ceil(amt), Game.player.x, Game.player.y - 36, '#ff8a8a', 12);
   Game.health -= amt;
   Game.flash = 1;
@@ -6482,6 +6560,49 @@ function drawPickup(pk) {
     ctx.textBaseline = 'middle';
     ctx.fillText(def.glyph, 0, 1);
     ctx.restore();
+  } else if (pk.kind === 'reserve') {
+    // Reserve vault — a spinning diamond with a star inside, purple-gold palette
+    const rdef = POWERUPS[pk.power];
+    const pulse = 0.5 + 0.5 * Math.sin(pk.t * 4.5);
+    ctx.save();
+    ctx.translate(pk.x, pk.y + bob);
+    ctx.rotate(pk.t * 1.1);
+    // outer aura
+    ctx.globalAlpha = 0.2 + 0.15 * pulse;
+    ctx.fillStyle = '#ffb3ff';
+    ctx.beginPath(); ctx.arc(0, 0, 22 + pulse * 5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // diamond border
+    const dr = 14;
+    ctx.fillStyle = '#1a0f08';
+    ctx.beginPath();
+    ctx.moveTo(0, -dr); ctx.lineTo(dr, 0); ctx.lineTo(0, dr); ctx.lineTo(-dr, 0);
+    ctx.closePath(); ctx.fill();
+    // diamond fill (gold-to-purple gradient)
+    const gr = ctx.createLinearGradient(-dr, 0, dr, 0);
+    gr.addColorStop(0, '#ffd86b');
+    gr.addColorStop(1, '#d06fff');
+    ctx.fillStyle = gr;
+    ctx.beginPath();
+    ctx.moveTo(0, -(dr - 3)); ctx.lineTo(dr - 3, 0);
+    ctx.lineTo(0, dr - 3); ctx.lineTo(-(dr - 3), 0);
+    ctx.closePath(); ctx.fill();
+    // glyph: show the power-up's own glyph to hint what's banked
+    ctx.fillStyle = '#1a0f08';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(rdef ? rdef.glyph : '★', 0, 1);
+    ctx.restore();
+    // "NEXT RUN" label below
+    ctx.save();
+    ctx.globalAlpha = 0.65 + 0.2 * pulse;
+    ctx.fillStyle = '#ffb3ff';
+    ctx.font = 'bold 7px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('NEXT RUN', pk.x, pk.y + bob + 16);
+    ctx.restore();
   }
 }
 
@@ -6496,8 +6617,13 @@ function drawBullets() {
     for (const b of Game.bullets) {
       const r = (b.big ? 14 : 9);
       const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r);
-      g.addColorStop(0, 'rgba(255,220,140,0.55)');
-      g.addColorStop(1, 'rgba(255,180,80,0)');
+      if (b.homing) {
+        g.addColorStop(0, 'rgba(255,140,255,0.6)');
+        g.addColorStop(1, 'rgba(200,60,255,0)');
+      } else {
+        g.addColorStop(0, 'rgba(255,220,140,0.55)');
+        g.addColorStop(1, 'rgba(255,180,80,0)');
+      }
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fill();
     }
@@ -6508,9 +6634,9 @@ function drawBullets() {
       ctx.fillStyle = 'rgba(255,180,80,0.3)';
       ctx.fillRect(b.x - b.w, b.y - b.h, b.w * 2, b.h * 2);
     }
-    ctx.fillStyle = '#fff3b0';
+    ctx.fillStyle = b.homing ? '#ffaaff' : '#fff3b0';
     ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
-    ctx.fillStyle = 'rgba(255,180,80,0.5)';
+    ctx.fillStyle = b.homing ? 'rgba(255,100,255,0.5)' : 'rgba(255,180,80,0.5)';
     ctx.fillRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4);
   }
   // Enemy bullets — same additive halo trick, tinted red so threats remain
@@ -7797,6 +7923,14 @@ const UI = {
     document.getElementById('mode-vehicle').textContent = v.name;
     const list = document.getElementById('mode-list');
     list.innerHTML = '';
+    // Banked power-up badge
+    if (p.bankedPowerup && POWERUPS[p.bankedPowerup]) {
+      const bdef = POWERUPS[p.bankedPowerup];
+      const badge = document.createElement('div');
+      badge.style.cssText = `text-align:center;padding:7px 10px;border:1px solid ${bdef.color};border-radius:4px;color:${bdef.color};font-size:13px;margin-bottom:6px;background:rgba(0,0,0,0.4)`;
+      badge.innerHTML = `${bdef.glyph} <b>BANKED: ${escapeHtml(bdef.name)}</b> — ACTIVATES AT RUN START`;
+      list.appendChild(badge);
+    }
     MODES.forEach(m => {
       const tile = document.createElement('button');
       const zombieLocked = m.id === 'zombie' && !zombieUnlocked;
