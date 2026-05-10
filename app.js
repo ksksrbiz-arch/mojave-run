@@ -455,7 +455,7 @@ const MODES = [
 // Fields: w/h are sprite size, hp is health, vy/vxRange drive movement, contact is collision damage, score is points, icon is HUD shorthand.
 const ZOMBIE_DEFS = [
   { id:'walker',  name:'WALKER',  w:20, h:30, hp:3,  vy:50,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10', icon:'W' },
-  { id:'runner',  name:'RUNNER',  w:16, h:26, hp:1,  vy:120, vxRange:44, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410', icon:'R' },
+  { id:'runner',  name:'RUNNER',  w:16, h:26, hp:1,  vy:110, vxRange:44, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410', icon:'R' },
   { id:'boomer',  name:'BOOMER',  w:30, h:36, hp:4,  vy:42,  vxRange:14, contact:18, score:180, color:'#566b2d', goreColor:'#83a63f', accent:'#d2ff6f', icon:'B', special:true },
   { id:'hunter',  name:'HUNTER',  w:18, h:28, hp:3,  vy:145, vxRange:70, contact:16, score:210, color:'#253a25', goreColor:'#102010', accent:'#7af07a', icon:'H', special:true },
   { id:'charger', name:'CHARGER', w:30, h:40, hp:8,  vy:95,  vxRange:8,  contact:26, score:260, color:'#58402c', goreColor:'#3a2818', accent:'#ff8a3d', icon:'C', special:true },
@@ -472,6 +472,8 @@ const ZOMBIE_OBJECTIVES = [
 const ZOMBIE_INITIAL_SURVIVORS = 3;
 const ZOMBIE_MAX_SURVIVORS = 6;
 const ZOMBIE_SURVIVOR_RESCUE_BONUS = 1;
+const ZOMBIE_BURN_DAMAGE_PER_SECOND = 3;
+const ZOMBIE_HUD_OFFSET_Y = 12;
 
 // ============================================================
 // IRON THRONE — 8-stage boss campaign (unlocked by full mastery)
@@ -2807,7 +2809,7 @@ function spawnZombiePowerup() {
 function updateZombieWasteland(dt) {
   if (Game.mode !== 'zombie') return;
   const zw = Game.zombie || (Game.zombie = { wave: 0, waveT: 0, waveDur: 0, survivors: ZOMBIE_INITIAL_SURVIVORS, powerT: 5 });
-  if (!zw.wave) startZombieWave();
+  if (zw.wave === 0) startZombieWave();
   zw.waveT += dt;
   zw.powerT = (zw.powerT || 5) - dt;
   if (zw.powerT <= 0) {
@@ -5027,7 +5029,7 @@ function update(dt) {
     } else if (e.kind === 'zombie') {
       // Zombies shuffle or lunge toward the player and wobble side-to-side
       e.wobble = (e.wobble || 0) + (e.wobbleSpeed || 3) * dt;
-      if (e.burning) { e.burning -= dt; e.hp -= 3 * dt; }
+      if (e.burning) { e.burning -= dt; e.hp -= ZOMBIE_BURN_DAMAGE_PER_SECOND * dt; }
       if (Game.player) {
         const dx = Game.player.x - e.x;
         // gently steer toward player with a side-to-side shuffle
@@ -7414,7 +7416,7 @@ function drawHUD() {
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.fillStyle = '#d2ff6f';
     const icons = (zw.specialIcons && zw.specialIcons.length) ? zw.specialIcons.slice(-5).join(' ') : '—';
-    ctx.fillText('SPECIALS ' + icons + ' · SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + 12);
+    ctx.fillText('SPECIALS ' + icons + ' · SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + ZOMBIE_HUD_OFFSET_Y);
   }
 
   // hull bar
@@ -9826,6 +9828,7 @@ function mpRefreshPeerList() {
   MP.on('event', (id, ev) => {
     if (!ev) return;
     if (ev.kind === 'zombie-wave' && Game.mode === 'zombie' && Game.zombie) {
+      // Kept for future lobby/status UI; local simulation remains non-authoritative.
       Game.zombie.remoteWave = ev.wave || 0;
       if (typeof ev.survivors === 'number') Game.zombie.survivors = Math.max(0, ev.survivors);
       UI.toast('CO-OP WAVE SYNC: ' + (ev.wave || '?'));
