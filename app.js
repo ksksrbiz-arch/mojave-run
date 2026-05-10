@@ -447,15 +447,26 @@ const MODES = [
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
   { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
-  { id: 'zombie',      name: 'ZOMBIE HORDE',     desc: 'The dead walk the Mojave. No bullets — just claws, teeth, and numbers. Survive the endless shamble.' },
+  { id: 'zombie',      name: 'ZOMBIE WASTELAND', desc: 'Unlockable co-op-ready zombie gauntlet: waves, special infected, survivor objectives, and exclusive tools.' },
   { id: 'ironthrone',  name: 'IRON THRONE',      desc: 'Full mastery unlocks the boss campaign. Eight Warlords with different weapons and armored rigs. No survivors.' },
 ];
 
-// Zombie enemy definitions for ZOMBIE HORDE mode
+// Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
 const ZOMBIE_DEFS = [
-  { id:'walker',  w:20, h:30, hp:3, vy:50,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10' },
-  { id:'runner',  w:16, h:26, hp:1, vy:110, vxRange:40, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410' },
-  { id:'bruiser', w:32, h:38, hp:7, vy:30,  vxRange:8,  contact:22, score:220, color:'#4a3828', goreColor:'#3a2818', accent:'#1a1210' },
+  { id:'walker',  name:'WALKER',  w:20, h:30, hp:3,  vy:50,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10', icon:'W' },
+  { id:'runner',  name:'RUNNER',  w:16, h:26, hp:1,  vy:120, vxRange:44, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410', icon:'R' },
+  { id:'boomer',  name:'BOOMER',  w:30, h:36, hp:4,  vy:42,  vxRange:14, contact:18, score:180, color:'#566b2d', goreColor:'#83a63f', accent:'#d2ff6f', icon:'B', special:true },
+  { id:'hunter',  name:'HUNTER',  w:18, h:28, hp:3,  vy:145, vxRange:70, contact:16, score:210, color:'#253a25', goreColor:'#102010', accent:'#7af07a', icon:'H', special:true },
+  { id:'charger', name:'CHARGER', w:30, h:40, hp:8,  vy:95,  vxRange:8,  contact:26, score:260, color:'#58402c', goreColor:'#3a2818', accent:'#ff8a3d', icon:'C', special:true },
+  { id:'tank',    name:'TANK',    w:46, h:52, hp:24, vy:34,  vxRange:6,  contact:42, score:650, color:'#6a402c', goreColor:'#4a2018', accent:'#ff5050', icon:'T', special:true, miniBoss:true },
+];
+const ZOMBIE_DEF_BY_ID = Object.fromEntries(ZOMBIE_DEFS.map(z => [z.id, z]));
+const ZOMBIE_OBJECTIVES = [
+  { id:'horde', name:'SURVIVE MASSIVE HORDE' },
+  { id:'convoy', name:'DEFEND CONVOY' },
+  { id:'rescue', name:'RESCUE SURVIVORS' },
+  { id:'choke', name:'HOLD CHOKE POINT' },
+  { id:'tank', name:'TANK WAVE' },
 ];
 
 // ============================================================
@@ -2485,8 +2496,15 @@ const POWERUPS = {
   homing:    { name:'HOMING SHOTS', color:'#ff6fff', dur:10.0, glyph:'⊙' },
   // Armor: plating absorbs half incoming damage for its duration.
   armor:     { name:'ARMOR PLATING', color:'#b8c8ff', dur:12.0, glyph:'▣' },
+  chainsaw:  { name:'CHAINSAW', color:'#d2ff6f', dur:7.0, glyph:'⛓' },
+  molotov:   { name:'MOLOTOV', color:'#ff8a3d', dur:0.5, glyph:'🔥' },
+  pipebomb:  { name:'PIPE BOMB', color:'#ffe07a', dur:0.5, glyph:'●' },
+  barricade: { name:'BARRICADE KIT', color:'#b8c8ff', dur:8.0, glyph:'▤' },
+  adrenaline:{ name:'ADRENALINE', color:'#ff6fff', dur:5.0, glyph:'✚' },
 };
 const POWERUP_KEYS = Object.keys(POWERUPS);
+const ZOMBIE_POWERUP_KEYS = ['chainsaw', 'molotov', 'pipebomb', 'barricade', 'adrenaline'];
+const ZOMBIE_POWERUP_SET = Object.fromEntries(ZOMBIE_POWERUP_KEYS.map(k => [k, true]));
 const SALVAGE_MAGNET_BONUS = 40;
 const BOSS_RUSH_REWARD_BASE = 1200;
 const BOSS_RUSH_REWARD_PER_STAGE = 250;
@@ -2652,6 +2670,17 @@ function activatePowerup(id, src) {
   // clearing all enemy bullets. Massive but satisfying.
   if (id === 'nuke') {
     detonateHordeNuke();
+  } else if (id === 'molotov') {
+    detonateZombieTool('molotov');
+  } else if (id === 'pipebomb') {
+    detonateZombieTool('pipebomb');
+  } else if (id === 'barricade') {
+    Game.powerups.shield = { t: Math.max(4, def.dur * 0.6), max: Math.max(4, def.dur * 0.6) };
+    Game.powerups.armor = { t: def.dur, max: def.dur };
+  } else if (id === 'adrenaline') {
+    Game.health = Math.min(Game.maxHealth, Game.health + Math.round(Game.maxHealth * 0.25));
+    Game.powerups.rapid = { t: def.dur, max: def.dur };
+    Game.powerups.nitro = { t: Math.max(2.2, def.dur * 0.45), max: Math.max(2.2, def.dur * 0.45) };
   }
 }
 
@@ -2680,6 +2709,105 @@ function detonateHordeNuke() {
     Game.boss.hp -= 25;
     if (Settings.damageNumbers) addPopup('-25', Game.boss.x, Game.boss.y - 18, '#ff3a3a', 13);
   }
+}
+
+
+function detonateZombieTool(kind) {
+  const px = Game.player ? Game.player.x : W * 0.5;
+  const py = Game.player ? Game.player.y - 80 : H * 0.55;
+  const radius = kind === 'pipebomb' ? 260 : 150;
+  const dmg = kind === 'pipebomb' ? 18 : 8;
+  const color = kind === 'pipebomb' ? '#ffe07a' : '#ff8a3d';
+  shockwave(px, py, hexToRgba(color, 0.55), radius);
+  emit(px, py, kind === 'pipebomb' ? 55 : 34, { color, speed: 420, life: 0.8, size: 5 });
+  Game.shake = Math.max(Game.shake, kind === 'pipebomb' ? 1.0 : 0.65);
+  for (let i = Game.enemies.length - 1; i >= 0; i--) {
+    const e = Game.enemies[i];
+    if (e.kind !== 'zombie') continue;
+    if (Math.hypot(e.x - px, e.y - py) <= radius) {
+      e.hp -= dmg;
+      if (kind === 'molotov') e.burning = Math.max(e.burning || 0, 4);
+      if (e.hp <= 0) {
+        emit(e.x, e.y, 12, { color, speed: 260, life: 0.5, size: 3 });
+        applyKill(e.x, e.y, e.zombieScore || ENEMY_SCORE.zombie);
+        Game.enemies.splice(i, 1);
+        clearEnemyShotsFrom(e);
+      }
+    }
+  }
+}
+
+function startZombieWave(forceObjective) {
+  if (Game.mode !== 'zombie') return;
+  const zw = Game.zombie || (Game.zombie = {});
+  zw.wave = (zw.wave || 0) + 1;
+  zw.waveT = 0;
+  zw.waveDur = Math.max(24, 34 - Math.min(12, zw.wave * 0.8));
+  zw.objective = forceObjective || ((zw.wave % 5 === 0) ? ZOMBIE_OBJECTIVES[((zw.wave / 5) - 1) % ZOMBIE_OBJECTIVES.length] : null);
+  zw.objectiveKills = Game.kills;
+  zw.specialIcons = [];
+  if (zw.objective && zw.objective.id === 'rescue') zw.survivors = Math.min(6, (zw.survivors || 3) + 1);
+  announceEvent(zw.objective ? zw.objective.name : ('WAVE ' + zw.wave), zw.objective ? '#ff8a3d' : '#d2ff6f');
+  const burst = Math.min(10, 3 + Math.floor(zw.wave * 0.8));
+  for (let i = 0; i < burst; i++) spawnEnemy('zombie');
+  if (zw.wave % 3 === 0 || (zw.objective && zw.objective.id === 'tank')) spawnZombieSpecial(zw.objective && zw.objective.id === 'tank' ? 'tank' : null);
+  if (window.MP && MP.connected && MP.sendSharedEvent) MP.sendSharedEvent({ kind:'zombie-wave', wave: zw.wave, objective: zw.objective && zw.objective.id, survivors: zw.survivors });
+}
+
+function spawnZombieSpecial(forceType) {
+  const zw = Game.zombie || (Game.zombie = {});
+  const wave = zw.wave || 1;
+  let type = forceType;
+  if (!type) {
+    const pool = ['boomer', 'hunter', 'charger'];
+    if (wave >= 5) pool.push('tank');
+    type = pool[Math.floor(Math.random() * pool.length)];
+  }
+  spawnEnemy('zombie:' + type, true);
+  const def = ZOMBIE_DEF_BY_ID[type];
+  if (def) {
+    zw.specialIcons = (zw.specialIcons || []).filter(x => x !== def.icon);
+    zw.specialIcons.push(def.icon);
+  }
+}
+
+function spawnZombiePowerup() {
+  const { x0, x1 } = roadBounds();
+  const power = ZOMBIE_POWERUP_KEYS[Math.floor(Math.random() * ZOMBIE_POWERUP_KEYS.length)];
+  Game.pickups.push({ kind:'powerup', power, x: rand(x0 + 30, x1 - 30), y: -30, w:28, h:28, t:0 });
+}
+
+function updateZombieWasteland(dt) {
+  if (Game.mode !== 'zombie') return;
+  const zw = Game.zombie || (Game.zombie = { wave: 0, waveT: 0, waveDur: 0, survivors: 3, powerT: 5 });
+  if (!zw.wave) startZombieWave();
+  zw.waveT += dt;
+  zw.powerT = (zw.powerT || 5) - dt;
+  if (zw.powerT <= 0) {
+    zw.powerT = rand(9, 14);
+    spawnZombiePowerup();
+  }
+  if (zw.objective) {
+    if (zw.objective.id === 'convoy' && Math.random() < dt * 0.45) spawnEnemy('zombie:charger', true);
+    if (zw.objective.id === 'rescue' && Math.random() < dt * 0.35) spawnEnemy('zombie:hunter', true);
+    if (zw.objective.id === 'choke' && Math.random() < dt * 0.55) spawnEnemy('zombie:boomer', true);
+  }
+  if (isPowerupActive('chainsaw') && Game.player) {
+    for (let i = Game.enemies.length - 1; i >= 0; i--) {
+      const e = Game.enemies[i];
+      if (e.kind !== 'zombie') continue;
+      if (Math.hypot(e.x - Game.player.x, e.y - Game.player.y) < 82) {
+        e.hp -= 18 * dt;
+        emit(e.x, e.y, 1, { color:'#d2ff6f', speed:120, life:0.18, size:3 });
+        if (e.hp <= 0) {
+          applyKill(e.x, e.y, e.zombieScore || ENEMY_SCORE.zombie);
+          Game.enemies.splice(i, 1);
+          clearEnemyShotsFrom(e);
+        }
+      }
+    }
+  }
+  if (zw.waveT >= zw.waveDur) startZombieWave();
 }
 
 function hexToRgba(hex, a) {
@@ -2805,7 +2933,11 @@ const SPECIAL_POWERUP_KEYS = { nuke: true, siege: true };
 
 function buildPowerupPool() {
   const pool = [];
-  POWERUP_KEYS.forEach(id => { if (!SPECIAL_POWERUP_KEYS[id]) weightedPoolAdd(pool, id, 1); });
+  if (Game.mode === 'zombie') {
+    ZOMBIE_POWERUP_KEYS.forEach(id => weightedPoolAdd(pool, id, 1));
+    return pool;
+  }
+  POWERUP_KEYS.forEach(id => { if (!SPECIAL_POWERUP_KEYS[id] && !ZOMBIE_POWERUP_SET[id]) weightedPoolAdd(pool, id, 1); });
   if (Game.mode === 'timeattack') {
     weightedPoolAdd(pool, 'rapid', 2);
     weightedPoolAdd(pool, 'x2', 2);
@@ -2835,7 +2967,9 @@ function buildPowerupPool() {
 // Special power-ups (nuke, siege) are never randomly rolled — they're
 // only granted directly during scripted boss horde levels.
 function rollPowerup() {
-  const eligible = POWERUP_KEYS.filter(k => !SPECIAL_POWERUP_KEYS[k]);
+  const eligible = Game.mode === 'zombie'
+    ? ZOMBIE_POWERUP_KEYS.slice()
+    : POWERUP_KEYS.filter(k => !SPECIAL_POWERUP_KEYS[k] && !ZOMBIE_POWERUP_SET[k]);
   const inactive = eligible.filter(k => !isPowerupActive(k));
   const weighted = buildPowerupPool().filter(k => inactive.length === 0 || inactive.includes(k));
   const pool = weighted.length ? weighted : (inactive.length ? inactive : eligible);
@@ -3113,7 +3247,7 @@ const Game = {
   comboT: 0,
   comboBest: 0,
   // power-ups: id -> { t, max } | null
-  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null, homing: null, armor: null },
+  powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null, homing: null, armor: null, chainsaw: null, molotov: null, pipebomb: null, barricade: null, adrenaline: null },
   // tire skid marks (drawn under road decals)
   skidMarks: [],
   // far parallax peaks (deepest layer)
@@ -3130,6 +3264,8 @@ const Game = {
   sidekick: null,
   sidekickHealT: 0,
   magnetRangeMul: 1,
+  zombie: null,              // Zombie Wasteland optional wave/objective state
+  coopDowned: false,          // multiplayer revive helper only
   // badges earned at the end of this run (populated by endRun)
   _pendingBadges: [],
   _pendingCosmetics: [],
@@ -3214,7 +3350,7 @@ function startRun(mode, level) {
   if (!profile) return;
   if (mode === 'zombie' && !Profile.isZombieModeUnlocked()) {
     const remaining = getZombieUnlockLevelsRemaining(profile);
-    UI.toast(zombieLockedMessage('ZOMBIE HORDE LOCKED', remaining));
+    UI.toast(zombieLockedMessage('ZOMBIE WASTELAND LOCKED', remaining));
     UI.showMode();
     return;
   }
@@ -3374,6 +3510,8 @@ function startRun(mode, level) {
   if (mode !== 'ironthrone') Game.ironThroneStage = 0;
   Game.hordeMode = null;
   Game.hordeWaveT = 0;
+  Game.zombie = mode === 'zombie' ? { wave: 0, waveT: 0, waveDur: 0, survivors: 3, powerT: 4, specialIcons: [] } : null;
+  Game.coopDowned = false;
   Game.skidMarks.length = 0;
   Game.farPeaks.length = 0;
   Game.dustDevils.length = 0;
@@ -3431,6 +3569,8 @@ function beginPlaying() {
     announceEvent('BOSS RUSH ' + Game.bossRushStage + '/' + BOSS_RUSH_STAGES.length, '#ff8a8a');
     SFX.boss();
     Haptics.bossWarn();
+  } else if (Game.mode === 'zombie') {
+    startZombieWave();
   } else if (Game.levelData && Game.levelData.obj === 'horde') {
     // BOSS HORDE LEVEL — the player gets a massive temporary upgrade
     // (siege mode: super-laser + side miniguns + faster fire), then has
@@ -3736,17 +3876,24 @@ function spawnEnemy(forceKind, forceElite) {
   const lvlMul = Game.levelData ? Game.levelData.diff : 1;
   const dist = Game.distance;
 
-  // ZOMBIE HORDE MODE — only spawns zombies, never vehicles. Also used to
+  // ZOMBIE WASTELAND MODE — only spawns zombies, never vehicles. Also used to
   // force a single zombie spawn from any mode by passing forceKind:'zombie'
   // (e.g. mid-mission boss-horde levels mix vehicles and zombies).
-  if (Game.mode === 'zombie' || forceKind === 'zombie') {
-    const waveDiff = Math.min(3.0, 1 + dist / 8000);
-    // pick zombie type based on difficulty
+  if (Game.mode === 'zombie' || forceKind === 'zombie' || (typeof forceKind === 'string' && forceKind.startsWith('zombie:'))) {
+    const wave = (Game.zombie && Game.zombie.wave) || 1;
+    const waveDiff = Math.min(3.4, 1 + Math.max(dist / 9000, wave / 8));
     let def;
-    const zr = Math.random();
-    if (waveDiff > 2.0 && zr < 0.18) def = ZOMBIE_DEFS[2]; // bruiser
-    else if (waveDiff > 1.2 && zr < 0.35) def = ZOMBIE_DEFS[1]; // runner
-    else def = ZOMBIE_DEFS[0]; // walker
+    const forcedZombieType = (typeof forceKind === 'string' && forceKind.startsWith('zombie:')) ? forceKind.slice(7) : '';
+    if (forcedZombieType && ZOMBIE_DEF_BY_ID[forcedZombieType]) def = ZOMBIE_DEF_BY_ID[forcedZombieType];
+    else {
+      const zr = Math.random();
+      if (wave >= 10 && zr < 0.06) def = ZOMBIE_DEF_BY_ID.tank;
+      else if (wave >= 7 && zr < 0.14) def = ZOMBIE_DEF_BY_ID.charger;
+      else if (wave >= 5 && zr < 0.24) def = ZOMBIE_DEF_BY_ID.hunter;
+      else if (wave >= 3 && zr < 0.34) def = ZOMBIE_DEF_BY_ID.boomer;
+      else if (waveDiff > 1.2 && zr < 0.48) def = ZOMBIE_DEF_BY_ID.runner;
+      else def = ZOMBIE_DEF_BY_ID.walker;
+    }
     const { x0: zx0, x1: zx1 } = roadBounds();
     // spawn zombies spread across the full width, including shoulders
     const spread = W * 0.12;
@@ -3767,6 +3914,7 @@ function spawnEnemy(forceKind, forceElite) {
         color: def.color, goreColor: def.goreColor, accent: def.accent,
         wobble: rand(0, Math.PI * 2), wobbleSpeed: rand(2.5, 5.0),
         elite: !!(forceElite && Math.random() < 0.2),
+        special: !!def.special, miniBoss: !!def.miniBoss,
       });
     }
     return;
@@ -3962,7 +4110,7 @@ function spawnPickup() {
   else kind = 'scrap';
   const pk = { kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 };
   if (kind === 'powerup') {
-    pk.power = rollPowerup();
+    pk.power = Game.mode === 'zombie' ? ZOMBIE_POWERUP_KEYS[Math.floor(Math.random() * ZOMBIE_POWERUP_KEYS.length)] : rollPowerup();
     pk.w = 26; pk.h = 26;
   } else if (kind === 'cache') {
     pk.w = 28; pk.h = 28;
@@ -4461,6 +4609,7 @@ function update(dt) {
   updatePowerups(dt);
   applyMagnet(dt);
   updateSidekick(dt);
+  updateZombieWasteland(dt);
 
   // nitro modifies effective scroll & score gain
   const nitroMul = isPowerupActive('nitro') ? 1.6 : 1.0;
@@ -4849,15 +4998,25 @@ function update(dt) {
       // stationary roadside; scrolls with road
       e.y += Game.speed * dt;
     } else if (e.kind === 'zombie') {
-      // Zombies shuffle toward the player and wobble side-to-side
+      // Zombies shuffle or lunge toward the player and wobble side-to-side
       e.wobble = (e.wobble || 0) + (e.wobbleSpeed || 3) * dt;
+      if (e.burning) { e.burning -= dt; e.hp -= 3 * dt; }
       if (Game.player) {
         const dx = Game.player.x - e.x;
         // gently steer toward player with a side-to-side shuffle
-        e.vx = clamp(e.vx + dx * 0.4 * dt + Math.sin(e.wobble) * 12 * dt, -60, 60);
+        const steer = e.zombieType === 'hunter' ? 1.1 : e.zombieType === 'charger' ? 0.18 : 0.4;
+        const maxX = e.zombieType === 'hunter' ? 130 : e.zombieType === 'charger' ? 35 : 60;
+        e.vx = clamp(e.vx + dx * steer * dt + Math.sin(e.wobble) * 12 * dt, -maxX, maxX);
       }
       e.x += e.vx * dt;
       e.y += (e.vy + Game.speed * 0.10) * dt;
+      if (e.hp <= 0) {
+        if (e.zombieType === 'boomer') detonateZombieBoomer(e);
+        applyKill(e.x, e.y, e.zombieScore || ENEMY_SCORE.zombie);
+        Game.enemies.splice(i, 1);
+        clearEnemyShotsFrom(e);
+        continue;
+      }
       // zombies can wander slightly off-road
       e.x = clamp(e.x, e.w, W - e.w);
     } else if (e.kind === 'drone') {
@@ -4965,7 +5124,8 @@ function update(dt) {
             ? (e.zombieScore || ENEMY_SCORE.zombie) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1)
             : (ENEMY_SCORE[e.kind] || ENEMY_SCORE.buggy) * (e.elite ? ELITE_SCORE_MULTIPLIER : 1);
           if (isZombie) {
-            emit(e.x, e.y, 12, { color:'#5a7a3a', speed:220, life:0.6, size:3 });
+            if (e.zombieType === 'boomer') { detonateZombieBoomer(e); }
+            emit(e.x, e.y, 12, { color:e.goreColor || '#5a7a3a', speed:220, life:0.6, size:3 });
             emit(e.x, e.y, 6,  { color:'#1a2a10', speed:140, life:0.4, size:2 });
             shockwave(e.x, e.y, 'rgba(80,120,50,0.35)', 50);
             Game.shake = Math.max(Game.shake, 0.35);
@@ -5017,10 +5177,12 @@ function update(dt) {
         Game.enemies.splice(i,1);
         clearEnemyShotsFrom(e);
       } else {
+        if (isZombie && e.zombieType === 'hunter') { e.vy *= 0.25; addPopup('PINNED!', Game.player.x, Game.player.y - 46, '#7af07a', 14); }
         damagePlayer(isZombie ? ((e.contact || 12) * Game.damageTakenMul) : e.kind === 'bike' || e.kind === 'drone' ? 28 : e.kind === 'tank' ? 55 : 40);
         SFX.explode();
         if (isZombie) {
-          emit(e.x, e.y, 14, { color:'#5a7a3a', speed:200, life:0.5, size:3 });
+          if (e.zombieType === 'boomer') detonateZombieBoomer(e);
+          emit(e.x, e.y, 14, { color:e.goreColor || '#5a7a3a', speed:200, life:0.5, size:3 });
           Game.shake = Math.max(Game.shake, 0.4);
           // zombie survives the hit but bounces back
           e.vy *= 0.7;
@@ -5032,7 +5194,12 @@ function update(dt) {
           Game.shake = Math.max(Game.shake, 0.7);
         }
       }
-    } else if (e.y > H + 60) Game.enemies.splice(i,1);
+    } else if (e.y > H + 60) {
+      if (Game.mode === 'zombie' && e.kind === 'zombie' && Game.zombie && (Game.zombie.objective && (Game.zombie.objective.id === 'convoy' || Game.zombie.objective.id === 'rescue'))) {
+        Game.zombie.survivors = Math.max(0, (Game.zombie.survivors || 0) - (e.special ? 1 : 0));
+      }
+      Game.enemies.splice(i,1);
+    }
   }
 
   // ---- enemy bullets vs player ----
@@ -5343,6 +5510,13 @@ function triggerPlayerDeath() {
   Game.state = 'dying';
   releaseWakeLock();
   pauseBtn.classList.remove('show');
+}
+
+function detonateZombieBoomer(e) {
+  shockwave(e.x, e.y, 'rgba(210,255,111,0.5)', 120);
+  emit(e.x, e.y, 28, { color:'#d2ff6f', speed:300, life:0.7, size:4 });
+  Game.shake = Math.max(Game.shake, 0.55);
+  for (let i = 0; i < 3; i++) spawnEnemy('zombie');
 }
 
 function splashDamage(x, y, r, dmg) {
@@ -6500,8 +6674,8 @@ function drawMortar(e) {
 function drawZombie(e) {
   ctx.save();
   ctx.translate(e.x, e.y);
-  const isBruiser = e.zombieType === 'bruiser';
-  const isRunner  = e.zombieType === 'runner';
+  const isBruiser = e.zombieType === 'tank' || e.zombieType === 'charger';
+  const isRunner  = e.zombieType === 'runner' || e.zombieType === 'hunter';
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(1, e.h/2 + 2, e.w/2 + 2, 4, 0, 0, Math.PI*2); ctx.fill();
@@ -6527,6 +6701,11 @@ function drawZombie(e) {
   ctx.fillStyle = isRunner ? '#c8ff80' : isBruiser ? '#ff8040' : '#90c860';
   ctx.fillRect(-hw/2 + 2 + headWobble, -e.h/2 + 3, hw/2 - 3, 2);
   ctx.fillRect(2 + headWobble, -e.h/2 + 3, hw/2 - 3, 2);
+  if (e.special) {
+    ctx.strokeStyle = (ZOMBIE_DEF_BY_ID[e.zombieType] && ZOMBIE_DEF_BY_ID[e.zombieType].accent) || '#d2ff6f';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
+  }
   // bite mark / gore detail
   ctx.fillStyle = 'rgba(120,40,20,0.55)';
   ctx.fillRect(-3, -e.h/4 + 2, 5, 3);
@@ -7156,6 +7335,9 @@ function drawHUD() {
     subL = `LV ${Game.levelData.num}/${LEVELS.length}  ${Game.levelData.name}`;
   } else if (Game.mode === 'timeattack') {
     subL = `TIME ATTACK`;
+  } else if (Game.mode === 'zombie') {
+    const zw = Game.zombie || {};
+    subL = zw.objective ? zw.objective.name : 'ZOMBIE WASTELAND';
   } else if (Game.mode === 'bossrush') {
     subL = `BOSS RUSH`;
   } else if (Game.mode === 'ironthrone') {
@@ -7178,6 +7360,9 @@ function drawHUD() {
   } else if (Game.mode === 'timeattack') {
     const remain = Math.max(0, 60 - Game.t);
     mainR = remain.toFixed(1) + 'S';
+  } else if (Game.mode === 'zombie') {
+    const zw = Game.zombie || {};
+    mainR = 'WAVE ' + (zw.wave || 1);
   } else if (Game.mode === 'gauntlet' && Game.levelData) {
     const L = Game.levelData;
     if (L.obj === 'survive') mainR = Math.max(0, L.target - Game.t).toFixed(1) + 'S';
@@ -7195,6 +7380,15 @@ function drawHUD() {
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
   ctx.font = `bold ${fs - 2}px "Courier New", monospace`;
   ctx.fillText('+' + Math.floor(Game.score / 10) + ' SCRAP', W - 50, hudH * 0.72);
+
+  if (Game.mode === 'zombie') {
+    const zw = Game.zombie || {};
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.fillStyle = '#d2ff6f';
+    const icons = (zw.specialIcons && zw.specialIcons.length) ? zw.specialIcons.slice(-5).join(' ') : '—';
+    ctx.fillText('SPECIALS ' + icons + '  SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + 12);
+  }
 
   // hull bar
   const hbW = Math.min(180, W * 0.42), hbH = 10, hbX = (W - hbW) / 2, hbY = hudH * 0.4 - hbH/2;
@@ -7345,12 +7539,12 @@ const LOADING_TIPS = [
   'DAILY CHALLENGE IS THE SAME WORLD FOR EVERYONE EACH DAY',
   'STORM SECTORS HAVE LIGHTNING — IT TARGETS METAL',
   // Zombie mode tips
-  'ZOMBIE HORDE: MOW THROUGH RUNNERS BEFORE BRUISERS CLOSE IN',
-  'ZOMBIE HORDE: REPAIRS ARE SCARCE — EVERY SCRATCH COUNTS',
-  'ZOMBIE HORDE: BRUISERS TAKE 5 HITS — TARGET RUNNERS FIRST',
-  'ZOMBIE HORDE: THE HORDE DOUBLES IN DENSITY PAST 10 KILOMETERS',
-  'ZOMBIE HORDE: NITRO + CONTACT IS YOUR BEST CROWD CLEAR',
-  'ZOMBIE HORDE: RUNNERS CHASE. BRUISERS WAIT. NEVER STOP MOVING.',
+  'ZOMBIE WASTELAND: SPECIAL INFECTED ICONS WARN WHAT IS ON THE ROAD',
+  'ZOMBIE WASTELAND: REPAIRS ARE SCARCE — EVERY SCRATCH COUNTS',
+  'ZOMBIE WASTELAND: BRUISERS TAKE 5 HITS — TARGET RUNNERS FIRST',
+  'ZOMBIE WASTELAND: THE HORDE DOUBLES IN DENSITY PAST 10 KILOMETERS',
+  'ZOMBIE WASTELAND: NITRO + CONTACT IS YOUR BEST CROWD CLEAR',
+  'ZOMBIE WASTELAND: RUNNERS CHASE. BRUISERS WAIT. NEVER STOP MOVING.',
   // Hitchhiker tips
   'HITCHHIKERS WANDER INTO YOUR LANE — HIT ONE AND YOU LOSE CONTROL',
   'SPINOUT AHEAD: HITCHHIKERS NEAR THE SHOULDER CAN SEND YOU CRASHING',
@@ -7408,7 +7602,7 @@ function drawLoadingOverlay() {
     title = 'WINDING RUN';
     sub = 'PROCEDURAL CURVES · ' + (Game.vehicle ? Game.vehicle.name : '');
   } else if (Game.mode === 'zombie') {
-    title = 'ZOMBIE HORDE';
+    title = 'ZOMBIE WASTELAND';
     sub = 'THE DEAD ARE COMING · ' + (Game.vehicle ? Game.vehicle.name : '');
   } else if (Game.mode === 'bossrush') {
     title = 'BOSS RUSH';
@@ -7445,6 +7639,8 @@ function drawLoadingOverlay() {
     ctx.font = `bold ${W < 500 ? 13 : 16}px "Courier New", monospace`;
     ctx.fillStyle = '#ff5050';
     ctx.fillText('▲ BOSS: ' + (def ? def.name : 'UNKNOWN') + ' ▲', W/2, H * 0.58);
+  } else if (Game.mode === 'zombie') {
+    startZombieWave();
   } else if (Game.levelData && Game.levelData.obj === 'horde') {
     const pulse = 0.6 + Math.sin(Game.animT * 8) * 0.4;
     ctx.globalAlpha = alpha * pulse;
@@ -8935,7 +9131,7 @@ const UI = {
         const sk = SIDEKICK_BY_ID[sidekickId];
         if (sk) notices.push('★ ' + sk.name.toUpperCase() + ' JOINS YOUR CREW!');
       }
-      if (zombieUnlocked) notices.push('☣ ZOMBIE HORDE UNLOCKED');
+      if (zombieUnlocked) notices.push('☣ ZOMBIE WASTELAND UNLOCKED');
       if (notices.length) {
         skLine.textContent = notices.join(' | ');
         skLine.style.display = '';
@@ -9489,6 +9685,8 @@ function sendMpState() {
     kills: Game.kills | 0,
     dist: Game.distance | 0,
     hp: Math.max(0, Math.round((Game.health / Math.max(1, Game.maxHealth || Game.health)) * 100)),
+    downed: !!Game.coopDowned || Game.state === 'dying',
+    zombieWave: Game.zombie ? Game.zombie.wave : 0,
     state: Game.state,
     mode: Game.mode || null,
     level: Game.level || null,
@@ -9534,6 +9732,14 @@ function drawMpGhosts() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(name, x, y - 42);
+    if (typeof s.hp === 'number') {
+      const bw = 44, bh = 5;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(x - bw/2, y - 32, bw, bh);
+      ctx.fillStyle = s.downed ? '#ff5050' : '#7af07a';
+      ctx.fillRect(x - bw/2, y - 32, bw * clamp(s.hp / 100, 0, 1), bh);
+      if (s.downed) { ctx.fillStyle = '#ff5050'; ctx.fillText('REVIVE', x, y - 24); }
+    }
   }
   ctx.restore();
 }
@@ -9590,6 +9796,16 @@ function mpRefreshPeerList() {
   });
   // Themed status events surfaced as toasts so the user always knows what's
   // happening with the radio link. Codes are stable; detail is presentation.
+  MP.on('event', (id, ev) => {
+    if (!ev) return;
+    if (ev.kind === 'zombie-wave' && Game.mode === 'zombie' && Game.zombie) {
+      Game.zombie.remoteWave = ev.wave || 0;
+      if (typeof ev.survivors === 'number') Game.zombie.survivors = Math.max(Game.zombie.survivors || 0, ev.survivors);
+      UI.toast('CO-OP WAVE SYNC: ' + (ev.wave || '?'));
+    } else if (ev.kind === 'revive') {
+      UI.toast('TEAMMATE REVIVE SIGNAL');
+    }
+  });
   MP.on('status', (st) => {
     if (!st) return;
     const code = st.code;

@@ -431,6 +431,7 @@ wss.on('connection', (ws, req) => {
       }
       send(ws, { type: 'joined', id: peer.id, room, peers: existing });
       broadcast(room, { type: 'peer-join', id: peer.id, name: peer.name, color: peer.color, vehicleId: peer.vehicleId }, peer.id);
+      broadcast(room, { type: 'player-join', id: peer.id, name: peer.name, color: peer.color, vehicleId: peer.vehicleId }, peer.id);
       return;
     }
 
@@ -440,13 +441,17 @@ wss.on('connection', (ws, req) => {
     const me = roomMap.get(peer.id);
     if (!me) return;
 
-    if (msg.type === 'state') {
-      // trust client-reported state; this is co-op cosmetic, not authoritative
+    if (msg.type === 'state' || msg.type === 'player-state') {
+      // trust client-reported state; this is lightweight shared co-op, not authoritative
       me.state = msg.s || null;
       broadcast(peer.room, { type: 'peer-state', id: peer.id, s: me.state }, peer.id);
-    } else if (msg.type === 'event') {
-      const ev = msg.ev || {};
-      broadcast(peer.room, { type: 'peer-event', id: peer.id, ev }, peer.id);
+      broadcast(peer.room, { type: 'player-state', id: peer.id, s: me.state }, peer.id);
+    } else if (msg.type === 'event' || msg.type === 'shared-event') {
+      const ev = msg.ev || msg.event || {};
+      const outType = msg.type === 'shared-event' ? 'shared-event' : 'peer-event';
+      broadcast(peer.room, { type: outType, id: peer.id, ev }, peer.id);
+    } else if (msg.type === 'revive') {
+      broadcast(peer.room, { type: 'revive', id: peer.id, target: safeStr(msg.target || '', 32) }, peer.id);
     } else if (msg.type === 'meta') {
       if (msg.name) me.name = peer.name = safeStr(msg.name, 14);
       if (msg.color) me.color = peer.color = safeStr(msg.color, 16);

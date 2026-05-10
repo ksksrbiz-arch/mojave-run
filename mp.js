@@ -1,4 +1,4 @@
-// MOJAVE RUN — multiplayer client (ghost overlay co-op).
+// MOJAVE RUN — multiplayer client (shared-world co-op relay).
 // Connects via WebSocket to the same origin that served the page.
 // Each peer broadcasts its position/score; everyone draws everyone else
 // as a translucent ghost car on their own road. Gameplay stays single-player
@@ -208,7 +208,11 @@
           break;
         }
         case 'peer-event':
-          emit('event', msg.id, msg.ev);
+        case 'shared-event':
+          emit('event', msg.id, msg.ev || msg.event);
+          break;
+        case 'revive':
+          emit('event', msg.id, { kind: 'revive', target: msg.target });
           break;
         case 'pong': {
           const now = performance.now();
@@ -283,7 +287,7 @@
       const now = performance.now();
       if (now - MP._lastSent < 1000 / STATE_HZ) return;
       MP._lastSent = now;
-      try { MP.ws.send(JSON.stringify({ type: 'state', s: MP._pendingState })); } catch (_) {}
+      try { MP.ws.send(JSON.stringify({ type: 'player-state', s: MP._pendingState })); } catch (_) {}
       MP._pendingState = null;
     }, Math.floor(1000 / STATE_HZ / 2));
   }
@@ -339,7 +343,14 @@
 
   function sendEvent(ev) {
     if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
-    try { MP.ws.send(JSON.stringify({ type: 'event', ev })); } catch (_) {}
+    try { MP.ws.send(JSON.stringify({ type: 'shared-event', ev })); } catch (_) {}
+  }
+
+  function sendSharedEvent(ev) { sendEvent(ev); }
+
+  function sendRevive(target) {
+    if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
+    try { MP.ws.send(JSON.stringify({ type: 'revive', target: target || null })); } catch (_) {}
   }
 
   function sendMeta(meta) {
@@ -385,6 +396,6 @@
 
   // expose
   window.MP = Object.assign(MP, {
-    connect, disconnect, sendState, sendEvent, sendMeta, on, defaultUrl, pruneStale,
+    connect, disconnect, sendState, sendEvent, sendSharedEvent, sendRevive, sendMeta, on, defaultUrl, pruneStale,
   });
 })();
