@@ -10275,7 +10275,7 @@ const Rivals = {
       const rival = JSON.parse(atob(b64));
       if (!rival.name) return { ok: false, reason: 'INVALID RIVAL DATA' };
       if (!this._list) this.load();
-      if (this._list.length >= MAX_RIVALS) return { ok: false, reason: 'RIVAL LIMIT REACHED (' + MAX_RIVALS + '/' + MAX_RIVALS + ')' };
+      if (this._list.length >= MAX_RIVALS) return { ok: false, reason: 'RIVAL LIMIT REACHED (MAX ' + MAX_RIVALS + ')' };
       if (this._list.some(r => r.name === rival.name)) return { ok: false, reason: 'RIVAL ALREADY IMPORTED' };
       rival.imported = Date.now();
       this._list.push(rival); this.save();
@@ -10287,15 +10287,18 @@ const Rivals = {
     this._list = this._list.filter(r => r.name !== name);
     this.save();
   },
-  // Draw a ghost car overlay during gameplay (translucent, no collision).
-  // Called from the platform frame hook below when Game.state === 'playing'.
+  // Render rival ghost car in the game loop (translucent overlay).
+  // Ghost cars oscillate gently across the road. No collision — visual only.
   drawGhosts(ctx) {
+    const GHOST_SPEED_FACTOR   = 0.6;  // horizontal oscillation speed (radians/sec)
+    const GHOST_SPACING_FACTOR = 1.8;  // phase offset between successive rivals
+    const GHOST_AMPLITUDE      = 0.18; // fraction of screen width for lateral swing
     const list = this.list();
     if (!list.length || !Game.player) return;
     const t = Game.t || 0;
     list.forEach((rival, i) => {
       const vDef = VEHICLE_BY_ID[rival.vehicle] || VEHICLES[0];
-      const gx = W * 0.5 + Math.sin(t * 0.6 + i * 1.8) * W * 0.18;
+      const gx = W * 0.5 + Math.sin(t * GHOST_SPEED_FACTOR + i * GHOST_SPACING_FACTOR) * W * GHOST_AMPLITUDE;
       const gy = H * 0.28 + i * 48;
       ctx.save();
       ctx.globalAlpha = 0.18;
@@ -10402,7 +10405,8 @@ const Clan = {
   },
   setClanName(raw) {
     const p = Profile.active(); if (!p) return false;
-    p.clanName = (raw || '').trim().toUpperCase().slice(0, 20) || null;
+    // Strip characters that could be harmful if rendered without escapeHtml in future contexts
+    p.clanName = (raw || '').trim().toUpperCase().replace(/[^A-Z0-9 ._\-]/g, '').slice(0, 20) || null;
     Profile.save();
     return true;
   },
@@ -10570,17 +10574,19 @@ function buildPlatformScreen() {
 
 function buildEditorScreen() {
   const raw = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
-  // Sanitize numeric values from localStorage before inserting into HTML attributes
+  const VALID_BIOMES = ['wastes','canyon','city','neon'];
+  const VALID_OBJECTIVES = ['score','distance','kills','survive'];
+  // Sanitize all values from localStorage before inserting into HTML attributes
   const draft = {
     name:         escapeHtml(String(raw.name || 'CUSTOM RUN').slice(0, 20)),
-    biome:        String(raw.biome || 'wastes'),
-    objective:    String(raw.objective || 'score'),
+    biome:        VALID_BIOMES.includes(String(raw.biome)) ? String(raw.biome) : 'wastes',
+    objective:    VALID_OBJECTIVES.includes(String(raw.objective)) ? String(raw.objective) : 'score',
     difficulty:   Math.max(1, Math.min(5, Math.round(Number(raw.difficulty) || 2))),
     enemyDensity: Math.max(0.5, Math.min(2.0, Math.round((Number(raw.enemyDensity) || 1) * 10) / 10)),
     pickupRate:   Math.max(0.5, Math.min(2.0, Math.round((Number(raw.pickupRate)   || 1) * 10) / 10)),
   };
-  const biomes = ['wastes','canyon','city','neon'];
-  const objectives = ['score','distance','kills','survive'];
+  const biomes = VALID_BIOMES;
+  const objectives = VALID_OBJECTIVES;
   return `
     <h2>🛠 LEVEL EDITOR</h2>
     <div class="set-row">
@@ -10695,10 +10701,15 @@ UI.act = function(action, data) {
         const out = document.getElementById('ed-code-out');
         const txt = document.getElementById('ed-code-text');
         const lbl = document.getElementById('ed-code-label');
-        if (out && txt) { out.style.display = ''; txt.textContent = code; if (lbl) lbl.textContent = 'YOUR LEVEL CODE (TAP TO COPY)'; }
-        txt && txt.addEventListener('click', () => {
-          try { navigator.clipboard.writeText(code).catch(() => {}); UI.toast('CODE COPIED!'); } catch (_) {}
-        });
+        if (out && txt) {
+          out.style.display = '';
+          txt.textContent = code;
+          if (lbl) lbl.textContent = 'YOUR LEVEL CODE (TAP TO COPY)';
+          // Use { once: true } to prevent duplicate listeners on repeated generate clicks
+          txt.addEventListener('click', function copyCode() {
+            try { navigator.clipboard.writeText(code).catch(() => {}); UI.toast('CODE COPIED!'); } catch (_) {}
+          }, { once: true });
+        }
         UI.toast('LEVEL CODE GENERATED!');
       }
       return;
@@ -10774,7 +10785,7 @@ UI.act = function(action, data) {
       const entry = rlist.find(r => r.date === rdate);
       if (entry && entry.code) {
         try { navigator.clipboard.writeText(entry.code).catch(() => {}); UI.toast('REPLAY CODE COPIED!'); }
-        catch (_) { UI.toast(entry.code.slice(0, 32) + '…'); }
+        catch (_) { UI.toast('COPY FAILED: ' + entry.code.slice(0, 32) + '…'); }
       } else {
         UI.toast('REPLAY NOT FOUND');
       }
@@ -10869,7 +10880,7 @@ UI.act = function(action, data) {
   // on top of the canvas after the main render completes.
   (function rivalRenderLoop(now) {
     if (Game.state === 'playing' && !Game.paused && Rivals.list().length > 0 && ctx) {
-      try { Rivals.drawGhosts(ctx); } catch (_) {}
+      try { Rivals.drawGhosts(ctx); } catch (err) { console.error('[Rivals] Ghost render error:', err); }
     }
     requestAnimationFrame(rivalRenderLoop);
   })(0);
