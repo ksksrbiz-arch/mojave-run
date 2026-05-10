@@ -259,7 +259,7 @@
     overflow:hidden;background:#0d0805;
   }
   .portrait svg{display:block;width:100%;height:100%}
-  .portrait.lg{width:140px;height:140px;border-color:var(--gold-dim)}
+  .portrait.lg{width:140px;height:140px;border-color:var(--gold-dim);transition:box-shadow .2s,border-color .2s}
   .portrait.xl{width:170px;height:170px;border-color:var(--gold)}
   .portrait .pframe{
     position:absolute;inset:0;pointer-events:none;
@@ -299,6 +299,11 @@
     0%,100%{opacity:.2;transform:scale(.8)}
     50%{opacity:1;transform:scale(1.2)}
   }
+  /* selected card shimmer sweep */
+  @keyframes char-shimmer{
+    0%{background-position:-200% 0}
+    100%{background-position:200% 0}
+  }
   .portrait .eyelid{transform-origin:center;transform-box:fill-box;animation:cha-blink 5.4s infinite}
   .portrait .eyelid.b{animation:cha-blink-2 6.1s infinite}
   .portrait .breath{transform-origin:center;transform-box:fill-box;animation:cha-breath 3.8s ease-in-out infinite}
@@ -317,16 +322,34 @@
     background:rgba(0,0,0,.5);
     border:2px solid var(--gold-faint);
     border-radius:6px;cursor:pointer;
-    transition:border-color .15s,background .15s,box-shadow .15s,transform .15s;
+    transition:border-color .2s,background .2s,box-shadow .2s,transform .15s;
+    position:relative;overflow:hidden;
   }
-  .char-card.selected{border-color:var(--gold);background:rgba(245,215,110,.06)}
-  .char-card:hover{border-color:rgba(245,215,110,.7);box-shadow:0 6px 18px rgba(0,0,0,.2)}
+  .char-card.selected{
+    border-color:var(--gold);
+    background:rgba(245,215,110,.07);
+    box-shadow:0 0 18px rgba(245,215,110,.18), inset 0 0 24px rgba(245,215,110,.04);
+  }
+  /* animated shimmer sweep on selected card */
+  .char-card.selected::after{
+    content:'';position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 30%,rgba(245,215,110,.13) 50%,transparent 70%);
+    background-size:200% 100%;
+    animation:char-shimmer 2.4s ease-in-out infinite;
+    pointer-events:none;
+  }
+  .char-card:hover{border-color:rgba(245,215,110,.7);box-shadow:0 6px 22px rgba(0,0,0,.28)}
   .char-card:active{transform:scale(.995)}
   .char-card .cmeta{flex:1;min-width:0}
   .char-card .cname{font-weight:bold;letter-spacing:2px;font-size:15px;color:var(--gold)}
   .char-card .ctitle{font-size:10px;letter-spacing:2px;color:var(--rust);margin-top:2px}
   .char-card .cbio{font-size:11px;color:var(--gold-dim);letter-spacing:.5px;margin-top:6px;line-height:1.45}
   .char-card .cperk{font-size:10px;color:var(--good);letter-spacing:1px;margin-top:6px}
+  /* portrait glow ring on selected card */
+  .char-card.selected .portrait.lg{
+    box-shadow:0 0 14px rgba(245,215,110,.5);
+    border-color:var(--gold);
+  }
 
   /* MENU profile bar — character portrait inline */
   .profile-bar .pb-portrait{
@@ -352,6 +375,9 @@
   .vehicle-tile.selected{border-color:var(--gold);background:rgba(245,215,110,.06)}
   .vehicle-tile:hover{border-color:rgba(245,215,110,.7);box-shadow:0 6px 18px rgba(0,0,0,.2)}
   .vehicle-tile.locked{opacity:.5}
+  .vehicle-tile.master-vehicle{border-color:#7aff5a;box-shadow:0 0 12px rgba(122,255,90,.25)}
+  .vehicle-tile.master-vehicle.selected{border-color:#7aff5a;background:rgba(122,255,90,.06)}
+  .master-badge{display:inline-block;font-size:9px;letter-spacing:2px;background:#7aff5a;color:#0a1a06;padding:1px 5px;border-radius:2px;vertical-align:middle;margin-left:5px;font-weight:900}
   .vehicle-tile .vt-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
   .vehicle-tile .vt-name{font-weight:bold;letter-spacing:2px;font-size:14px}
   .vehicle-tile .vt-cost{font-size:11px;color:var(--gold-dim);letter-spacing:1px}
