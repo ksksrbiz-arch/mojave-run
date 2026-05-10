@@ -11000,8 +11000,18 @@ const LevelEditor = {
 (function setupModdingAPI() {
   const _modVehicles = [], _modModes = [], _modHazards = [], _modBiomes = [], _modMutators = [];
   const _scriptListeners = new Map();
+  function removeScriptEntry(event, entryToRemove) {
+    const list = _scriptListeners.get(event);
+    if (!list) return false;
+    const idx = list.indexOf(entryToRemove);
+    if (idx < 0) return false;
+    list.splice(idx, 1);
+    if (list.length) _scriptListeners.set(event, list);
+    else _scriptListeners.delete(event);
+    return true;
+  }
   function addScriptListener(event, fn, once) {
-    if (typeof event !== 'string' || !event || typeof fn !== 'function') return false;
+    if (typeof event !== 'string' || event.length === 0 || typeof fn !== 'function') return false;
     const list = _scriptListeners.get(event) || [];
     list.push({ fn, once: !!once });
     _scriptListeners.set(event, list);
@@ -11009,19 +11019,20 @@ const LevelEditor = {
   }
   function removeScriptListener(event, fn) {
     const list = _scriptListeners.get(event);
-    if (!list || !list.length || typeof fn !== 'function') return false;
-    const next = list.filter(entry => entry.fn !== fn);
-    if (next.length) _scriptListeners.set(event, next);
-    else _scriptListeners.delete(event);
-    return next.length !== list.length;
+    if (!list || typeof fn !== 'function') return false;
+    const entry = list.find(item => item.fn === fn);
+    if (!entry) return false;
+    return removeScriptEntry(event, entry);
   }
   function emitScriptEvent(event, data) {
     const list = (_scriptListeners.get(event) || []).slice();
+    const onceEntries = [];
     list.forEach(entry => {
       try { entry.fn(data); }
       catch (err) { console.error('[MojaveMod.script] listener failed for', event, err); }
-      if (entry.once) removeScriptListener(event, entry.fn);
+      if (entry.once) onceEntries.push(entry);
     });
+    onceEntries.forEach(entry => removeScriptEntry(event, entry));
     return list.length;
   }
   window.MojaveMod = {
@@ -11084,6 +11095,10 @@ const LevelEditor = {
     get biomes()    { return _modBiomes.slice();     },
     get mutators()  { return _modMutators.slice();   },
     // Lightweight platform event bus for mods and page-level scripts.
+    // Built-in hooks currently emitted by the game use namespace:action keys:
+    // run:start, run:end, weekly:complete, weekly:claim, craft:complete,
+    // replay:start, and replay:end. on/once/off return booleans and emit
+    // returns the number of listeners invoked for that event.
     script: {
       on(event, fn)  { return addScriptListener(event, fn, false); },
       once(event, fn){ return addScriptListener(event, fn, true);  },
@@ -13154,10 +13169,10 @@ function startReplayPlayback(rp) {
   UI.hideAllScreens();
 }
 function updateReplayPlayback(dt) {
-  const r = Game.replay; if (!r) return;
-  r.t += dt;
-  const frames = r.data.frames;
-  const idx = Math.min(frames.length - 1, Math.floor(r.t * REPLAY_FPS));
+  const replayState = Game.replay; if (!replayState) return;
+  replayState.t += dt;
+  const frames = replayState.data.frames;
+  const idx = Math.min(frames.length - 1, Math.floor(replayState.t * REPLAY_FPS));
   const f = frames[idx];
   if (f && Game.player) {
     Game.player.x = f.x; Game.player.y = f.y; Game.score = f.s; Game.kills = f.k; Game.health = f.h;
@@ -13165,7 +13180,7 @@ function updateReplayPlayback(dt) {
   Game.bgScroll += 120 * dt; Game.laneOffset = (Game.laneOffset + 120 * dt) % 60;
   if (idx >= frames.length - 1 || keys['escape']) {
     emitModScriptEvent('replay:end', {
-      meta: Object.assign({}, (r.data && r.data.meta) || {}),
+      meta: Object.assign({}, (replayState.data && replayState.data.meta) || {}),
       frames: frames.length,
       interrupted: !!keys['escape'],
     });
