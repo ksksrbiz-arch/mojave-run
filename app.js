@@ -2413,7 +2413,14 @@ const Profile = {
     // === PLATFORM FEATURES: weekly challenge check (deferred until systems loaded) ===
     if (typeof checkWeeklyChallenge === 'function') {
       const wc = checkWeeklyChallenge(result);
-      if (wc) { Game._pendingWeekly = wc; }
+      if (wc) {
+        Game._pendingWeekly = wc;
+        emitModScriptEvent('weekly:complete', {
+          challenge: Object.assign({}, wc),
+          result: Object.assign({}, result),
+          profileId: p.id,
+        });
+      }
     }
   },
   isLevelUnlocked(num) {
@@ -4214,6 +4221,18 @@ function startRun(mode, level) {
   Game.loadingT = 0;
   Game.loadingDur = 1.7;
   Game.loadingTip = pickLoadingTip();
+  emitModScriptEvent('run:start', {
+    mode,
+    level: Game.level,
+    biome: Game.biome,
+    vehicleId: Game.vehicle && Game.vehicle.id,
+    dailySeedKey: Game.dailySeedKey,
+    wastelandSeedKey: Game.wastelandSeedKey,
+    ironThroneStage: Game.ironThroneStage || 0,
+    customConfig: Game.customConfig ? Object.assign({}, Game.customConfig) : null,
+    mutators: (Game.runMutators || []).map(m => m.id),
+    weaponSpec: Game.activeWeaponSpec ? Game.activeWeaponSpec.id : 'none',
+  });
   SFX.start();
   requestWakeLock();
   pauseBtn.classList.remove('show');
@@ -4307,7 +4326,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   Profile.earn(Game.scrapEarned);
   flushV23RunCounters();
   // record stats
-  Profile.recordRunResult({
+  const runResult = {
     mode: Game.mode,
     score: Math.floor(Game.score),
     distance: Math.floor(Game.distance),
@@ -4328,7 +4347,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     died: reason === 'death',
     // iron throne: stage number that was just cleared (incremented on boss death)
     ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
-  });
+  };
+  Profile.recordRunResult(runResult);
   // check achievements earned this run; also grant mastery vehicle if newly unlocked
   const _masteryWasUnlocked = !!(Profile.active() && Profile.active().ownedVehicles['warlordking']);
   Game._pendingBadges = Profile.checkAchievements();
@@ -4336,6 +4356,12 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   if (_newlyGranted && !_masteryWasUnlocked) {
     Game._pendingBadges = Game._pendingBadges.concat([{ icon:'🚗', name:'WARLORD KING UNLOCKED', desc:'The boss car is yours.' }]);
   }
+  emitModScriptEvent('run:end', {
+    reason,
+    result: Object.assign({}, runResult),
+    weekly: Game._pendingWeekly ? Object.assign({}, Game._pendingWeekly) : null,
+    badges: (Game._pendingBadges || []).map(b => Object.assign({}, b)),
+  });
   Game._pendingCosmetics = Profile.checkCosmetics();
   // SFX already played by death/victory sequences; only play here for time-out
   if (reason === 'time') SFX.victory();
@@ -10973,6 +10999,31 @@ const LevelEditor = {
 // Share codes use the same base64 format as the Level Editor.
 (function setupModdingAPI() {
   const _modVehicles = [], _modModes = [], _modHazards = [], _modBiomes = [], _modMutators = [];
+  const _scriptListeners = new Map();
+  function addScriptListener(event, fn, once) {
+    if (typeof event !== 'string' || !event || typeof fn !== 'function') return false;
+    const list = _scriptListeners.get(event) || [];
+    list.push({ fn, once: !!once });
+    _scriptListeners.set(event, list);
+    return true;
+  }
+  function removeScriptListener(event, fn) {
+    const list = _scriptListeners.get(event);
+    if (!list || !list.length || typeof fn !== 'function') return false;
+    const next = list.filter(entry => entry.fn !== fn);
+    if (next.length) _scriptListeners.set(event, next);
+    else _scriptListeners.delete(event);
+    return next.length !== list.length;
+  }
+  function emitScriptEvent(event, data) {
+    const list = (_scriptListeners.get(event) || []).slice();
+    list.forEach(entry => {
+      try { entry.fn(data); }
+      catch (err) { console.error('[MojaveMod.script] listener failed for', event, err); }
+      if (entry.once) removeScriptListener(event, entry.fn);
+    });
+    return list.length;
+  }
   window.MojaveMod = {
     version: '2.3',
     // Register a custom vehicle: { id, name, desc, base: {maxHp,accel,maxV,fireRate,dmg,guns}, color }
@@ -11032,13 +11083,25 @@ const LevelEditor = {
     get hazards()   { return _modHazards.slice();    },
     get biomes()    { return _modBiomes.slice();     },
     get mutators()  { return _modMutators.slice();   },
-    // Visual scripting stub — full integration is a future TODO.
+    // Lightweight platform event bus for mods and page-level scripts.
     script: {
-      on(event, fn)  { console.info('[MojaveMod.script] stub listener:', event); },
-      emit(event, d) { console.info('[MojaveMod.script] stub emit:', event, d);  },
+      on(event, fn)  { return addScriptListener(event, fn, false); },
+      once(event, fn){ return addScriptListener(event, fn, true);  },
+      off(event, fn) { return removeScriptListener(event, fn);      },
+      emit(event, d) { return emitScriptEvent(event, d);            },
     },
   };
 })();
+
+function emitModScriptEvent(event, data) {
+  try {
+    if (window.MojaveMod && window.MojaveMod.script && typeof window.MojaveMod.script.emit === 'function') {
+      window.MojaveMod.script.emit(event, data);
+    }
+  } catch (err) {
+    console.error('[MojaveMod.script] emit failed for', event, err);
+  }
+}
 
 // === RIVALS SYSTEM ===
 // Import rival ghost cars via share codes. During gameplay a translucent
@@ -11122,7 +11185,7 @@ const Rivals = {
 
 // === COMMUNITY REPLAY THEATER ===
 // Records a lightweight run snapshot at 5 fps (max 60 s) for export and sharing.
-// Import a replay code to watch as an overlay. Full playback render is a TODO.
+// Imported or local replays can be played back in a lightweight theater view.
 const REPLAY_STORAGE_KEY = 'mojave_replays_v1';
 const REPLAY_FPS = 5;
 const REPLAY_MAX_FRAMES = REPLAY_FPS * 60; // 60 seconds max
@@ -11498,6 +11561,7 @@ UI.act = function(action, data) {
       SFX.click();
       if (claimWeeklyReward()) {
         const wc = getWeeklyChallenge();
+        emitModScriptEvent('weekly:claim', { challenge: Object.assign({}, wc) });
         SFX.levelUp();
         UI.toast('✦ WEEKLY REWARD: +' + wc.reward.toLocaleString() + ' SCRAP', 3000);
         UI.showPlatform();
@@ -11633,6 +11697,10 @@ UI.act = function(action, data) {
       SFX.click();
       const res = CraftingWorkshop.craft(data || '');
       if (res.ok) {
+        emitModScriptEvent('craft:complete', {
+          recipe: Object.assign({}, res.recipe, { cost: Object.assign({}, res.recipe.cost || {}) }),
+          profileId: (Profile.active() || {}).id || null,
+        });
         incrementV23Counter('crafts', 1);
         SFX.levelUp();
         UI.toast('CRAFTED ' + res.recipe.name);
@@ -12462,8 +12530,7 @@ const CRAFTING_RECIPES = [
   },
 ];
 
-// Crafting Workshop state object.
-// Full UI integration is a future TODO — this provides the data layer.
+// Crafting Workshop state object backing the platform crafting UI.
 const CraftingWorkshop = {
   // Craft a recipe by ID. Deducts resources, adds mod to profile.
   craft(recipeId) {
@@ -13080,6 +13147,10 @@ function startReplayPlayback(rp) {
   Game.score = 0; Game.kills = 0; Game.health = Game.maxHealth = Math.round(Game.vehicleStats.maxHp || 100);
   Game.biome = 'wastes'; Game.isNight = false; Game.isStorm = false;
   Game.bullets.length = Game.enemies.length = Game.obstacles.length = Game.pickups.length = Game.enemyBullets.length = 0;
+  emitModScriptEvent('replay:start', {
+    meta: Object.assign({}, meta),
+    frames: rp.frames.length,
+  });
   UI.hideAllScreens();
 }
 function updateReplayPlayback(dt) {
@@ -13092,7 +13163,15 @@ function updateReplayPlayback(dt) {
     Game.player.x = f.x; Game.player.y = f.y; Game.score = f.s; Game.kills = f.k; Game.health = f.h;
   }
   Game.bgScroll += 120 * dt; Game.laneOffset = (Game.laneOffset + 120 * dt) % 60;
-  if (idx >= frames.length - 1 || keys['escape']) { Game.state = 'menu'; UI.showPlatform(); }
+  if (idx >= frames.length - 1 || keys['escape']) {
+    emitModScriptEvent('replay:end', {
+      meta: Object.assign({}, (r.data && r.data.meta) || {}),
+      frames: frames.length,
+      interrupted: !!keys['escape'],
+    });
+    Game.state = 'menu';
+    UI.showPlatform();
+  }
 }
 function drawReplayOverlay() {
   ctx.save();
