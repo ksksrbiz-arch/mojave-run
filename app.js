@@ -452,6 +452,7 @@ const MODES = [
 ];
 
 // Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
+// Fields: w/h are sprite size, hp is health, vy/vxRange drive movement, contact is collision damage, score is points, icon is HUD shorthand.
 const ZOMBIE_DEFS = [
   { id:'walker',  name:'WALKER',  w:20, h:30, hp:3,  vy:50,  vxRange:18, contact:12, score:80,  color:'#3a4a28', goreColor:'#2a3a18', accent:'#1a1a10', icon:'W' },
   { id:'runner',  name:'RUNNER',  w:16, h:26, hp:1,  vy:120, vxRange:44, contact:8,  score:120, color:'#2a3a1c', goreColor:'#1a2a0e', accent:'#141410', icon:'R' },
@@ -468,6 +469,9 @@ const ZOMBIE_OBJECTIVES = [
   { id:'choke', name:'HOLD CHOKE POINT' },
   { id:'tank', name:'TANK WAVE' },
 ];
+const ZOMBIE_INITIAL_SURVIVORS = 3;
+const ZOMBIE_MAX_SURVIVORS = 6;
+const ZOMBIE_SURVIVOR_RESCUE_BONUS = 1;
 
 // ============================================================
 // IRON THRONE — 8-stage boss campaign (unlocked by full mastery)
@@ -2737,21 +2741,44 @@ function detonateZombieTool(kind) {
   }
 }
 
+function zombieObjectiveForWave(wave) {
+  if (wave % 5 !== 0) return null;
+  return ZOMBIE_OBJECTIVES[(Math.floor(wave / 5) - 1) % ZOMBIE_OBJECTIVES.length];
+}
+
+function isZombieProtectionObjectiveActive() {
+  const obj = Game.zombie && Game.zombie.objective;
+  return !!obj && (obj.id === 'convoy' || obj.id === 'rescue');
+}
+
 function startZombieWave(forceObjective) {
   if (Game.mode !== 'zombie') return;
   const zw = Game.zombie || (Game.zombie = {});
   zw.wave = (zw.wave || 0) + 1;
   zw.waveT = 0;
   zw.waveDur = Math.max(24, 34 - Math.min(12, zw.wave * 0.8));
-  zw.objective = forceObjective || ((zw.wave % 5 === 0) ? ZOMBIE_OBJECTIVES[((zw.wave / 5) - 1) % ZOMBIE_OBJECTIVES.length] : null);
+  zw.objective = forceObjective || zombieObjectiveForWave(zw.wave);
   zw.objectiveKills = Game.kills;
   zw.specialIcons = [];
-  if (zw.objective && zw.objective.id === 'rescue') zw.survivors = Math.min(6, (zw.survivors || 3) + 1);
+  if (zw.objective && zw.objective.id === 'rescue') {
+    zw.survivors = Math.min(
+      ZOMBIE_MAX_SURVIVORS,
+      (zw.survivors || ZOMBIE_INITIAL_SURVIVORS) + ZOMBIE_SURVIVOR_RESCUE_BONUS
+    );
+  }
   announceEvent(zw.objective ? zw.objective.name : ('WAVE ' + zw.wave), zw.objective ? '#ff8a3d' : '#d2ff6f');
   const burst = Math.min(10, 3 + Math.floor(zw.wave * 0.8));
   for (let i = 0; i < burst; i++) spawnEnemy('zombie');
   if (zw.wave % 3 === 0 || (zw.objective && zw.objective.id === 'tank')) spawnZombieSpecial(zw.objective && zw.objective.id === 'tank' ? 'tank' : null);
-  if (window.MP && MP.connected && MP.sendSharedEvent) MP.sendSharedEvent({ kind:'zombie-wave', wave: zw.wave, objective: zw.objective && zw.objective.id, survivors: zw.survivors });
+  if (window.MP && MP.connected && MP.sendSharedEvent) {
+    const event = {
+      kind: 'zombie-wave',
+      wave: zw.wave,
+      objective: zw.objective && zw.objective.id,
+      survivors: zw.survivors,
+    };
+    MP.sendSharedEvent(event);
+  }
 }
 
 function spawnZombieSpecial(forceType) {
@@ -2779,7 +2806,7 @@ function spawnZombiePowerup() {
 
 function updateZombieWasteland(dt) {
   if (Game.mode !== 'zombie') return;
-  const zw = Game.zombie || (Game.zombie = { wave: 0, waveT: 0, waveDur: 0, survivors: 3, powerT: 5 });
+  const zw = Game.zombie || (Game.zombie = { wave: 0, waveT: 0, waveDur: 0, survivors: ZOMBIE_INITIAL_SURVIVORS, powerT: 5 });
   if (!zw.wave) startZombieWave();
   zw.waveT += dt;
   zw.powerT = (zw.powerT || 5) - dt;
@@ -3510,7 +3537,7 @@ function startRun(mode, level) {
   if (mode !== 'ironthrone') Game.ironThroneStage = 0;
   Game.hordeMode = null;
   Game.hordeWaveT = 0;
-  Game.zombie = mode === 'zombie' ? { wave: 0, waveT: 0, waveDur: 0, survivors: 3, powerT: 4, specialIcons: [] } : null;
+  Game.zombie = mode === 'zombie' ? { wave: 0, waveT: 0, waveDur: 0, survivors: ZOMBIE_INITIAL_SURVIVORS, powerT: 4, specialIcons: [] } : null;
   Game.coopDowned = false;
   Game.skidMarks.length = 0;
   Game.farPeaks.length = 0;
@@ -5195,8 +5222,8 @@ function update(dt) {
         }
       }
     } else if (e.y > H + 60) {
-      if (Game.mode === 'zombie' && e.kind === 'zombie' && Game.zombie && (Game.zombie.objective && (Game.zombie.objective.id === 'convoy' || Game.zombie.objective.id === 'rescue'))) {
-        Game.zombie.survivors = Math.max(0, (Game.zombie.survivors || 0) - (e.special ? 1 : 0));
+      if (Game.mode === 'zombie' && e.kind === 'zombie' && isZombieProtectionObjectiveActive()) {
+        Game.zombie.survivors = Math.max(0, (Game.zombie.survivors || 0) - 1);
       }
       Game.enemies.splice(i,1);
     }
@@ -7387,7 +7414,7 @@ function drawHUD() {
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.fillStyle = '#d2ff6f';
     const icons = (zw.specialIcons && zw.specialIcons.length) ? zw.specialIcons.slice(-5).join(' ') : '—';
-    ctx.fillText('SPECIALS ' + icons + '  SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + 12);
+    ctx.fillText('SPECIALS ' + icons + ' · SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + 12);
   }
 
   // hull bar
@@ -9800,7 +9827,7 @@ function mpRefreshPeerList() {
     if (!ev) return;
     if (ev.kind === 'zombie-wave' && Game.mode === 'zombie' && Game.zombie) {
       Game.zombie.remoteWave = ev.wave || 0;
-      if (typeof ev.survivors === 'number') Game.zombie.survivors = Math.max(Game.zombie.survivors || 0, ev.survivors);
+      if (typeof ev.survivors === 'number') Game.zombie.survivors = Math.max(0, ev.survivors);
       UI.toast('CO-OP WAVE SYNC: ' + (ev.wave || '?'));
     } else if (ev.kind === 'revive') {
       UI.toast('TEAMMATE REVIVE SIGNAL');

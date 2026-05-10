@@ -431,6 +431,7 @@ wss.on('connection', (ws, req) => {
       }
       send(ws, { type: 'joined', id: peer.id, room, peers: existing });
       broadcast(room, { type: 'peer-join', id: peer.id, name: peer.name, color: peer.color, vehicleId: peer.vehicleId }, peer.id);
+      // v2 clients can subscribe to player-join while older clients keep peer-join.
       broadcast(room, { type: 'player-join', id: peer.id, name: peer.name, color: peer.color, vehicleId: peer.vehicleId }, peer.id);
       return;
     }
@@ -445,6 +446,7 @@ wss.on('connection', (ws, req) => {
       // trust client-reported state; this is lightweight shared co-op, not authoritative
       me.state = msg.s || null;
       broadcast(peer.room, { type: 'peer-state', id: peer.id, s: me.state }, peer.id);
+      // v2 clients can subscribe to player-state while older ghost clients keep peer-state.
       broadcast(peer.room, { type: 'player-state', id: peer.id, s: me.state }, peer.id);
     } else if (msg.type === 'event' || msg.type === 'shared-event') {
       const ev = msg.ev || msg.event || {};

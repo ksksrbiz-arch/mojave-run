@@ -346,6 +346,7 @@
     try { MP.ws.send(JSON.stringify({ type: 'shared-event', ev })); } catch (_) {}
   }
 
+  // Named wrapper keeps the shared-world API explicit while preserving sendEvent compatibility.
   function sendSharedEvent(ev) { sendEvent(ev); }
 
   function sendRevive(target) {
