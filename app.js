@@ -7538,12 +7538,19 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const speed = Math.abs(vx || 0);
   const speedN = clamp(speed / 420, 0, 1);
   const wheelSpin = t * (6 + speedN * 26);
-  const bounce = Math.sin(t * (5 + speedN * 9) + x * 0.012) * (0.5 + speedN * 1.3);
+  const suspensionBob = Math.sin(t * (5 + speedN * 9) + x * 0.012) * (0.5 + speedN * 1.3);
+  const FIRE_ANIM_WINDOW = 0.12;
+  const RECOIL_DISTANCE = 4;
+  const BRAKE_BASE_ALPHA = 0.25;
+  const BRAKE_IDLE_BOOST = 0.4;
+  const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
+  const BRAKE_PULSE_AMPLITUDE = 0.2;
+  const BRAKE_PULSE_RATE = 8;
 
   // ---- CEMETERY TANK special render ----
   if (vehicle.shape === 'tank') {
     ctx.save();
-    ctx.translate(x, y + bounce * 0.35);
+    ctx.translate(x, y + suspensionBob * 0.35);
     const tilt = clamp(vx / 460, -1, 1) * 0.08;
     ctx.rotate(tilt);
     const tw = w + 12, th = h;
@@ -7598,7 +7605,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
     ctx.fillRect(-tw/4 + 2, -th/4, tw/2 - 4, th/5);
 
     // cannon barrel
-    const recoil = Math.max(0, 1 - ((Game.player ? Game.player.fireT || 1 : 1) / 0.12)) * 4;
+    const recoil = Math.max(0, 1 - ((Game.player ? Game.player.fireT || 1 : 1) / FIRE_ANIM_WINDOW)) * RECOIL_DISTANCE;
     ctx.fillStyle = '#0a0a06';
     ctx.fillRect(-4, th/4 - 6 + recoil, 8, 20 - recoil);
     // muzzle brake
@@ -7652,7 +7659,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   }
 
   ctx.save();
-  ctx.translate(x, y + bounce);
+  ctx.translate(x, y + suspensionBob);
   const tilt = opts.forcedRot !== undefined
     ? opts.forcedRot
     : clamp(vx / 460, -1, 1) * 0.18;
@@ -7748,7 +7755,9 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   ctx.fill();
   pathRoundRect(w * 0.2, -h * 0.52, w * 0.18, h * 0.05, 2);
   ctx.fill();
-  const brakeA = 0.25 + 0.4 * (speedN < 0.16 ? 1 : 0) + 0.2 * Math.max(0, Math.sin(t * 8));
+  const brakeA = BRAKE_BASE_ALPHA
+    + BRAKE_IDLE_BOOST * (speedN < BRAKE_IDLE_SPEED_THRESHOLD ? 1 : 0)
+    + BRAKE_PULSE_AMPLITUDE * Math.max(0, Math.sin(t * BRAKE_PULSE_RATE));
   ctx.fillStyle = `rgba(255,70,60,${brakeA})`;
   pathRoundRect(-w * 0.29, h * 0.43, w * 0.14, h * 0.04, 2);
   ctx.fill();
@@ -7880,7 +7889,7 @@ function drawObstacle(o) {
     ctx.fill();
     pathRoundRect(o.w * 0.19, -o.h * 0.52, o.w * 0.17, o.h * 0.05, 2);
     ctx.fill();
-    const tailPulse = 0.2 + 0.3 * (0.5 + 0.5 * Math.sin(t * 8));
+    const tailPulse = 0.35 + 0.15 * Math.sin(t * 8);
     ctx.fillStyle = `rgba(255,80,80,${tailPulse})`;
     pathRoundRect(-o.w * 0.28, o.h * 0.42, o.w * 0.14, o.h * 0.04, 2);
     ctx.fill();
