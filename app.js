@@ -12310,6 +12310,12 @@ function buildPlatformScreen() {
   const replays = Replay.list();
   const clanTag  = Clan.getTag()  || '';
   const clanName = Clan.getName() || '';
+  const pushAvailable = !!(typeof PushService !== 'undefined' && PushService.isAvailable);
+  const pushEnabled = !!(pushAvailable && PushService.permissionGranted);
+  const iapAvailable = !!(typeof IAPService !== 'undefined' && IAPService.isAvailable);
+  const products = (iapAvailable && IAPService.PRODUCTS) ? IAPService.PRODUCTS : [];
+  const splitActive = !!(typeof SplitScreen !== 'undefined' && typeof SplitScreen.isActive === 'function' && SplitScreen.isActive());
+  const cloudConnected = !!(localStorage.getItem(CLOUD_ID_KEY) && localStorage.getItem(CLOUD_TOKEN_KEY));
 
   return `
     <h2>✦ NEW GAME+ PRESTIGE</h2>
@@ -12345,6 +12351,59 @@ function buildPlatformScreen() {
         ${wcClaimed ? '<span class="set-val" style="color:var(--good)">✔ CLAIMED</span>' :
           wcDone ? '<button class="btn set-toggle on" data-act="platform-claim-weekly">CLAIM</button>' :
           '<span class="set-val">IN PROGRESS</span>'}
+      </div>
+    </div>
+
+    <h2>☁ CLOUD OPERATIONS</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div>
+          <div class="set-name">${cloudConnected ? 'CONNECTED TO CLOUD ACCOUNT' : 'NO CLOUD ACCOUNT LINKED'}</div>
+          <div class="set-sub">SAVE, RESTORE, OR MANUALLY SYNC YOUR CURRENT PROFILES</div>
+        </div>
+      </div>
+      <div class="set-q-row">
+        <button class="btn set-q" data-act="cloud-save" style="flex:1">SAVE</button>
+        <button class="btn set-q" data-act="cloud-restore" style="flex:1">RESTORE</button>
+        <button class="btn set-q" data-act="platform-sync-now" style="flex:1">SYNC NOW</button>
+      </div>
+    </div>
+
+    <h2>📲 MOBILE SERVICES</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div>
+          <div class="set-name">PUSH NOTIFICATIONS</div>
+          <div class="set-sub">${pushAvailable ? (pushEnabled ? 'ENABLED ON THIS DEVICE' : 'AVAILABLE — ENABLE TO GET EVENT ALERTS') : 'AVAILABLE IN NATIVE IOS/ANDROID BUILDS'}</div>
+        </div>
+        <button class="btn set-toggle ${pushEnabled ? 'on' : ''}" data-act="push-enable">${pushEnabled ? 'ENABLED' : 'ENABLE'}</button>
+      </div>
+    </div>
+
+    <h2>🛒 STORE</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">${iapAvailable ? 'IN-APP PURCHASE CATALOG' : 'STORE AVAILABLE IN NATIVE BUILDS'}</div><div class="set-sub">PURCHASES APPLY TO YOUR ACTIVE DRIVER PROFILE</div></div>
+        <button class="btn set-toggle" data-act="iap-restore">RESTORE</button>
+      </div>
+      ${products.length ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">' + products.map(prod => {
+        const canCheckEntitlement = iapAvailable && typeof IAPService.hasEntitlement === 'function';
+        const owned = canCheckEntitlement && prod.type === 'non_consumable' && IAPService.hasEntitlement(prod.id);
+        return `<div class="set-head" style="gap:8px"><div><div class="set-name" style="font-size:11px">${escapeHtml(prod.name)} · ${escapeHtml(prod.price || '')}</div><div class="set-sub">${escapeHtml(prod.desc || '')}</div></div>${owned ? '<span class="set-val" style="color:var(--good)">OWNED</span>' : `<button class="btn set-toggle ${iapAvailable ? 'on' : ''}" data-act="iap-purchase" data-data="${escapeHtml(prod.id)}" style="font-size:9px">BUY</button>`}</div>`;
+      }).join('') + '</div>' : ''}
+    </div>
+
+    <h2>🎮 CONSOLE SERVICES</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">SPLIT-SCREEN CO-OP</div><div class="set-sub">REQUIRES TWO CONNECTED CONTROLLERS</div></div>
+        ${splitActive
+          ? '<button class="btn set-toggle on" data-act="split-stop">STOP</button>'
+          : '<button class="btn set-toggle" data-act="split-start">START</button>'}
+      </div>
+      <div class="set-head" style="margin-top:8px">
+        <div><div class="set-name">PLATFORM COMPLIANCE CHECK</div><div class="set-sub">RUNS STORAGE, INPUT, ACHIEVEMENT, AUDIO, AND SERVICE CHECKS</div></div>
+        <button class="btn set-toggle" data-act="compliance-check">RUN</button>
       </div>
     </div>
 
@@ -14626,11 +14685,29 @@ function _onVisibilityForSync() {
 // Wire Phase 1 actions into UI.act
 const _origActPhase1 = UI.act.bind(UI);
 UI.act = function(action, data) {
+  if (action === 'platform-sync-now') {
+    SFX.click();
+    try {
+      if (typeof cloudAutoSync === 'function') {
+        cloudAutoSync();
+        UI.toast('CLOUD SYNC QUEUED');
+      } else {
+        UI.toast('CLOUD SYNC UNAVAILABLE');
+      }
+    } catch (_) {
+      UI.toast('CLOUD SYNC FAILED');
+    }
+    return;
+  }
   if (action === 'push-enable') {
     SFX.click();
-    PushService.requestPermission().then(ok => {
-      UI.toast(ok ? 'PUSH NOTIFICATIONS ENABLED' : 'PUSH PERMISSION DENIED');
-    });
+    if (typeof PushService !== 'undefined' && PushService && typeof PushService.requestPermission === 'function') {
+      PushService.requestPermission().then(ok => {
+        UI.toast(ok ? 'PUSH NOTIFICATIONS ENABLED' : 'PUSH PERMISSION DENIED');
+      });
+    } else {
+      UI.toast('PUSH SERVICE UNAVAILABLE');
+    }
     return;
   }
   if (action === 'iap-purchase') {
