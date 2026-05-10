@@ -509,6 +509,8 @@ const LEVELS = [
   { num:19, name:'SCRAP STORM',     obj:'horde',    target:35,   reward:2200, diff:3.0,  map:'wastes',    story:'A signal flare drops the entire wasteland on top of you. Salvage every gun you ever pulled — you\'ll need them all at once.' },
   { num:20, name:'DEAD TIDE',       obj:'horde',    target:50,   reward:3200, diff:5.0,  map:'midnight', night:true, storm:true, story:'Every raider, every drone, every walking corpse from here to the coast. Siege mode active. Drive into the meatgrinder.' },
 ];
+// Gauntlet sectors are the 18 tiered sectors (nums 1-18); levels 19-20 are boss horde levels, not sectors.
+const GAUNTLET_SECTORS = LEVELS.filter(L => L.obj !== 'horde');
 
 // ============================================================
 // CAMPAIGN — US road-trip story mode (LA → New York, 18 locations)
@@ -1514,10 +1516,7 @@ function checkAchievementCondition(id, p) {
     case 'ncr_poster_child': return (p.cleanRuns || 0) >= 5;
     case 'goodsprings_butcher': return (p.maxCivilianHits || 0) >= CIVILIAN_INFAMY_HITS;
     case 'full_mastery':
-      return CAMPAIGN_LOCATIONS.every(loc => {
-        const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
-        return cleared.length >= loc.levels.length;
-      }) && LEVELS.length > 0 && LEVELS.every(L => (p.gauntletCleared || []).includes(L.num));
+      return Profile.isFullMasteryUnlocked();
     case 'throne_claimed': return (p.ironThroneCleared || []).length >= IRON_THRONE_STAGES.length;
     default: return false;
   }
@@ -1859,7 +1858,7 @@ const Profile = {
       const cleared = ((p.campaignCleared || {})[loc.id] || {}).levelsCleared || [];
       return cleared.length >= loc.levels.length;
     });
-    const allGauntlet = LEVELS.length > 0 && LEVELS.every(L => (p.gauntletCleared || []).includes(L.num));
+    const allGauntlet = GAUNTLET_SECTORS.length > 0 && GAUNTLET_SECTORS.every(L => (p.gauntletCleared || []).includes(L.num));
     return allCampaign && allGauntlet;
   },
   // Grant the WARLORD KING vehicle automatically when full mastery is first achieved.
@@ -7826,7 +7825,7 @@ const UI = {
   // ---- GAUNTLET ----
   showGauntlet() {
     const p = Profile.active(); if (!p) return;
-    document.getElementById('gauntlet-progress').textContent = `${p.gauntletCleared.length} / ${LEVELS.length}`;
+    document.getElementById('gauntlet-progress').textContent = `${p.gauntletCleared.length} / ${GAUNTLET_SECTORS.length}`;
     const grid = document.getElementById('gauntlet-grid');
     grid.innerHTML = '';
     LEVELS.forEach(L => {
@@ -7908,7 +7907,7 @@ const UI = {
       ['CLEAN RUNS', p.cleanRuns || 0],
       ['VEHICLES OWNED', ownedCount + ' / ' + VEHICLES.length],
       ['UPGRADES BUILT', ttlUpgrades],
-      ['GAUNTLET', p.gauntletCleared.length + ' / ' + LEVELS.length],
+      ['GAUNTLET', p.gauntletCleared.length + ' / ' + GAUNTLET_SECTORS.length],
       ['CAMPAIGN', (() => {
         const c = Object.values(p.campaignCleared || {}).reduce((s, v) => s + ((v.levelsCleared || []).length), 0);
         const total = CAMPAIGN_LOCATIONS.reduce((s, l) => s + l.levels.length, 0);
