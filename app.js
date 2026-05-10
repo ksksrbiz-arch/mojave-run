@@ -7564,6 +7564,12 @@ const BRAKE_IDLE_BOOST = 0.4;
 const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
 const BRAKE_PULSE_AMPLITUDE = 0.2;
 const BRAKE_PULSE_RATE = 8;
+const MUZZLE_RECOIL_WINDOW = 0.08;
+const TREAD_WOBBLE_AMPLITUDE = 0.2;
+const BIOME_ROUGHNESS_MAP = {
+  redcanyon: 0.35, ash: 0.2, midnight: 0.08, thunderplains: 0.45,
+  frostwaste: 0.24, irradiated: 0.26, scraparch: 0.38,
+};
 const BIGWHEEL_TIRE = '#171717';
 const BIGWHEEL_RIM = '#969daa';
 const BIGWHEEL_SPOKE = '#f6fbff';
@@ -7571,8 +7577,9 @@ const BIGWHEEL_SPOKE = '#f6fbff';
 function visualQualityLevel() {
   const q = (Settings.visualQuality || 'high');
   let base = q === 'low' ? 0 : q === 'medium' ? 1 : 2;
-  if (typeof PerfMon !== 'undefined' && PerfMon.quality < 0.22) base = 0;
-  else if (typeof PerfMon !== 'undefined' && PerfMon.quality < 0.5) base = Math.min(base, 1);
+  const perfQ = (typeof PerfMon !== 'undefined') ? PerfMon.quality : 1;
+  if (perfQ < 0.22) base = 0;
+  else if (perfQ < 0.5) base = Math.min(base, 1);
   return base;
 }
 
@@ -7642,7 +7649,7 @@ function pathVehicleSilhouette(w, h, profile) {
   ctx.closePath();
 }
 
-function drawVehicleWheelSet(w, h, wheelSpin, turnLean, detail, treadBoost = 1) {
+function drawVehicleWheelSet(w, h, wheelSpin, turnLean, detail, treadMultiplier = 1) {
   const tireYFront = -h * 0.25;
   const tireYRear = h * 0.28;
   const tireX = w * 0.5 + 2;
@@ -7661,7 +7668,7 @@ function drawVehicleWheelSet(w, h, wheelSpin, turnLean, detail, treadBoost = 1) 
         const ty = sy + i * (tireR * 0.22);
         ctx.beginPath();
         ctx.moveTo(sx - tireR * 0.72, ty);
-        ctx.lineTo(sx + tireR * 0.72, ty + Math.sin(wheelSpin + i) * 0.2 * treadBoost);
+        ctx.lineTo(sx + tireR * 0.72, ty + Math.sin(wheelSpin + i) * TREAD_WOBBLE_AMPLITUDE * treadMultiplier);
         ctx.stroke();
       }
     }
@@ -7924,7 +7931,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const speed = Math.abs(vx || 0);
   const speedN = clamp(speed / 460, 0, 1);
   const detail = opts.detailLevel !== undefined ? opts.detailLevel : visualQualityLevel();
-  const biomeRough = ({ redcanyon:0.35, ash:0.2, midnight:0.08, thunderplains:0.45, frostwaste:0.24, irradiated:0.26, scraparch:0.38 })[Game.biome] || 0.15;
+  const biomeRough = BIOME_ROUGHNESS_MAP[Game.biome] || 0.15;
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
   const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
@@ -7965,7 +7972,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
     ctx.fillStyle = c.cab;
     pathRoundRect(-tw / 4, -th / 4, tw / 2, th / 2.4, 4);
     ctx.fill();
-    const recoil = clamp((Game.muzzleT || 0) / 0.08, 0, 1) * RECOIL_DISTANCE;
+    const recoil = clamp((Game.muzzleT || 0) / MUZZLE_RECOIL_WINDOW, 0, 1) * RECOIL_DISTANCE;
     ctx.fillStyle = '#0a0908';
     ctx.fillRect(-4, th/4 - 6 + recoil, 8, 20 - recoil);
     ctx.fillRect(-6, th/4 + 13, 12, 4 - recoil * 0.2);
@@ -9417,7 +9424,7 @@ function drawWreck() {
   pathRoundRect(-24, -30, 48, 60, 8);
   ctx.fill();
   // twisted original paint peeking through
-  ctx.fillStyle = `rgba(${parseInt(col.body.slice(1,3),16)},${parseInt(col.body.slice(3,5),16)},${parseInt(col.body.slice(5,7),16)},0.25)`;
+  ctx.fillStyle = hexToRgba(col.body, 0.25);
   ctx.fillRect(-17, -24, 34, 8);
   ctx.fillStyle = 'rgba(0,0,0,0.42)';
   ctx.fillRect(-16, -4, 32, 16);
@@ -9905,7 +9912,7 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null) {
   const c = canvas.getContext('2d');
   const cw = canvas.width = 80;
   const ch = canvas.height = 90;
-  c.imageSmoothingEnabled = true;
+  c.imageSmoothingEnabled = false;
   c.clearRect(0, 0, cw, ch);
   const cx = cw * 0.5, cy = ch * 0.53;
   const w = 38, h = 60;
