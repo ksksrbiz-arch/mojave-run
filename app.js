@@ -7566,6 +7566,8 @@ const BRAKE_PULSE_AMPLITUDE = 0.2;
 const BRAKE_PULSE_RATE = 8;
 const MUZZLE_RECOIL_WINDOW = 0.08;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
+const DAMAGE_SMOKE_SPAWN_CHANCE = 0.28;
+const SKID_ROTATION_FACTOR = 0.05;
 const BIOME_ROUGHNESS_MAP = {
   redcanyon: 0.35, ash: 0.2, midnight: 0.08, thunderplains: 0.45,
   frostwaste: 0.24, irradiated: 0.26, scraparch: 0.38,
@@ -7654,11 +7656,11 @@ function drawVehicleWheelSet(w, h, wheelSpin, turnLean, detail, treadMultiplier 
   const tireYRear = h * 0.28;
   const tireX = w * 0.5 + 2;
   const tireR = Math.max(4, Math.min(6.8, w * 0.14));
-  const wob = Math.sin(Game.t * (8 + Math.abs(turnLean) * 2)) * 0.08 * (1 + Math.abs(turnLean) * 2);
-  drawWheelTopdown(-tireX, tireYFront + wob, tireR, wheelSpin * (1 + wob), '#121212', '#8f96a2', '#dce6ff');
-  drawWheelTopdown( tireX, tireYFront - wob, tireR, wheelSpin * (1 - wob), '#121212', '#8f96a2', '#dce6ff');
-  drawWheelTopdown(-tireX, tireYRear - wob, tireR, wheelSpin * 0.94, '#101010', '#8f96a2', '#dce6ff');
-  drawWheelTopdown( tireX, tireYRear + wob, tireR, wheelSpin * 0.94, '#101010', '#8f96a2', '#dce6ff');
+  const wheelWobble = Math.sin(Game.t * (8 + Math.abs(turnLean) * 2)) * 0.08 * (1 + Math.abs(turnLean) * 2);
+  drawWheelTopdown(-tireX, tireYFront + wheelWobble, tireR, wheelSpin * (1 + wheelWobble), '#121212', '#8f96a2', '#dce6ff');
+  drawWheelTopdown( tireX, tireYFront - wheelWobble, tireR, wheelSpin * (1 - wheelWobble), '#121212', '#8f96a2', '#dce6ff');
+  drawWheelTopdown(-tireX, tireYRear - wheelWobble, tireR, wheelSpin * 0.94, '#101010', '#8f96a2', '#dce6ff');
+  drawWheelTopdown( tireX, tireYRear + wheelWobble, tireR, wheelSpin * 0.94, '#101010', '#8f96a2', '#dce6ff');
   if (detail < 2) return;
   ctx.strokeStyle = 'rgba(50,50,50,0.65)';
   ctx.lineWidth = 1;
@@ -8001,7 +8003,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   }
   ctx.restore();
 
-  if (damageR > 0.45 && detail >= 1 && Math.random() < 0.28) {
+  if (damageR > 0.45 && detail >= 1 && Math.random() < DAMAGE_SMOKE_SPAWN_CHANCE) {
     Game.particles.push({
       x: x + rand(-w * 0.24, w * 0.24), y: y - h * 0.22,
       vx: rand(-15, 15), vy: rand(-35, -10),
@@ -8983,7 +8985,7 @@ function drawSkidMarks() {
     const a = clamp(s.life / s.max, 0, 1) * 0.5;
     ctx.save();
     ctx.translate(s.x, s.y);
-    const rot = Math.atan2(s.vy || 1, (s.vx || 0.001)) * 0.05;
+    const rot = Math.atan2(s.vy || 1, (s.vx || 0.001)) * SKID_ROTATION_FACTOR;
     ctx.rotate(rot);
     ctx.fillStyle = `rgba(20,12,6,${a})`;
     ctx.fillRect(-s.w/2, -s.h/2, s.w, s.h);
