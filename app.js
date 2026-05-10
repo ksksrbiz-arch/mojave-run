@@ -1610,6 +1610,11 @@ const Profile = {
         if (!Array.isArray(p.ironThroneCleared)) { p.ironThroneCleared = []; dirty = true; }
         if (!('bankedPowerup' in p)) { p.bankedPowerup = null; dirty = true; }
         if (normalizeCosmetics(p, true)) dirty = true;
+        // === PLATFORM FEATURES normalization ===
+        if (typeof p.prestigeTokens !== 'number') { p.prestigeTokens = 0; dirty = true; }
+        if (!p.weeklyProgress || typeof p.weeklyProgress !== 'object') { p.weeklyProgress = {}; dirty = true; }
+        if (!('clanTag' in p)) { p.clanTag = null; dirty = true; }
+        if (!('clanName' in p)) { p.clanName = null; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -1665,6 +1670,11 @@ const Profile = {
       achievements: [],    // array of earned achievement IDs
       cosmetics: defaultCosmetics(),
       bankedPowerup: null, // power-up id to activate at the start of next run
+      // === PLATFORM FEATURES ===
+      prestigeTokens: 0,   // permanent prestige tokens earned from New Game+ resets
+      weeklyProgress: {},  // weekKey → { progress, claimed } for weekly challenge tracking
+      clanTag: null,       // up to 5-char clan tag shown in scoreboards
+      clanName: null,      // full clan name (up to 20 chars)
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -1845,6 +1855,11 @@ const Profile = {
       }
     }
     this.save();
+    // === PLATFORM FEATURES: weekly challenge check (deferred until systems loaded) ===
+    if (typeof checkWeeklyChallenge === 'function') {
+      const wc = checkWeeklyChallenge(result);
+      if (wc) { Game._pendingWeekly = wc; }
+    }
   },
   isLevelUnlocked(num) {
     if (num === 1) return true;
@@ -1994,6 +2009,10 @@ const Settings = {
   damageNumbers: true,
   // darker HUD backing + brighter labels for readability
   hudContrast: false,
+  // color-blind simulation filter applied to the game canvas ('none'|'protanopia'|'deuteranopia'|'tritanopia')
+  colorBlind: 'none',
+  // skip non-essential animations for users sensitive to motion
+  reducedMotion: false,
   load() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
@@ -2008,6 +2027,8 @@ const Settings = {
        if (typeof o.autoFire === 'boolean') this.autoFire = o.autoFire;
        if (typeof o.damageNumbers === 'boolean') this.damageNumbers = o.damageNumbers;
        if (typeof o.hudContrast === 'boolean') this.hudContrast = o.hudContrast;
+       if (typeof o.colorBlind === 'string') this.colorBlind = o.colorBlind;
+       if (typeof o.reducedMotion === 'boolean') this.reducedMotion = o.reducedMotion;
     } catch (_) {}
   },
   save() {
@@ -2016,12 +2037,20 @@ const Settings = {
         master: this.master, sfx: this.sfx, shake: this.shake,
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
+        colorBlind: this.colorBlind, reducedMotion: this.reducedMotion,
       }));
     } catch (_) {}
     this.applyBodyClass();
   },
   applyBodyClass() {
     document.body.classList.toggle('big-touch', !!this.bigButtons);
+    document.body.classList.toggle('reduced-motion', !!this.reducedMotion);
+    // Apply color-blind SVG filter to the game canvas
+    const canvas = document.getElementById('c');
+    if (canvas) {
+      const cb = this.colorBlind || 'none';
+      canvas.style.filter = cb !== 'none' ? 'url(#cb-' + cb + ')' : '';
+    }
   },
 };
 // local clamp (real `clamp` is defined later in HELPERS section)
@@ -8744,6 +8773,14 @@ const UI = {
     const qopts = ['auto','high','medium','low']
       .map(m => `<button class="btn set-q ${PerfMon.mode === m ? 'on' : ''}" data-quality="${m}">${m.toUpperCase()}</button>`)
       .join('');
+    const cbOpts = ['none','protanopia','deuteranopia','tritanopia']
+      .map(m => `<button class="btn set-q ${(Settings.colorBlind||'none') === m ? 'on' : ''}" data-colorblind="${m}">${m === 'none' ? 'OFF' : m.slice(0,5).toUpperCase()}</button>`)
+      .join('');
+    // Prestige info for platform section
+    const pTier = typeof getPrestigeTier === 'function' ? getPrestigeTier((Profile.active()||{}).prestigeTokens||0) : null;
+    const pLabel = pTier ? pTier.label : '';
+    const pTokens = (Profile.active()||{}).prestigeTokens || 0;
+    const season = typeof getCurrentSeason === 'function' ? getCurrentSeason() : null;
     wrap.innerHTML = `
       <h2>AUDIO</h2>
       ${slider('MASTER VOLUME', 'master', 0, 1, 0.05)}
@@ -8756,12 +8793,36 @@ const UI = {
         <div class="set-q-row">${qopts}</div>
       </div>
       ${toggle('HIGH CONTRAST HUD', 'hudContrast', 'STRONGER HUD BACKDROP + BRIGHTER LABELS')}
+      <h2>ACCESSIBILITY</h2>
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">COLOR-BLIND MODE</div><div class="set-sub">APPLIES A SIMULATION FILTER TO THE CANVAS</div></div></div>
+        <div class="set-q-row">${cbOpts}</div>
+      </div>
+      ${toggle('REDUCED MOTION', 'reducedMotion', 'DISABLES NON-ESSENTIAL SCREEN ANIMATIONS')}
       <h2>CONTROLS</h2>
       ${toggle('HAPTICS', 'haptics', 'VIBRATE ON HIT / KILL / DEATH')}
       ${toggle('LARGE TOUCH TARGETS', 'bigButtons', 'EASIER TO TAP ON SMALL SCREENS')}
       ${toggle('AUTO FIRE', 'autoFire', 'CONTINUOUS FIRE ASSIST DURING RUNS')}
       <h2>READABILITY</h2>
       ${toggle('DAMAGE NUMBERS', 'damageNumbers', 'SHOW DAMAGE POPUPS ON HITS')}
+      <h2>PLATFORM</h2>
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">PRESTIGE RANK</div><div class="set-sub">${pTokens} TOKEN${pTokens !== 1 ? 'S' : ''} · ${pLabel}</div></div>
+        <button class="btn set-toggle" data-act="platform-prestige" style="font-size:10px">NEW GAME+</button></div>
+      </div>
+      ${season ? `<div class="set-row"><div class="set-head"><div><div class="set-name">${season.icon} ${season.name}</div><div class="set-sub">${season.daysLeft} DAYS LEFT · ${season.bonusDesc}</div></div></div></div>` : ''}
+      <div class="set-row">
+        <div class="set-head"><div class="set-name">COMMUNITY HUB</div></div>
+        <div class="set-q-row">
+          <button class="btn set-q" data-act="platform-rivals" style="flex:1">👻 RIVALS</button>
+          <button class="btn set-q" data-act="platform-replays" style="flex:1">🎬 REPLAYS</button>
+          <button class="btn set-q" data-act="platform-clan" style="flex:1">🏴 CLAN</button>
+          <button class="btn set-q" data-act="platform-editor" style="flex:1">🛠 EDITOR</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">BUILD FOR ANDROID / IOS</div><div class="set-sub">INSTALL CAPACITOR · RUN npx cap add android · npx cap sync · npx cap open android</div></div></div>
+      </div>
     `;
     this.show('settings');
   },
@@ -9404,6 +9465,15 @@ document.addEventListener('click', e => {
     UI.showSettings();
     return;
   }
+  // color-blind mode buttons in settings
+  const scb = e.target.closest('[data-colorblind]');
+  if (scb) {
+    Settings.colorBlind = scb.dataset.colorblind || 'none';
+    Settings.save();
+    SFX.click();
+    UI.showSettings();
+    return;
+  }
   const st = e.target.closest('[data-toggle]');
   if (st) {
     const key = st.dataset.toggle;
@@ -9921,6 +9991,913 @@ UI.act = function(action, data) {
   }
   return _origAct(action, data);
 };
+
+// ============================================================
+// === PLATFORM FEATURES ===
+// Prestige/New Game+, Seasons, Weekly Challenges, Level Editor,
+// Modding API, Rivals, Replay Theater, Clan System, Photo Mode,
+// Accessibility, and PWA/Native enhancements.
+// All systems are toggleable from Settings. No new dependencies.
+// ============================================================
+
+// === PRESTIGE / NEW GAME+ ===
+// Resetting progress earns a permanent prestige token that multiplies
+// all future scrap earnings. Requires full mastery OR 50,000 scrap.
+const PRESTIGE_REQUIRED_SCRAP = 50000;
+const PRESTIGE_TIERS = [
+  { tokens: 0,  label: 'ROAD DOG', bonus: null,                scrapMult: 1.00 },
+  { tokens: 1,  label: 'VAGRANT',  bonus: '+5% SCRAP EARNED',  scrapMult: 1.05 },
+  { tokens: 2,  label: 'DRIFTER',  bonus: '+10% SCRAP',        scrapMult: 1.10 },
+  { tokens: 3,  label: 'EXILE',    bonus: '+15% SCRAP',        scrapMult: 1.15 },
+  { tokens: 5,  label: 'LEGEND',   bonus: '+20% SCRAP',        scrapMult: 1.20 },
+  { tokens: 10, label: 'GHOST',    bonus: '+25% SCRAP',        scrapMult: 1.25 },
+];
+function getPrestigeTier(tokens) {
+  let tier = PRESTIGE_TIERS[0];
+  for (const t of PRESTIGE_TIERS) { if ((tokens || 0) >= t.tokens) tier = t; }
+  return tier;
+}
+// Wrap Profile.earn to apply the prestige scrap multiplier transparently.
+const _prestige_origEarn = Profile.earn.bind(Profile);
+Profile.earn = function(amt) {
+  const p = this.active();
+  const mult = p ? getPrestigeTier(p.prestigeTokens || 0).scrapMult : 1;
+  _prestige_origEarn(Math.floor(amt * mult));
+};
+// Prestige reset: awards a permanent token, wipes progress.
+// Keeps: name, characterId, achievements, prestigeTokens, cosmetics, clanTag/Name.
+Profile.prestige = function() {
+  const p = this.active();
+  if (!p) return { ok: false, reason: 'NO ACTIVE DRIVER' };
+  const hasMastery = this.isFullMasteryUnlocked();
+  if (!hasMastery && (p.scrap || 0) < PRESTIGE_REQUIRED_SCRAP)
+    return { ok: false, reason: 'REQUIRES FULL MASTERY OR ' + PRESTIGE_REQUIRED_SCRAP + ' SCRAP' };
+  p.prestigeTokens = (p.prestigeTokens || 0) + 1;
+  // Reset progress stats
+  p.scrap = 100; p.lifetimeScrap = 0; p.runs = 0;
+  p.bestClassic = 0; p.bestTime = 0; p.bestBossRush = 0;
+  p.bestWinding = 0; p.bestDistance = 0; p.bestZombie = 0;
+  p.bestIronThrone = 0; p.bestKills = 0; p.bestCombo = 0;
+  p.bestScrapRun = 0; p.cleanRuns = 0;
+  p.totalCivilianHits = 0; p.maxCivilianHits = 0;
+  p.ownedVehicles = { rustbucket: true };
+  p.vehicleUpgrades = { rustbucket: Object.assign({}, UPGRADE_TRACK_DEFAULTS) };
+  p.vehicleBranches = { rustbucket: null };
+  p.activeVehicle = 'rustbucket';
+  p.gauntletCleared = []; p.ironThroneCleared = [];
+  p.campaignCleared = {}; p.bankedPowerup = null; p.activeSidekick = null;
+  this.save();
+  return { ok: true };
+};
+
+// === SEASONAL EVENTS ===
+// 14-day rotating seasons (client-timed, no server). Each season has
+// a unique name, theme colour, icon, and gameplay bonus description.
+const SEASON_DURATION_DAYS = 14;
+const SEASON_DEFS = [
+  { name: 'IRON SEASON',   theme: '#c0392b', icon: '⚙',  bonusDesc: 'Bonus scrap from armored kills' },
+  { name: 'ASH SEASON',    theme: '#7f8c8d', icon: '🌫',  bonusDesc: 'Fuel cells respawn 20% faster' },
+  { name: 'CHROME SEASON', theme: '#bdc3c7', icon: '⚡',  bonusDesc: '+10% max speed this season' },
+  { name: 'EMBER SEASON',  theme: '#e67e22', icon: '🔥',  bonusDesc: 'Bullet damage +15%' },
+  { name: 'VOID SEASON',   theme: '#2c3e50', icon: '🌑',  bonusDesc: 'Civilian lights off — drive careful' },
+  { name: 'GOLD SEASON',   theme: '#f1c40f', icon: '✦',  bonusDesc: '+20% scrap drop rate' },
+  { name: 'NEON SEASON',   theme: '#9b59b6', icon: '💜',  bonusDesc: 'Ghost rivals appear on the road' },
+  { name: 'STORM SEASON',  theme: '#3498db', icon: '🌩',  bonusDesc: 'Lightning strikes cluster enemies' },
+];
+function getCurrentSeason() {
+  const epochMs = Date.UTC(2024, 0, 1); // epoch: Jan 1 2024
+  const daysSince = Math.floor((Date.now() - epochMs) / 86400000);
+  const idx = Math.floor(daysSince / SEASON_DURATION_DAYS);
+  const dayInSeason = daysSince % SEASON_DURATION_DAYS;
+  const daysLeft = SEASON_DURATION_DAYS - dayInSeason;
+  const def = SEASON_DEFS[idx % SEASON_DEFS.length];
+  return Object.assign({}, def, { index: idx, daysLeft, dayInSeason, seasonNumber: idx + 1 });
+}
+
+// === WEEKLY CHALLENGES ===
+// One challenge per ISO week, seeded so everyone gets the same task.
+// Completing it awards a scrap bonus claimable once per week.
+const WEEKLY_DEFS = [
+  { id: 'wk_score',    label: 'MILE MARKER',   desc: 'Score 50,000 in Classic mode',       mode: 'classic',    goal: 'score',    target: 50000,  reward: 1500 },
+  { id: 'wk_kills',    label: 'ROAD RAGE',     desc: 'Destroy 100 enemies in one run',     mode: null,         goal: 'kills',    target: 100,    reward: 2000 },
+  { id: 'wk_distance', label: 'LONG HAUL',     desc: 'Travel 25km in a single run',        mode: 'winding',    goal: 'distance', target: 25000,  reward: 1800 },
+  { id: 'wk_combo',    label: 'CHAIN KILL',    desc: 'Hit a 15-kill combo in any run',     mode: null,         goal: 'combo',    target: 15,     reward: 2500 },
+  { id: 'wk_time',     label: 'IRONCLAD',      desc: 'Finish Time Attack without dying',   mode: 'timeattack', goal: 'victory',  target: 1,      reward: 3000 },
+  { id: 'wk_zombie',   label: 'ZOMBIE SLAYER', desc: 'Score 30,000 in Zombie Wasteland',   mode: 'zombie',     goal: 'score',    target: 30000,  reward: 2200 },
+  { id: 'wk_daily',    label: 'DAILY GRIND',   desc: 'Complete the Daily Challenge',       mode: 'daily',      goal: 'played',   target: 1,      reward: 1200 },
+  { id: 'wk_gauntlet', label: 'SECTOR PUSH',   desc: 'Clear any Gauntlet sector',          mode: 'gauntlet',   goal: 'victory',  target: 1,      reward: 1600 },
+];
+function thisWeekKey() {
+  const d = new Date();
+  const day = d.getUTCDay() || 7; // Mon=1..Sun=7
+  const mon = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 1));
+  return 'week-' + mon.getUTCFullYear() + '-' +
+    String(mon.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(mon.getUTCDate()).padStart(2, '0');
+}
+function getWeeklyChallenge() {
+  const key = thisWeekKey();
+  const seed = seedFromString('weekly-' + key);
+  const idx = Math.abs(seed) % WEEKLY_DEFS.length;
+  return Object.assign({}, WEEKLY_DEFS[idx], { weekKey: key });
+}
+// Called from Profile.recordRunResult to advance weekly challenge progress.
+function checkWeeklyChallenge(result) {
+  const p = Profile.active(); if (!p) return null;
+  const wc = getWeeklyChallenge();
+  const key = wc.weekKey;
+  p.weeklyProgress = p.weeklyProgress || {};
+  if (p.weeklyProgress[key] && p.weeklyProgress[key].claimed) return null;
+  let met = false;
+  if (wc.goal === 'score'    && (!wc.mode || wc.mode === result.mode)) met = (result.score    || 0) >= wc.target;
+  if (wc.goal === 'kills')                                              met = (result.kills    || 0) >= wc.target;
+  if (wc.goal === 'distance' && (!wc.mode || wc.mode === result.mode)) met = (result.distance || 0) >= wc.target;
+  if (wc.goal === 'combo')                                              met = (result.comboBest|| 0) >= wc.target;
+  if (wc.goal === 'victory'  && (!wc.mode || wc.mode === result.mode)) met = !!result.victory;
+  if (wc.goal === 'played'   && (!wc.mode || wc.mode === result.mode)) met = true;
+  if (met) {
+    const prev = p.weeklyProgress[key];
+    if (!prev || !prev.progress) {
+      p.weeklyProgress[key] = { progress: 1, claimed: false };
+      Profile.save();
+      return wc; // newly completed — signal to show badge on results screen
+    }
+  }
+  return null;
+}
+function claimWeeklyReward() {
+  const p = Profile.active(); if (!p) return false;
+  const wc = getWeeklyChallenge();
+  const key = wc.weekKey;
+  p.weeklyProgress = p.weeklyProgress || {};
+  const entry = p.weeklyProgress[key];
+  if (!entry || !entry.progress || entry.claimed) return false;
+  entry.claimed = true;
+  p.scrap = (p.scrap || 0) + wc.reward;
+  p.lifetimeScrap = (p.lifetimeScrap || 0) + wc.reward;
+  Profile.save();
+  return true;
+}
+
+// === IN-BROWSER LEVEL EDITOR ===
+// Generates shareable base64 codes encoding custom level parameters.
+// Codes can be distributed and imported for a custom run experience.
+const LevelEditor = {
+  defaultConfig() {
+    return {
+      name: 'CUSTOM RUN', author: '',
+      biome: 'wastes',     // wastes|canyon|city|neon
+      difficulty: 2,       // 1–5
+      waves: 3,            // objective waves
+      enemyDensity: 1.0,   // 0.5–2.0
+      pickupRate: 1.0,     // 0.5–2.0
+      obstacles: true,
+      objective: 'score',  // score|distance|kills|survive
+      targetScore: 30000,
+    };
+  },
+  // Encode config → shareable code (prefix MRC1-)
+  generateCode(cfg) {
+    try {
+      const safe = Object.assign({}, cfg);
+      safe.difficulty   = Math.max(1, Math.min(5, Math.round(safe.difficulty   || 2)));
+      safe.waves        = Math.max(1, Math.min(10, Math.round(safe.waves       || 3)));
+      safe.enemyDensity = Math.max(0.5, Math.min(2.0, parseFloat(safe.enemyDensity) || 1.0));
+      safe.pickupRate   = Math.max(0.5, Math.min(2.0, parseFloat(safe.pickupRate)   || 1.0));
+      return 'MRC1-' + btoa(JSON.stringify(safe)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    } catch (_) { return null; }
+  },
+  // Decode a shareable code → config object
+  parseCode(code) {
+    if (!code || typeof code !== 'string') return null;
+    try {
+      let b64 = code.replace(/^MRC1-/, '').replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const cfg = JSON.parse(atob(b64));
+      if (typeof cfg.name !== 'string') return null;
+      return cfg;
+    } catch (_) { return null; }
+  },
+  // Persist a draft config in localStorage
+  saveDraft(cfg) {
+    try { localStorage.setItem('mojave_editor_draft', JSON.stringify(cfg)); } catch (_) {}
+  },
+  loadDraft() {
+    try { return JSON.parse(localStorage.getItem('mojave_editor_draft') || 'null'); } catch (_) { return null; }
+  },
+};
+
+// === SIMPLE MODDING API ===
+// Exposed on window.MojaveMod so page-level scripts (e.g. mod packs loaded
+// via <script src="mymod.js">) can register custom vehicles, modes, and hazards.
+// Share codes use the same base64 format as the Level Editor.
+(function setupModdingAPI() {
+  const _modVehicles = [], _modModes = [], _modHazards = [];
+  window.MojaveMod = {
+    version: '1.0',
+    // Register a custom vehicle: { id, name, desc, base: {maxHp,accel,maxV,fireRate,dmg,guns}, color }
+    registerVehicle(def) {
+      if (!def || !def.id || !def.name) { console.warn('[MojaveMod] registerVehicle: id+name required'); return false; }
+      if (VEHICLE_BY_ID[def.id]) { console.warn('[MojaveMod] Vehicle id already exists:', def.id); return false; }
+      def.modded = true;
+      _modVehicles.push(def); VEHICLES.push(def); VEHICLE_BY_ID[def.id] = def;
+      console.info('[MojaveMod] Registered vehicle:', def.id);
+      return true;
+    },
+    // Register a custom game mode: { id, name, desc }
+    registerMode(def) {
+      if (!def || !def.id || !def.name) { console.warn('[MojaveMod] registerMode: id+name required'); return false; }
+      if (MODES.some(m => m.id === def.id)) { console.warn('[MojaveMod] Mode id already exists:', def.id); return false; }
+      def.modded = true;
+      _modModes.push(def); MODES.push(def);
+      console.info('[MojaveMod] Registered mode:', def.id);
+      return true;
+    },
+    // Register a custom hazard/obstacle type: { id, name }
+    registerHazard(def) {
+      if (!def || !def.id) { console.warn('[MojaveMod] registerHazard: id required'); return false; }
+      _modHazards.push(def);
+      console.info('[MojaveMod] Registered hazard:', def.id);
+      return true;
+    },
+    // Load a level/vehicle/mode pack from a Level Editor share code
+    loadShareCode(code) {
+      const cfg = LevelEditor.parseCode(code);
+      if (!cfg) { console.warn('[MojaveMod] Invalid share code'); return null; }
+      return cfg;
+    },
+    get vehicles() { return _modVehicles.slice(); },
+    get modes()    { return _modModes.slice();    },
+    get hazards()  { return _modHazards.slice();  },
+    // Visual scripting stub — full integration is a future TODO.
+    script: {
+      on(event, fn)  { console.info('[MojaveMod.script] stub listener:', event); },
+      emit(event, d) { console.info('[MojaveMod.script] stub emit:', event, d);  },
+    },
+  };
+})();
+
+// === RIVALS SYSTEM ===
+// Import rival ghost cars via share codes. During gameplay a translucent
+// ghost car appears on the road, showing the rival's name. No collision.
+const RIVALS_STORAGE_KEY = 'mojave_rivals_v1';
+const MAX_RIVALS = 5;
+const Rivals = {
+  _list: null,
+  load() {
+    try { this._list = JSON.parse(localStorage.getItem(RIVALS_STORAGE_KEY) || '[]'); }
+    catch (_) { this._list = []; }
+    if (!Array.isArray(this._list)) this._list = [];
+  },
+  save() { try { localStorage.setItem(RIVALS_STORAGE_KEY, JSON.stringify(this._list)); } catch (_) {} },
+  list() { if (!this._list) this.load(); return this._list.slice(); },
+  // Generate a shareable rival code from the active profile
+  generateCode() {
+    const p = Profile.active(); if (!p) return null;
+    const rid = {
+      name: p.name,
+      vehicle: p.activeVehicle || 'rustbucket',
+      bestScore: p.bestClassic || 0,
+      bestKills: p.bestKills  || 0,
+      prestige:  p.prestigeTokens || 0,
+      created:   Date.now(),
+    };
+    try {
+      return 'MRR1-' + btoa(JSON.stringify(rid)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    } catch (_) { return null; }
+  },
+  // Import a rival from a share code
+  importCode(code) {
+    if (!code || typeof code !== 'string') return { ok: false, reason: 'INVALID CODE' };
+    try {
+      let b64 = code.replace(/^MRR1-/, '').replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const rival = JSON.parse(atob(b64));
+      if (!rival.name) return { ok: false, reason: 'INVALID RIVAL DATA' };
+      if (!this._list) this.load();
+      if (this._list.length >= MAX_RIVALS) return { ok: false, reason: 'MAX ' + MAX_RIVALS + ' RIVALS' };
+      if (this._list.some(r => r.name === rival.name)) return { ok: false, reason: 'RIVAL ALREADY IMPORTED' };
+      rival.imported = Date.now();
+      this._list.push(rival); this.save();
+      return { ok: true, rival };
+    } catch (_) { return { ok: false, reason: 'CORRUPT CODE' }; }
+  },
+  remove(name) {
+    if (!this._list) this.load();
+    this._list = this._list.filter(r => r.name !== name);
+    this.save();
+  },
+  // Draw a ghost car overlay during gameplay (translucent, no collision).
+  // Called from the platform frame hook below when Game.state === 'playing'.
+  drawGhosts(ctx) {
+    const list = this.list();
+    if (!list.length || !Game.player) return;
+    const t = Game.t || 0;
+    list.forEach((rival, i) => {
+      const vDef = VEHICLE_BY_ID[rival.vehicle] || VEHICLES[0];
+      const gx = W * 0.5 + Math.sin(t * 0.6 + i * 1.8) * W * 0.18;
+      const gy = H * 0.28 + i * 48;
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.translate(gx, gy);
+      ctx.fillStyle = vDef.color ? vDef.color.body : '#aaaaaa';
+      ctx.fillRect(-15, -24, 30, 48);
+      ctx.fillStyle = vDef.color ? vDef.color.windshield : '#7ad0ff';
+      ctx.fillRect(-9, -16, 18, 14);
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(rival.name.slice(0, 8), 0, 32);
+      ctx.restore();
+    });
+  },
+};
+
+// === COMMUNITY REPLAY THEATER ===
+// Records a lightweight run snapshot at 5 fps (max 60 s) for export and sharing.
+// Import a replay code to watch as an overlay. Full playback render is a TODO.
+const REPLAY_STORAGE_KEY = 'mojave_replays_v1';
+const REPLAY_FPS = 5;
+const REPLAY_MAX_FRAMES = REPLAY_FPS * 60; // 60 seconds max
+const MAX_REPLAYS = 8;
+const Replay = {
+  _recording: false, _frames: [], _lastCapture: 0, _list: null,
+  load() {
+    try { this._list = JSON.parse(localStorage.getItem(REPLAY_STORAGE_KEY) || '[]'); }
+    catch (_) { this._list = []; }
+    if (!Array.isArray(this._list)) this._list = [];
+  },
+  save() { try { localStorage.setItem(REPLAY_STORAGE_KEY, JSON.stringify(this._list)); } catch (_) {} },
+  list() { if (!this._list) this.load(); return this._list.slice(); },
+  startRecording() { this._recording = true; this._frames = []; this._lastCapture = 0; },
+  stopRecording()  { this._recording = false; },
+  // Capture a lightweight snapshot of game state (called each frame from hook below)
+  captureFrame(now) {
+    if (!this._recording || this._frames.length >= REPLAY_MAX_FRAMES) return;
+    if (now - this._lastCapture < 1000 / REPLAY_FPS) return;
+    this._lastCapture = now;
+    this._frames.push({
+      t: Math.round(Game.t || 0),
+      x: Math.round(Game.player ? Game.player.x : 0),
+      y: Math.round(Game.player ? Game.player.y : 0),
+      s: Math.round(Game.score || 0),
+      k: Game.kills || 0,
+      h: Math.round(Game.health || 0),
+    });
+  },
+  // Export the recorded frames as a shareable code (prefix MRP1-)
+  exportReplay(meta) {
+    if (!this._frames.length) return null;
+    const data = {
+      v: 1,
+      meta: Object.assign({
+        name: 'UNNAMED', mode: Game.mode || 'classic',
+        vehicle: (Game.vehicle && Game.vehicle.id) || 'rustbucket',
+        score: Math.round(Game.score || 0), kills: Game.kills || 0, date: Date.now(),
+      }, meta || {}),
+      frames: this._frames,
+    };
+    try {
+      return 'MRP1-' + btoa(JSON.stringify(data)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    } catch (_) { return null; }
+  },
+  // Save the recording to localStorage
+  saveReplay(label) {
+    if (!this._list) this.load();
+    const code = this.exportReplay({ name: label || ('RUN ' + new Date().toLocaleDateString()) });
+    if (!code) return false;
+    if (this._list.length >= MAX_REPLAYS) this._list.shift();
+    this._list.push({ label: label || 'RUN', date: Date.now(), code });
+    this.save();
+    return true;
+  },
+  parseReplay(code) {
+    if (!code || typeof code !== 'string') return null;
+    try {
+      let b64 = code.replace(/^MRP1-/, '').replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      return JSON.parse(atob(b64));
+    } catch (_) { return null; }
+  },
+  removeReplay(date) {
+    if (!this._list) this.load();
+    this._list = this._list.filter(r => r.date !== date);
+    this.save();
+  },
+};
+
+// === CLAN SYSTEM ===
+// Local clan metadata: a 1–5 char tag and an optional clan name.
+// Tag is displayed in scoreboard entries and the profile bar.
+const Clan = {
+  getTag()  { const p = Profile.active(); return (p && p.clanTag)  || null; },
+  getName() { const p = Profile.active(); return (p && p.clanName) || null; },
+  setTag(raw) {
+    const p = Profile.active(); if (!p) return false;
+    const tag = (raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+    p.clanTag = tag || null;
+    Profile.save();
+    return true;
+  },
+  setClanName(raw) {
+    const p = Profile.active(); if (!p) return false;
+    p.clanName = (raw || '').trim().toUpperCase().slice(0, 20) || null;
+    Profile.save();
+    return true;
+  },
+  // Format a driver name with the clan tag prefix
+  formatName(name) { const tag = this.getTag(); return tag ? '[' + tag + '] ' + name : name; },
+  // Seasonal clan event stub: earn bonus scrap by finishing weekly challenges
+  getSeasonalEvent() {
+    const s = getCurrentSeason();
+    return { seasonName: s.name, goal: 'Complete 3 weekly challenges this season', reward: 5000 };
+  },
+};
+
+// === PHOTO / CINEMATIC MODE ===
+// Hides the HUD and captures the game canvas as a PNG download.
+const PhotoMode = {
+  active: false,
+  toggle() {
+    this.active = !this.active;
+    const hud = document.getElementById('hud');
+    if (hud) hud.style.opacity = this.active ? '0' : '';
+    const btn = document.getElementById('photo-mode-btn');
+    if (btn) btn.textContent = this.active ? '📷 CAPTURE' : '📷 PHOTO';
+    if (this.active) UI.toast('PHOTO MODE — TAP CAPTURE TO SCREENSHOT');
+  },
+  capture() {
+    const canvas = document.getElementById('c');
+    if (!canvas) { UI.toast('NO CANVAS'); return; }
+    try {
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mojave-run-' + Date.now() + '.png';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      UI.toast('SCREENSHOT SAVED!');
+      Haptics.victory();
+    } catch (_) {
+      // Canvas may be tainted in cross-origin contexts — fall back to new tab
+      try { window.open(canvas.toDataURL('image/png'), '_blank'); }
+      catch (_2) { UI.toast('SCREENSHOT FAILED — CANVAS TAINTED'); }
+    }
+  },
+  exit() {
+    this.active = false;
+    const hud = document.getElementById('hud');
+    if (hud) hud.style.opacity = '';
+    const btn = document.getElementById('photo-mode-btn');
+    if (btn) btn.textContent = '📷 PHOTO';
+  },
+};
+
+// === PLATFORM UI HELPERS ===
+// Builds HTML for the community platform screen shown from SETTINGS.
+function buildPlatformScreen() {
+  const p = Profile.active() || {};
+  const tokens = p.prestigeTokens || 0;
+  const tier   = getPrestigeTier(tokens);
+  const season = getCurrentSeason();
+  const wc     = getWeeklyChallenge();
+  const wp     = ((p.weeklyProgress || {})[wc.weekKey]) || {};
+  const wcDone    = !!(wp.progress);
+  const wcClaimed = !!(wp.claimed);
+  const rivals = Rivals.list();
+  const replays = Replay.list();
+  const clanTag  = Clan.getTag()  || '';
+  const clanName = Clan.getName() || '';
+
+  return `
+    <h2>✦ NEW GAME+ PRESTIGE</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div>
+          <div class="set-name">${tier.label} · ${tokens} TOKEN${tokens !== 1 ? 'S' : ''}</div>
+          <div class="set-sub">${tier.bonus || 'NO BONUS YET — PRESTIGE TO UNLOCK'}</div>
+          <div class="set-sub">REQUIRES FULL MASTERY OR ${PRESTIGE_REQUIRED_SCRAP.toLocaleString()} SCRAP</div>
+        </div>
+        <button class="btn set-toggle" data-act="platform-do-prestige">NEW GAME+</button>
+      </div>
+    </div>
+
+    <h2>${season.icon} ${season.name} · SEASON ${season.seasonNumber}</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div>
+          <div class="set-name">${season.daysLeft} DAYS REMAINING</div>
+          <div class="set-sub">${season.bonusDesc}</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>📅 WEEKLY CHALLENGE</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div>
+          <div class="set-name">${wc.label}</div>
+          <div class="set-sub">${wc.desc}</div>
+          <div class="set-sub">REWARD: ${wc.reward.toLocaleString()} SCRAP</div>
+        </div>
+        ${wcClaimed ? '<span class="set-val" style="color:var(--good)">✔ CLAIMED</span>' :
+          wcDone ? '<button class="btn set-toggle on" data-act="platform-claim-weekly">CLAIM</button>' :
+          '<span class="set-val">IN PROGRESS</span>'}
+      </div>
+    </div>
+
+    <h2>🛠 LEVEL EDITOR</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">CUSTOM LEVEL CODES</div><div class="set-sub">CREATE A RUN · SHARE THE CODE · PLAY ANYWHERE</div></div>
+        <button class="btn set-toggle" data-act="platform-editor">OPEN</button>
+      </div>
+    </div>
+
+    <h2>👻 RIVALS (${rivals.length}/${MAX_RIVALS})</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">GHOST RIVALS</div><div class="set-sub">IMPORT A CODE TO RACE AGAINST AN AI GHOST</div></div>
+        <button class="btn set-toggle" data-act="platform-import-rival">IMPORT</button>
+      </div>
+      ${rivals.length ? '<div>' + rivals.map(r =>
+        `<div class="set-head" style="margin-top:6px"><div class="set-name" style="font-size:11px">👻 ${escapeHtml(r.name)} · ${(r.bestScore||0).toLocaleString()}</div>
+        <button class="btn set-toggle" data-act="platform-remove-rival" data-data="${escapeHtml(r.name)}" style="font-size:9px">✕</button></div>`
+      ).join('') + '</div>' : ''}
+    </div>
+
+    <h2>🎬 REPLAYS (${replays.length}/${MAX_REPLAYS})</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">RUN REPLAYS</div><div class="set-sub">SAVE YOUR BEST RUNS · SHARE CODES · REPLAY LATER</div></div>
+        <button class="btn set-toggle" data-act="platform-import-replay">IMPORT</button>
+      </div>
+      ${replays.length ? '<div>' + replays.map(r =>
+        `<div class="set-head" style="margin-top:6px"><div class="set-name" style="font-size:11px">🎬 ${escapeHtml(r.label)} · ${new Date(r.date).toLocaleDateString()}</div>
+        <div style="display:flex;gap:4px"><button class="btn set-toggle" data-act="platform-export-replay" data-data="${r.date}" style="font-size:9px">SHARE</button>
+        <button class="btn set-toggle" data-act="platform-remove-replay" data-data="${r.date}" style="font-size:9px">✕</button></div></div>`
+      ).join('') + '</div>' : ''}
+    </div>
+
+    <h2>🏴 CLAN</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div>
+          <div class="set-name">${clanTag ? '[' + escapeHtml(clanTag) + '] ' + escapeHtml(clanName || 'NO NAME') : 'NO CLAN TAG SET'}</div>
+          <div class="set-sub">TAG SHOWS IN SCOREBOARDS · MAX 5 CHARS</div>
+        </div>
+        <button class="btn set-toggle" data-act="platform-set-clan">EDIT</button>
+      </div>
+    </div>
+
+    <h2>📷 PHOTO MODE</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">CINEMATIC SCREENSHOT</div><div class="set-sub">HIDES HUD · CAPTURES THE CANVAS AS PNG</div></div>
+        <button class="btn set-toggle" id="photo-mode-btn" data-act="platform-photo-toggle">📷 PHOTO</button>
+      </div>
+    </div>
+
+    <h2>🔗 SHARE YOUR RIVAL CODE</h2>
+    <div class="set-row">
+      <div class="set-head">
+        <div><div class="set-name">EXPORT YOUR GHOST</div><div class="set-sub">LET OTHER DRIVERS RACE YOUR AI GHOST</div></div>
+        <button class="btn set-toggle" data-act="platform-gen-rival">GENERATE</button>
+      </div>
+    </div>
+  `;
+}
+
+function buildEditorScreen() {
+  const draft = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+  const biomes = ['wastes','canyon','city','neon'];
+  const objectives = ['score','distance','kills','survive'];
+  return `
+    <h2>🛠 LEVEL EDITOR</h2>
+    <div class="set-row">
+      <div class="set-head"><div class="set-name">LEVEL NAME</div></div>
+      <input id="ed-name" class="mp-input" maxlength="20" value="${escapeHtml(draft.name||'CUSTOM RUN')}" style="margin-top:4px" placeholder="CUSTOM RUN" />
+    </div>
+    <div class="set-row">
+      <div class="set-head"><div class="set-name">BIOME</div></div>
+      <div class="set-q-row">${biomes.map(b=>`<button class="btn set-q ${draft.biome===b?'on':''}" data-ed-biome="${b}">${b.toUpperCase()}</button>`).join('')}</div>
+    </div>
+    <div class="set-row">
+      <div class="set-head"><div class="set-name">DIFFICULTY (${draft.difficulty}/5)</div></div>
+      <input type="range" min="1" max="5" step="1" value="${draft.difficulty||2}" id="ed-diff" />
+    </div>
+    <div class="set-row">
+      <div class="set-head"><div class="set-name">ENEMY DENSITY (${Math.round((draft.enemyDensity||1)*100)}%)</div></div>
+      <input type="range" min="0.5" max="2" step="0.1" value="${draft.enemyDensity||1}" id="ed-density" />
+    </div>
+    <div class="set-row">
+      <div class="set-head"><div class="set-name">PICKUP RATE (${Math.round((draft.pickupRate||1)*100)}%)</div></div>
+      <input type="range" min="0.5" max="2" step="0.1" value="${draft.pickupRate||1}" id="ed-pickup" />
+    </div>
+    <div class="set-row">
+      <div class="set-head"><div class="set-name">OBJECTIVE</div></div>
+      <div class="set-q-row">${objectives.map(o=>`<button class="btn set-q ${draft.objective===o?'on':''}" data-ed-obj="${o}">${o.toUpperCase()}</button>`).join('')}</div>
+    </div>
+    <div class="set-row">
+      <div class="set-head" style="gap:8px">
+        <button class="btn set-toggle on" data-act="editor-generate">GENERATE CODE</button>
+        <button class="btn set-toggle" data-act="editor-import">IMPORT CODE</button>
+      </div>
+    </div>
+    <div id="ed-code-out" class="set-row" style="display:none">
+      <div class="set-head"><div class="set-name" id="ed-code-label">CODE</div></div>
+      <div id="ed-code-text" style="word-break:break-all;font-size:10px;color:var(--gold);letter-spacing:1px;margin-top:4px"></div>
+    </div>
+  `;
+}
+
+// Show platform hub screen (reuses settings layout)
+UI.showPlatform = function() {
+  const wrap = document.getElementById('platform-list');
+  if (!wrap) return;
+  wrap.innerHTML = buildPlatformScreen();
+  this.show('platform');
+};
+// Show level editor screen
+UI.showEditor = function() {
+  const wrap = document.getElementById('editor-list');
+  if (!wrap) return;
+  wrap.innerHTML = buildEditorScreen();
+  this.show('editor');
+};
+
+// === PLATFORM ACTION HANDLER ===
+// Extends the existing UI.act chain to handle all platform feature actions.
+const _platform_origAct = UI.act.bind(UI);
+UI.act = function(action, data) {
+  switch (action) {
+    case 'menu-platform':
+      SFX.click();
+      UI.showPlatform();
+      return;
+    case 'back-platform':
+      SFX.click();
+      UI.showMenu();
+      return;
+    case 'platform-prestige':
+      SFX.click();
+      UI.showPlatform();
+      return;
+    case 'platform-do-prestige': {
+      SFX.click();
+      const res = Profile.prestige();
+      if (res.ok) {
+        SFX.levelUp();
+        const tok = (Profile.active() || {}).prestigeTokens || 0;
+        UI.toast('✦ PRESTIGE! ' + getPrestigeTier(tok).label + ' RANK EARNED', 3000);
+        UI.showPlatform();
+      } else {
+        UI.toast(res.reason);
+      }
+      return;
+    }
+    case 'platform-claim-weekly': {
+      SFX.click();
+      if (claimWeeklyReward()) {
+        const wc = getWeeklyChallenge();
+        SFX.levelUp();
+        UI.toast('✦ WEEKLY REWARD: +' + wc.reward.toLocaleString() + ' SCRAP', 3000);
+        UI.showPlatform();
+      } else {
+        UI.toast('NOTHING TO CLAIM');
+      }
+      return;
+    }
+    case 'platform-editor':
+      SFX.click();
+      UI.showEditor();
+      return;
+    case 'back-editor':
+      SFX.click();
+      UI.showPlatform();
+      return;
+    case 'editor-generate': {
+      SFX.click();
+      const cfg = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+      cfg.name = (document.getElementById('ed-name') || {}).value || cfg.name;
+      const code = LevelEditor.generateCode(cfg);
+      if (code) {
+        LevelEditor.saveDraft(cfg);
+        const out = document.getElementById('ed-code-out');
+        const txt = document.getElementById('ed-code-text');
+        const lbl = document.getElementById('ed-code-label');
+        if (out && txt) { out.style.display = ''; txt.textContent = code; if (lbl) lbl.textContent = 'YOUR LEVEL CODE (TAP TO COPY)'; }
+        txt && txt.addEventListener('click', () => {
+          try { navigator.clipboard.writeText(code).catch(() => {}); UI.toast('CODE COPIED!'); } catch (_) {}
+        });
+        UI.toast('LEVEL CODE GENERATED!');
+      }
+      return;
+    }
+    case 'editor-import': {
+      SFX.click();
+      cloudModal('IMPORT LEVEL CODE', 'PASTE YOUR MRC1-... LEVEL CODE BELOW:', {
+        showInput: true, inputPlaceholder: 'MRC1-...', okLabel: 'LOAD',
+        onOk: (code) => {
+          const cfg = LevelEditor.parseCode(code);
+          if (!cfg) { UI.toast('INVALID LEVEL CODE'); return; }
+          LevelEditor.saveDraft(cfg);
+          UI.showEditor();
+          UI.toast('LEVEL "' + (cfg.name || 'CUSTOM').toUpperCase() + '" LOADED');
+        },
+      });
+      return;
+    }
+    case 'platform-import-rival': {
+      SFX.click();
+      cloudModal('IMPORT RIVAL CODE', 'PASTE AN MRR1-... RIVAL CODE:', {
+        showInput: true, inputPlaceholder: 'MRR1-...', okLabel: 'IMPORT',
+        onOk: (code) => {
+          const res = Rivals.importCode(code);
+          if (res.ok) { UI.toast('👻 RIVAL ' + res.rival.name + ' IMPORTED'); UI.showPlatform(); }
+          else UI.toast('IMPORT FAILED: ' + res.reason);
+        },
+      });
+      return;
+    }
+    case 'platform-remove-rival': {
+      SFX.click();
+      const rname = data || '';
+      if (rname) { Rivals.remove(rname); UI.toast('RIVAL REMOVED'); UI.showPlatform(); }
+      return;
+    }
+    case 'platform-gen-rival': {
+      SFX.click();
+      const code = Rivals.generateCode();
+      if (code) {
+        try { navigator.clipboard.writeText(code).catch(() => {}); } catch (_) {}
+        UI.toast('RIVAL CODE COPIED!  ' + code.slice(0, 24) + '…', 4000);
+      } else {
+        UI.toast('LOG IN AS A DRIVER FIRST');
+      }
+      return;
+    }
+    case 'platform-rivals':
+      SFX.click();
+      UI.showPlatform();
+      return;
+    case 'platform-import-replay': {
+      SFX.click();
+      cloudModal('IMPORT REPLAY CODE', 'PASTE AN MRP1-... REPLAY CODE:', {
+        showInput: true, inputPlaceholder: 'MRP1-...', okLabel: 'IMPORT',
+        onOk: (code) => {
+          const rp = Replay.parseReplay(code);
+          if (!rp) { UI.toast('INVALID REPLAY CODE'); return; }
+          if (!Replay._list) Replay.load();
+          if (Replay._list.length >= MAX_REPLAYS) Replay._list.shift();
+          Replay._list.push({ label: (rp.meta && rp.meta.name) || 'IMPORTED', date: Date.now(), code });
+          Replay.save();
+          UI.toast('REPLAY IMPORTED!');
+          UI.showPlatform();
+        },
+      });
+      return;
+    }
+    case 'platform-export-replay': {
+      SFX.click();
+      const rdate = parseInt(data || '0', 10);
+      const rlist = Replay.list();
+      const entry = rlist.find(r => r.date === rdate);
+      if (entry && entry.code) {
+        try { navigator.clipboard.writeText(entry.code).catch(() => {}); UI.toast('REPLAY CODE COPIED!'); }
+        catch (_) { UI.toast(entry.code.slice(0, 32) + '…'); }
+      } else {
+        UI.toast('REPLAY NOT FOUND');
+      }
+      return;
+    }
+    case 'platform-remove-replay': {
+      SFX.click();
+      const rdate2 = parseInt(data || '0', 10);
+      Replay.removeReplay(rdate2);
+      UI.toast('REPLAY REMOVED');
+      UI.showPlatform();
+      return;
+    }
+    case 'platform-replays':
+      SFX.click();
+      UI.showPlatform();
+      return;
+    case 'platform-set-clan': {
+      SFX.click();
+      cloudModal('CLAN TAG', 'ENTER YOUR CLAN TAG (1–5 CHARS A–Z 0–9):', {
+        showInput: true, inputPlaceholder: 'TAG', okLabel: 'SET',
+        onOk: (raw) => {
+          Clan.setTag(raw);
+          cloudModal('CLAN NAME', 'ENTER CLAN NAME (OPTIONAL, UP TO 20 CHARS):', {
+            showInput: true, inputPlaceholder: 'CLAN NAME', okLabel: 'SAVE',
+            onOk: (nm) => {
+              Clan.setClanName(nm);
+              const tag = Clan.getTag();
+              UI.toast(tag ? 'CLAN SET: [' + tag + ']' : 'CLAN TAG CLEARED');
+              UI.showPlatform();
+            },
+          });
+        },
+      });
+      return;
+    }
+    case 'platform-photo-toggle':
+      SFX.click();
+      if (Game.state === 'playing') PhotoMode.toggle();
+      else UI.toast('PHOTO MODE AVAILABLE DURING GAMEPLAY');
+      return;
+    case 'photo-capture':
+      PhotoMode.capture();
+      return;
+  }
+  return _platform_origAct(action, data);
+};
+
+// === PLATFORM FRAME HOOK ===
+// Piggybacks on the existing requestAnimationFrame loop to:
+//  1. Capture replay frames during gameplay
+//  2. Draw rival ghost cars during gameplay
+//  3. Show weekly challenge completion toast after a run ends
+(function installPlatformFrameHook() {
+  // Inject into the render pipeline via a lightweight post-render callback.
+  // We replace the global `frame` reference only if doing so is safe.
+  // To avoid touching the tight inner loop, we intercept after render() returns.
+  // The safest approach: hook into the visibility-change + existing try/catch wrapper.
+  // We add rival ghost drawing and replay capture by wrapping requestAnimationFrame.
+  let _pfLastGameState = null;
+  const _pfOrigRAF = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function(cb) {
+    if (cb !== frame) return _pfOrigRAF(cb);
+    return _pfOrigRAF(function(now) {
+      cb(now);
+      // Replay capture during active gameplay
+      if (Game.state === 'playing' && !Game.paused) {
+        Replay.captureFrame(now);
+        // Draw rival ghosts after main render (rivals appear as overlay)
+        if (Rivals.list().length > 0 && ctx) {
+          try { Rivals.drawGhosts(ctx); } catch (_) {}
+        }
+      }
+      // Auto-start/stop replay recording on run begin/end
+      if (Game.state === 'playing' && _pfLastGameState !== 'playing') {
+        Replay.startRecording();
+      }
+      if (Game.state !== 'playing' && _pfLastGameState === 'playing') {
+        Replay.stopRecording();
+        // Auto-save replay if there are enough frames (at least 5 seconds)
+        if (Replay._frames.length >= REPLAY_FPS * 5) {
+          const p = Profile.active();
+          Replay.saveReplay(p ? p.name + ' ' + new Date().toLocaleDateString() : 'RUN');
+        }
+      }
+      // Weekly challenge toast notification
+      if (Game._pendingWeekly && (Game.state === 'gameover' || Game.state === 'victory')) {
+        const wc = Game._pendingWeekly;
+        Game._pendingWeekly = null;
+        setTimeout(() => {
+          UI.toast('✦ WEEKLY "' + wc.label + '" COMPLETE! CLAIM ' + wc.reward.toLocaleString() + ' SCRAP IN PLATFORM HUB', 4000);
+        }, 1500);
+      }
+      _pfLastGameState = Game.state;
+    });
+  };
+})();
+
+// Editor live-update handlers (delegate from the global click handler)
+document.addEventListener('click', function(e) {
+  const eb = e.target.closest('[data-ed-biome]');
+  if (eb) {
+    const draft = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+    draft.biome = eb.dataset.edBiome;
+    LevelEditor.saveDraft(draft);
+    UI.showEditor();
+    return;
+  }
+  const eo = e.target.closest('[data-ed-obj]');
+  if (eo) {
+    const draft2 = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+    draft2.objective = eo.dataset.edObj;
+    LevelEditor.saveDraft(draft2);
+    UI.showEditor();
+    return;
+  }
+  // Photo capture button during gameplay
+  const pc = e.target.closest('[data-act="photo-capture"]');
+  if (pc && PhotoMode.active) { PhotoMode.capture(); return; }
+}, true);
+
+// Editor slider live-update
+document.addEventListener('change', function(e) {
+  const ed = e.target.closest('#ed-diff, #ed-density, #ed-pickup');
+  if (!ed) return;
+  const draft = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
+  if (ed.id === 'ed-diff')    draft.difficulty   = parseFloat(ed.value);
+  if (ed.id === 'ed-density') draft.enemyDensity = parseFloat(ed.value);
+  if (ed.id === 'ed-pickup')  draft.pickupRate   = parseFloat(ed.value);
+  LevelEditor.saveDraft(draft);
+  UI.showEditor();
+}, true);
 
 // ============================================================
 // CLOUD SAVE / RESTORE (Render back-end accounts)

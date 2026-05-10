@@ -1,1 +1,42 @@
-{"appId":"com.mojaverun.game","appName":"Mojave Run","webDir":".","bundledWebRuntime":false,"plugins":{"SplashScreen":{"launchShowDuration":2000},"StatusBar":{"style":"DARK"}}} 
+{
+  "appId": "com.mojaverun.game",
+  "appName": "Mojave Run",
+  "webDir": ".",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#1a0f08",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#1a0f08"
+    },
+    "Keyboard": {
+      "resize": "body",
+      "style": "DARK",
+      "resizeOnFullScreen": true
+    },
+    "App": {
+      "launchUrl": "index.html"
+    }
+  },
+  "android": {
+    "buildOptions": {
+      "keystorePath": "release.keystore",
+      "keystoreAlias": "mojaverun"
+    }
+  },
+  "ios": {
+    "scheme": "Mojave Run",
+    "contentInset": "automatic"
+  }
+}
