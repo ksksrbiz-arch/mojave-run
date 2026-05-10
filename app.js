@@ -4278,6 +4278,7 @@ const Game = {
   _pendingBadges: [],
   _pendingCosmetics: [],
   latestReplayDate: null,
+  lastResultsSnapshot: null,
   replayReturnScreen: null,
   cosmetics: defaultCosmetics(),
   // spinout: set when the player hits a hitchhiker; car loses control temporarily
@@ -4478,6 +4479,7 @@ function startRun(mode, level) {
   Game.kills = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
+  Game.lastResultsSnapshot = null;
   const speedModeMul = mode === 'winding' ? 1.35 : 1;
   const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1) * speedModeMul;
   Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
@@ -9519,6 +9521,8 @@ function drawPopups() {
 // Public URL appended to Daily Challenge share text. Single point of change
 // if the canonical deploy URL ever moves.
 const SHARE_BASE_URL = 'https://mojave-run.netlify.app';
+const DAILY_ROOM_CODE_SEED_CHARS = 6;
+const DAILY_ROOM_CODE_MAX_LENGTH = 10;
 const BIOME_DISPLAY_NAMES = {
   wastes: 'WASTES',
   saltflats: 'SALT FLATS',
@@ -9531,17 +9535,28 @@ const BIOME_DISPLAY_NAMES = {
   thunderplains: 'THUNDER PLAINS',
   frostwaste: 'FROSTWASTE',
 };
+// New-player salvage cushion for the first five completed runs (0-based run count).
 const EARLY_RUN_SCRAP_BONUS = [280, 240, 200, 160, 120];
 const DAILY_SCRAP_BONUS = 150;
 const DAILY_VICTORY_SCRAP_BONUS = 300;
 
+function toDisplayWords(id) {
+  return String(id || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toUpperCase();
+}
+
 function getBiomeDisplayName(id) {
-  return BIOME_DISPLAY_NAMES[id] || String(id || 'wastes').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toUpperCase();
+  return BIOME_DISPLAY_NAMES[id] || toDisplayWords(id || 'wastes');
 }
 
 function buildDailyChallengeRoomCode(seedKey) {
-  const compact = String(seedKey || todaySeedString()).replace(/[^0-9A-Z]/gi, '').slice(-6);
-  return ('DLY' + compact).toUpperCase().slice(0, 10);
+  const sanitized = String(seedKey || todaySeedString()).replace(/[^0-9A-Z]/gi, '');
+  const truncated = sanitized.slice(-DAILY_ROOM_CODE_SEED_CHARS);
+  return ('DLY' + truncated).toUpperCase().slice(0, DAILY_ROOM_CODE_MAX_LENGTH);
+}
+
+function sanitizeFilenameToken(value, fallback) {
+  const safe = String(value || '').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '');
+  return safe || (fallback || 'file');
 }
 
 function buildDailyChallengeShareMeta() {
@@ -10049,6 +10064,55 @@ function submitGlobalScore() {
       body: JSON.stringify(payload),
     }).catch(() => {}); // silently ignore network failures on static hosts
   } catch (_) {}
+}
+
+function snapshotResultsState(reason) {
+  return {
+    reason,
+    state: Game.state,
+    mode: Game.mode,
+    level: Game.level,
+    levelData: Game.levelData ? Object.assign({}, Game.levelData) : null,
+    campaignLevelId: Game.campaignLevelId,
+    dailySeedKey: Game.dailySeedKey,
+    score: Game.score,
+    distance: Game.distance,
+    kills: Game.kills,
+    civiliansHit: Game.civiliansHit,
+    comboBest: Game.comboBest,
+    scrapEarned: Game.scrapEarned,
+    scrapBonusEarned: Game.scrapBonusEarned,
+    biome: Game.biome,
+    bossRushStage: Game.bossRushStage,
+    ironThroneStage: Game.ironThroneStage,
+    latestReplayDate: Game.latestReplayDate,
+    runMutators: (Game.runMutators || []).map(m => Object.assign({}, m)),
+    vehicle: Game.vehicle,
+  };
+}
+
+function restoreResultsState(snapshot) {
+  if (!snapshot) return false;
+  Game.state = snapshot.state;
+  Game.mode = snapshot.mode;
+  Game.level = snapshot.level;
+  Game.levelData = snapshot.levelData ? Object.assign({}, snapshot.levelData) : null;
+  Game.campaignLevelId = snapshot.campaignLevelId;
+  Game.dailySeedKey = snapshot.dailySeedKey;
+  Game.score = snapshot.score;
+  Game.distance = snapshot.distance;
+  Game.kills = snapshot.kills;
+  Game.civiliansHit = snapshot.civiliansHit;
+  Game.comboBest = snapshot.comboBest;
+  Game.scrapEarned = snapshot.scrapEarned;
+  Game.scrapBonusEarned = snapshot.scrapBonusEarned ?? 0;
+  Game.biome = snapshot.biome;
+  Game.bossRushStage = snapshot.bossRushStage ?? 0;
+  Game.ironThroneStage = snapshot.ironThroneStage ?? 0;
+  Game.latestReplayDate = snapshot.latestReplayDate ?? null;
+  Game.runMutators = (snapshot.runMutators || []).map(m => Object.assign({}, m));
+  Game.vehicle = snapshot.vehicle || Game.vehicle;
+  return true;
 }
 
 // ============================================================
@@ -10724,6 +10788,7 @@ const UI = {
       Game._pendingCosmetics = [];
     }
 
+    Game.lastResultsSnapshot = snapshotResultsState(reason);
     this.show('results');
   },
 
@@ -11071,6 +11136,7 @@ const UI = {
         const btn = document.getElementById('res-share');
         const seed = btn.dataset.seed || '';
         const shareMeta = buildDailyChallengeShareMeta();
+        const safeSeed = sanitizeFilenameToken(seed, 'daily');
         const posterDataURL = (typeof Cinematic !== 'undefined' && Cinematic.buildPosterDataURL)
           ? Cinematic.buildPosterDataURL({
               title: 'DAILY CHALLENGE',
@@ -11080,9 +11146,9 @@ const UI = {
           : null;
         let shared = false;
         try {
-          if (posterDataURL && navigator.canShare && window.fetch) {
+          if (posterDataURL && navigator.canShare && typeof fetch !== 'undefined') {
             fetch(posterDataURL).then(r => r.blob()).then(blob => {
-              const file = new File([blob], `mojave-daily-${seed}.png`, { type: 'image/png' });
+              const file = new File([blob], `mojave-daily-${safeSeed}.png`, { type: 'image/png' });
               if (navigator.canShare({ files: [file] })) {
                 navigator.share({ files: [file], title: shareMeta.title, text: shareMeta.text, url: shareMeta.url })
                   .then(() => UI.toast('DAILY SHARED'))
@@ -11090,7 +11156,10 @@ const UI = {
               } else {
                 fallbackShare();
               }
-            }).catch(() => fallbackShare());
+            }).catch(err => {
+              console.warn('[share] daily poster export failed', err);
+              fallbackShare();
+            });
             shared = true;
           } else if (navigator.share) {
             navigator.share({ title: shareMeta.title, text: shareMeta.text, url: shareMeta.url }).catch(() => {});
@@ -11120,7 +11189,7 @@ const UI = {
           try {
             const a = document.createElement('a');
             a.href = posterDataURL;
-            a.download = `mojave-daily-${seed || 'challenge'}.png`;
+            a.download = `mojave-daily-${safeSeed}.png`;
             document.body.appendChild(a);
             a.click();
             setTimeout(() => a.remove(), 0);
@@ -11133,7 +11202,7 @@ const UI = {
         const rdate = parseInt((btn && btn.dataset.replay) || '0', 10);
         const entry = Replay.list().find(r => r.date === rdate);
         const rp = entry && Replay.parseReplay(entry.code);
-        if (rp) startReplayPlayback(rp, 'menu');
+        if (rp) startReplayPlayback(rp, 'results');
         else UI.toast('REPLAY NOT FOUND');
         break;
       }
@@ -14705,7 +14774,9 @@ function updateReplayPlayback(dt) {
     Game.state = 'menu';
     const replayReturnScreen = Game.replayReturnScreen || 'platform';
     Game.replayReturnScreen = null;
-    if (replayReturnScreen === 'menu') UI.showMenu();
+    if (replayReturnScreen === 'results' && restoreResultsState(Game.lastResultsSnapshot)) {
+      UI.showResults(Game.lastResultsSnapshot.reason);
+    } else if (replayReturnScreen === 'menu') UI.showMenu();
     else UI.showPlatform();
   }
 }
