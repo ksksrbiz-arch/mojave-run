@@ -4112,6 +4112,40 @@ function makeDecor(yOverride) {
     else if (r < 0.76) type = 'bones';
     else if (r < 0.87) type = 'cactus';
     else               type = 'skull';
+  } else if (biome === 'neonruins') {
+    if      (r < 0.32) type = 'rock';
+    else if (r < 0.54) type = 'neonpanel';
+    else if (r < 0.68) type = 'wreck';
+    else if (r < 0.80) type = 'sign';
+    else if (r < 0.90) type = 'skull';
+    else               type = 'lightpole';
+  } else if (biome === 'irradiated') {
+    if      (r < 0.30) type = 'rock';
+    else if (r < 0.50) type = 'barrel';
+    else if (r < 0.64) type = 'toxicpuddle';
+    else if (r < 0.78) type = 'wreck';
+    else if (r < 0.88) type = 'skull';
+    else               type = 'stump';
+  } else if (biome === 'scraparch') {
+    if      (r < 0.30) type = 'rock';
+    else if (r < 0.52) type = 'girder';
+    else if (r < 0.68) type = 'wreck';
+    else if (r < 0.82) type = 'bones';
+    else               type = 'skull';
+  } else if (biome === 'thunderplains') {
+    if      (r < 0.36) type = 'rock';
+    else if (r < 0.54) type = 'post';
+    else if (r < 0.68) type = 'puddle';
+    else if (r < 0.80) type = 'wreck';
+    else if (r < 0.90) type = 'bones';
+    else               type = 'skull';
+  } else if (biome === 'frostwaste') {
+    if      (r < 0.38) type = 'rock';
+    else if (r < 0.56) type = 'icefloe';
+    else if (r < 0.70) type = 'wreck';
+    else if (r < 0.82) type = 'bones';
+    else if (r < 0.92) type = 'skull';
+    else               type = 'crystal';
   } else {
     if      (r < 0.55) type = 'rock';
     else if (r < 0.80) type = 'cactus';
@@ -6969,8 +7003,130 @@ function drawDecor() {
       // sunlit edge
       ctx.fillStyle = 'rgba(255,200,140,0.14)';
       ctx.fillRect(d.x - pw, d.y - ph, pw * 0.32, ph);
-    } else if (d.type === 'sign') {
-      // abandoned road sign (midnight biome)
+    } else if (d.type === 'neonpanel') {
+      // Collapsed neon sign panel (neonruins biome)
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot);
+      const pw = d.size * 1.1, ph = d.size * 0.55;
+      ctx.fillStyle = 'rgba(10,10,36,0.95)';
+      ctx.fillRect(-pw/2, -ph/2, pw, ph);
+      // neon tube strips — glowing cyan/magenta
+      const nc = Game.isNight ? 0.9 : 0.45;
+      ctx.fillStyle = `rgba(0,220,255,${nc})`;
+      ctx.fillRect(-pw/2 + 3, -ph/2 + 3, pw - 6, 3);
+      ctx.fillStyle = `rgba(255,60,200,${nc * 0.8})`;
+      ctx.fillRect(-pw/2 + 3, -ph/2 + 8, pw * 0.55, 2);
+      if (Game.isNight) {
+        // neon glow halo
+        const ng = ctx.createRadialGradient(0, 0, 0, 0, 0, pw * 0.7);
+        ng.addColorStop(0, 'rgba(0,200,255,0.10)');
+        ng.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = ng;
+        ctx.beginPath(); ctx.ellipse(0, 0, pw * 0.7, ph * 0.9, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    } else if (d.type === 'lightpole') {
+      // Toppled neon light pole (neonruins)
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot * 0.4 + 0.3);
+      const ph = d.size * 2.0;
+      ctx.fillStyle = Game.isNight ? 'rgba(30,30,60,0.9)' : 'rgba(55,55,80,1)';
+      ctx.fillRect(-2, -ph, 4, ph);
+      // lamp head
+      ctx.fillStyle = Game.isNight ? 'rgba(0,200,255,0.85)' : 'rgba(0,160,200,0.6)';
+      ctx.fillRect(-6, -ph, 12, 6);
+      if (Game.isNight) {
+        const lg = ctx.createRadialGradient(0, -ph + 3, 0, 0, -ph + 3, 18);
+        lg.addColorStop(0, 'rgba(0,200,255,0.18)');
+        lg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = lg;
+        ctx.beginPath(); ctx.arc(0, -ph + 3, 18, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    } else if (d.type === 'barrel') {
+      // Toxic waste barrel (irradiated biome)
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot * 0.3);
+      const bh = d.size * 0.9, bw = d.size * 0.55;
+      ctx.fillStyle = '#1a2210';
+      ctx.fillRect(-bw/2, -bh, bw, bh);
+      // warning stripe
+      ctx.fillStyle = 'rgba(120,200,0,0.6)';
+      ctx.fillRect(-bw/2, -bh * 0.65, bw, bh * 0.14);
+      // hazard symbol glow
+      ctx.fillStyle = 'rgba(80,200,0,0.35)';
+      ctx.beginPath(); ctx.arc(0, -bh * 0.4, bw * 0.28, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (d.type === 'toxicpuddle') {
+      // Glowing toxic puddle on the ground (irradiated)
+      const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 2.2 + d.x * 0.05);
+      ctx.save();
+      ctx.globalAlpha = 0.38 + 0.18 * pulse;
+      const pg = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.size * 0.8);
+      pg.addColorStop(0, 'rgba(100,255,0,0.45)');
+      pg.addColorStop(0.6, 'rgba(60,160,0,0.18)');
+      pg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.size * 0.8, d.size * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (d.type === 'girder') {
+      // Bent steel girder / I-beam (scraparch)
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot);
+      const gw = d.size * 1.4, gh = d.size * 0.22;
+      ctx.fillStyle = Game.isNight ? 'rgba(50,40,28,0.9)' : 'rgba(90,72,48,1)';
+      ctx.fillRect(-gw/2, -gh/2, gw, gh);
+      // flanges
+      ctx.fillRect(-gw/2, -gh, gw * 0.14, gh * 2);
+      ctx.fillRect( gw/2 - gw * 0.14, -gh, gw * 0.14, gh * 2);
+      // rust streak
+      ctx.fillStyle = 'rgba(160,80,30,0.22)';
+      ctx.fillRect(-gw/2 + 4, -gh/2, gw - 8, gh * 0.3);
+      ctx.restore();
+    } else if (d.type === 'puddle') {
+      // Rain puddle reflection (thunderplains)
+      const ripple = 0.5 + 0.5 * Math.sin((Game.t || 0) * 3.5 + d.x * 0.07);
+      ctx.save();
+      ctx.globalAlpha = 0.28 + 0.12 * ripple;
+      ctx.fillStyle = 'rgba(140,190,255,0.7)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.size * 0.9, d.size * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // ripple ring
+      ctx.globalAlpha = 0.18 * ripple;
+      ctx.strokeStyle = 'rgba(180,220,255,0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.size * (0.6 + ripple * 0.3), d.size * (0.14 + ripple * 0.08), 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else if (d.type === 'icefloe') {
+      // Ice shard / floe (frostwaste)
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot);
+      const iw = d.size * 0.9, ih = d.size * 0.38;
+      ctx.fillStyle = Game.isNight ? 'rgba(140,170,210,0.82)' : 'rgba(200,228,255,0.90)';
+      ctx.beginPath();
+      ctx.moveTo(-iw/2, 0);
+      ctx.lineTo(-iw/4, -ih);
+      ctx.lineTo(iw/3, -ih * 0.7);
+      ctx.lineTo(iw/2, 0);
+      ctx.lineTo(iw/4, ih * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      // frost sparkle
+      ctx.fillStyle = 'rgba(255,255,255,0.42)';
+      ctx.beginPath();
+      ctx.ellipse(-iw * 0.18, -ih * 0.4, iw * 0.14, ih * 0.12, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
       ctx.fillStyle = Game.isNight ? 'rgba(38,42,62,0.92)' : 'rgba(52,58,78,1)';
       const ph = d.size * 1.6;
       ctx.fillRect(d.x - 2, d.y - ph, 4, ph);
@@ -7024,6 +7180,99 @@ function drawWeather() {
     ctx.lineTo(p.x + 40, p.y);
     ctx.closePath();
     ctx.fill();
+  }
+
+  // === BIOME AMBIENT WEATHER ===
+  const biome = Game.biome || 'wastes';
+  const gT = Game.t || 0;
+
+  if (biome === 'frostwaste') {
+    // Drifting snowflakes — gentle, layered at two sizes
+    ctx.save();
+    const snowSeed = Math.floor(gT * 18);
+    ctx.fillStyle = 'rgba(230,245,255,0.82)';
+    for (let i = 0; i < 48; i++) {
+      const si = i * 137.508 + snowSeed * 7;
+      const sx = (((i * 199 + snowSeed * 11) % W) + W) % W;
+      const sy = ((gT * (22 + (i % 5) * 4) + i * 73) % (H + 24) + H + 24) % (H + 24) - 24;
+      const sz = 0.9 + (i % 4) * 0.5;
+      const sw = Math.sin(gT * 0.8 + si) * 6;
+      ctx.globalAlpha = 0.3 + (i % 3) * 0.18;
+      ctx.beginPath();
+      ctx.arc(sx + sw, sy, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // fine mist layer
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = 'rgba(210,230,255,1)';
+    ctx.fillRect(0, H * 0.44, W, H * 0.56);
+    ctx.restore();
+  }
+
+  if (biome === 'thunderplains') {
+    // Rain streaks — diagonal, fast
+    ctx.save();
+    ctx.strokeStyle = 'rgba(180,210,255,0.32)';
+    ctx.lineWidth = 1;
+    const rainSeed = Math.floor(gT * 40);
+    ctx.beginPath();
+    for (let i = 0; i < 70; i++) {
+      const rx = ((i * 89 + rainSeed * 13) % (W + 60)) - 30;
+      const ry = ((i * 61 + rainSeed * 9) % (H + 60)) - 30;
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx + 5, ry + 18);
+    }
+    ctx.stroke();
+    // puddle reflections on road surface
+    const { x0, x1 } = roadBounds();
+    ctx.globalAlpha = 0.12;
+    const pRad = ctx.createLinearGradient(x0, H * 0.75, x1, H);
+    pRad.addColorStop(0, 'rgba(140,190,255,0)');
+    pRad.addColorStop(0.5, 'rgba(140,190,255,1)');
+    pRad.addColorStop(1, 'rgba(140,190,255,0)');
+    ctx.fillStyle = pRad;
+    ctx.fillRect(x0, H * 0.75, x1 - x0, H * 0.25);
+    ctx.restore();
+  }
+
+  if (biome === 'neonruins' && Game.isNight) {
+    // Drifting neon embers — cyan and magenta dots float upward
+    ctx.save();
+    const emberSeed = Math.floor(gT * 12);
+    for (let i = 0; i < 28; i++) {
+      const ec = i % 3 === 0 ? [0, 220, 255] : i % 3 === 1 ? [255, 60, 200] : [120, 80, 255];
+      const ex = ((i * 173 + emberSeed * 17) % W);
+      const ey = (H + 20 - (gT * (30 + (i % 4) * 10) + i * 55) % (H + 40)) % (H + 40) - 20;
+      const er = 0.8 + (i % 3) * 0.6;
+      ctx.globalAlpha = 0.4 + 0.3 * Math.sin(gT * 3 + i);
+      ctx.fillStyle = `rgba(${ec[0]},${ec[1]},${ec[2]},1)`;
+      ctx.beginPath();
+      ctx.arc(ex, ey, er, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  if (biome === 'irradiated') {
+    // Toxic mist — rising green translucent wisps near the ground
+    ctx.save();
+    for (let i = 0; i < 5; i++) {
+      const wx = (i * W / 5 + Math.sin(gT * 0.4 + i * 1.2) * 20);
+      const wy = H * 0.72 + Math.sin(gT * 0.7 + i) * 8;
+      const wr = 30 + i * 14;
+      const mg = ctx.createRadialGradient(wx, wy, 0, wx, wy, wr);
+      mg.addColorStop(0, 'rgba(80,200,0,0.10)');
+      mg.addColorStop(1, 'rgba(30,120,0,0)');
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.ellipse(wx, wy, wr, wr * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // faint green tint on lower half
+    ctx.globalAlpha = 0.04;
+    ctx.fillStyle = 'rgba(60,180,0,1)';
+    ctx.fillRect(0, H * 0.6, W, H * 0.4);
+    ctx.restore();
   }
 }
 
@@ -7521,15 +7770,29 @@ function drawEnemy(e) {
     ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
   }
   ctx.restore();
+  // Damage smoke — emit from badly-damaged enemies
+  if (e.maxHp && e.hp < e.maxHp * 0.5 && Math.random() < 0.30) {
+    const smokeA = e.hp < e.maxHp * 0.25 ? 0.55 : 0.32;
+    Game.particles.push({
+      x: e.x + rand(-e.w * 0.3, e.w * 0.3), y: e.y - e.h * 0.3,
+      vx: rand(-12, 12), vy: rand(-30, -8),
+      life: 0.65, max: 0.65, size: 5 + rand(0, 4) | 0,
+      color: `rgba(120,100,80,${smokeA})`,
+    });
+    if (e.hp < e.maxHp * 0.25 && Math.random() < 0.25) {
+      Game.particles.push({
+        x: e.x + rand(-6, 6), y: e.y,
+        vx: rand(-20, 20), vy: rand(-40, -10),
+        life: 0.4, max: 0.4, size: 3,
+        color: 'rgba(255,140,30,0.75)',
+        shape: 'rect', rot: rand(0, Math.PI * 2),
+      });
+    }
+  }
 }
 
 function drawBike(e) {
   ctx.save();
-  ctx.translate(e.x, e.y);
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  ctx.fillRect(-e.w/2 + 2, -e.h/2 + 4, e.w, e.h);
-  // frame
   ctx.fillStyle = '#3a0a0a';
   ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
   // rider torso
@@ -7555,6 +7818,15 @@ function drawBike(e) {
     ctx.strokeRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
   }
   ctx.restore();
+  // Damage smoke for bikes
+  if (e.maxHp && e.hp < e.maxHp * 0.5 && Math.random() < 0.28) {
+    Game.particles.push({
+      x: e.x + rand(-5, 5), y: e.y - e.h * 0.2,
+      vx: rand(-15, 15), vy: rand(-25, -5),
+      life: 0.5, max: 0.5, size: 4,
+      color: 'rgba(110,90,70,0.45)',
+    });
+  }
 }
 
 function drawMortar(e) {
@@ -7729,10 +8001,58 @@ function drawTank(e) {
     ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
   }
   ctx.restore();
+  // Damage smoke for tanks — more dramatic given high HP
+  if (e.maxHp && e.hp < e.maxHp * 0.5 && Math.random() < 0.40) {
+    Game.particles.push({
+      x: e.x + rand(-e.w * 0.25, e.w * 0.25), y: e.y - e.h * 0.25,
+      vx: rand(-14, 14), vy: rand(-35, -8),
+      life: 0.75, max: 0.75, size: 6 + rand(0, 5) | 0,
+      color: `rgba(100,85,65,${e.hp < e.maxHp * 0.25 ? 0.62 : 0.38})`,
+    });
+    if (e.hp < e.maxHp * 0.25 && Math.random() < 0.35) {
+      Game.particles.push({
+        x: e.x + rand(-8, 8), y: e.y + rand(-e.h * 0.1, e.h * 0.1),
+        vx: rand(-25, 25), vy: rand(-45, -12),
+        life: 0.45, max: 0.45, size: 4, shape: 'rect', rot: rand(0, Math.PI * 2),
+        color: 'rgba(255,140,30,0.80)',
+      });
+    }
+  }
 }
 
 function drawBoss() {
   const b = Game.boss; if (!b) return;
+
+  // Boss ground aura — pulsing radial glow anchored at boss position
+  const auraT = (Game.t || 0);
+  const auraPulse = 0.55 + 0.45 * Math.sin(auraT * (b.enrage ? 9 : 4.5));
+  const auraColor = b.enrage ? '255,60,0' : '200,20,20';
+  const auraR = (b.w * 0.9 + b.h * 0.4) * (b.enrage ? 1.3 : 1.0);
+  function drawAura(bx, by) {
+    ctx.save();
+    const ag = ctx.createRadialGradient(bx, by + b.h * 0.3, 0, bx, by + b.h * 0.3, auraR);
+    ag.addColorStop(0, `rgba(${auraColor},${0.18 + 0.12 * auraPulse})`);
+    ag.addColorStop(0.5, `rgba(${auraColor},${0.06 + 0.06 * auraPulse})`);
+    ag.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = ag;
+    ctx.beginPath();
+    ctx.ellipse(bx, by + b.h * 0.3, auraR, auraR * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Enrage: expanding pulse rings
+    if (b.enrage) {
+      const ringPhase = (auraT * 2.8) % 1;
+      const ringR = auraR * 0.3 + ringPhase * auraR * 0.9;
+      ctx.globalAlpha = (1 - ringPhase) * 0.45;
+      ctx.strokeStyle = `rgba(${auraColor},1)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(bx, by + b.h * 0.3, ringR, ringR * 0.45, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
   // big version of enemy with extras
   function drawOne(x, y) {
     ctx.save();
@@ -7750,29 +8070,57 @@ function drawBoss() {
     ctx.fillStyle = '#1a0f08';
     ctx.fillRect(-b.w/2 - 6, -b.h/2 + 10, 6, b.h - 30);
     ctx.fillRect( b.w/2,     -b.h/2 + 10, 6, b.h - 30);
+    // hull highlights (battle-scarred panels)
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fillRect(-b.w/2 + 4, -b.h/2 + 4, b.w - 8, 6);
     // cab/turret
     ctx.fillStyle = '#1a0a0a';
     const cw = b.w * 0.5, ch = b.h * 0.4;
     ctx.fillRect(-cw/2, -ch/2, cw, ch);
-    // glowing eyes
+    // glowing eyes — brighter + animated pulse on enrage
+    const eyeGlow = b.enrage ? (0.7 + 0.3 * Math.sin(auraT * 12)) : 1;
+    ctx.globalAlpha = eyeGlow;
     ctx.fillStyle = b.enrage ? '#ffaa00' : '#ff3030';
     ctx.fillRect(-cw/2 + 6, -ch/2 + 8, cw/2 - 8, 4);
     ctx.fillRect(2, -ch/2 + 8, cw/2 - 8, 4);
-    // spikes
-    ctx.fillStyle = '#aa3030';
+    ctx.globalAlpha = 1;
+    // spikes — more on enrage
+    ctx.fillStyle = b.enrage ? '#ff4020' : '#aa3030';
     for (let i = -2; i <= 2; i++) {
-      ctx.fillRect(i * 14, b.h/2 - 4, 4, 10);
+      ctx.fillRect(i * 14, b.h/2 - 4, 4, b.enrage ? 13 : 10);
     }
-    // gun
+    // gun (double barrel when enraged)
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(-6, b.h/2 - 2, 12, 18);
+    if (b.enrage) {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(-12, b.h/2 - 2, 5, 14);
+      ctx.fillRect( 7, b.h/2 - 2, 5, 14);
+    }
     // glow accent
     if (b.enrage) {
-      ctx.fillStyle = 'rgba(255,80,80,0.3)';
+      ctx.fillStyle = `rgba(255,80,80,${0.22 + 0.14 * auraPulse})`;
       ctx.fillRect(-b.w/2 - 3, -b.h/2 - 3, b.w + 6, b.h + 6);
+    }
+    // damage smoke at low HP
+    if (b.hp < b.maxHp * 0.35 && Math.random() < 0.45) {
+      Game.particles.push({
+        x: x + rand(-b.w * 0.3, b.w * 0.3), y: y - b.h * 0.3,
+        vx: rand(-18, 18), vy: rand(-40, -10),
+        life: 0.8, max: 0.8, size: 8 + rand(0, 6) | 0,
+        color: 'rgba(100,80,60,0.55)',
+      });
+      if (Math.random() < 0.3) Game.particles.push({
+        x: x + rand(-10, 10), y,
+        vx: rand(-30, 30), vy: rand(-55, -15),
+        life: 0.5, max: 0.5, size: 5, shape: 'rect', rot: rand(0, Math.PI * 2),
+        color: 'rgba(255,120,20,0.85)',
+      });
     }
     ctx.restore();
   }
+  drawAura(b.x, b.y);
+  if (b.twin) drawAura(b.twinX, b.y);
   drawOne(b.x, b.y);
   if (b.twin) drawOne(b.twinX, b.y);
 }
@@ -7793,17 +8141,45 @@ function drawPickup(pk) {
     ctx.fill();
     ctx.fillStyle = '#a8731a';
     ctx.fillRect(-3, -3, 6, 6);
+    // orbiting sparkle dots
+    for (let oi = 0; oi < 3; oi++) {
+      const oa = pk.t * 3.5 + oi * Math.PI * 2 / 3;
+      const or = 14;
+      ctx.globalAlpha = 0.55 + 0.3 * Math.sin(pk.t * 5 + oi);
+      ctx.fillStyle = '#ffe07a';
+      ctx.beginPath(); ctx.arc(Math.cos(oa) * or, Math.sin(oa) * or, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
     ctx.restore();
   } else if (pk.kind === 'repair') {
-    ctx.fillStyle = 'rgba(122,240,122,0.2)';
-    ctx.beginPath(); ctx.arc(pk.x, pk.y + bob, 16, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#1a3a1a';
-    ctx.fillRect(pk.x - 11, pk.y + bob - 11, 22, 22);
+    // Brighter pulsing cross + orbiting green particles
+    const repPulse = 0.5 + 0.5 * Math.sin(pk.t * 5.5);
+    ctx.save();
+    ctx.translate(pk.x, pk.y + bob);
+    // pulsing outer aura
+    ctx.globalAlpha = 0.22 + 0.16 * repPulse;
     ctx.fillStyle = '#7af07a';
-    ctx.fillRect(pk.x - 9, pk.y + bob - 9, 18, 18);
+    ctx.beginPath(); ctx.arc(0, 0, 20 + repPulse * 4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // inner fill
     ctx.fillStyle = '#1a3a1a';
-    ctx.fillRect(pk.x - 2, pk.y + bob - 7, 4, 14);
-    ctx.fillRect(pk.x - 7, pk.y + bob - 2, 14, 4);
+    ctx.fillRect(-11, -11, 22, 22);
+    ctx.fillStyle = '#7af07a';
+    ctx.fillRect(-9, -9, 18, 18);
+    // cross
+    ctx.fillStyle = '#1a3a1a';
+    ctx.fillRect(-2, -7, 4, 14);
+    ctx.fillRect(-7, -2, 14, 4);
+    // orbiting heal particles
+    for (let hi = 0; hi < 4; hi++) {
+      const ha = pk.t * 2.8 + hi * Math.PI / 2;
+      const hr = 16 + repPulse * 2;
+      ctx.globalAlpha = 0.5 + 0.3 * Math.sin(pk.t * 4 + hi);
+      ctx.fillStyle = '#7af07a';
+      ctx.beginPath(); ctx.arc(Math.cos(ha) * hr, Math.sin(ha) * hr, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   } else if (pk.kind === 'cache') {
     ctx.save();
     ctx.translate(pk.x, pk.y + bob);
@@ -7995,9 +8371,20 @@ function drawParticles() {
     const a = Math.max(0, pr.life / pr.max);
     ctx.globalAlpha = a;
     ctx.fillStyle = pr.color;
-    ctx.beginPath();
-    ctx.arc(pr.x, pr.y, pr.size / 2, 0, Math.PI * 2);
-    ctx.fill();
+    if (pr.shape === 'rect') {
+      // Rectangular spark/debris particle — rotates as it flies
+      const rot = (pr.rot || 0) + (pr.vx || 0) * (pr.max - pr.life) * 0.04;
+      ctx.save();
+      ctx.translate(pr.x, pr.y);
+      ctx.rotate(rot);
+      const rw = pr.size * 0.6, rh = pr.size * 0.25;
+      ctx.fillRect(-rw/2, -rh/2, rw, rh);
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, pr.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -8338,6 +8725,25 @@ function drawHUD() {
     const glowA = 0.28 + 0.28 * Math.sin(Game.t * 8);
     ctx.fillStyle = `rgba(255,50,50,${glowA})`;
     ctx.fillRect(hbX - 4, hbY - 4, hbW + 8, hbH + 8);
+    // Critical edge vignette — red border around the whole screen
+    ctx.save();
+    const edgeA = 0.18 + 0.18 * Math.sin(Game.t * 8);
+    const el = ctx.createLinearGradient(0, 0, W * 0.12, 0);
+    el.addColorStop(0, `rgba(200,20,20,${edgeA})`);
+    el.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = el;
+    ctx.fillRect(0, 0, W * 0.12, H);
+    const er = ctx.createLinearGradient(W - W * 0.12, 0, W, 0);
+    er.addColorStop(0, 'rgba(0,0,0,0)');
+    er.addColorStop(1, `rgba(200,20,20,${edgeA})`);
+    ctx.fillStyle = er;
+    ctx.fillRect(W - W * 0.12, 0, W * 0.12, H);
+    const eb = ctx.createLinearGradient(0, H - H * 0.12, 0, H);
+    eb.addColorStop(0, 'rgba(0,0,0,0)');
+    eb.addColorStop(1, `rgba(200,20,20,${edgeA})`);
+    ctx.fillStyle = eb;
+    ctx.fillRect(0, H - H * 0.12, W, H * 0.12);
+    ctx.restore();
   }
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(hbX - 2, hbY - 2, hbW + 4, hbH + 4);
@@ -8361,6 +8767,12 @@ function drawHUD() {
     ctx.fillStyle = '#1a0a0a';
     ctx.fillRect(bbX, bbY, bbW, bbH);
     const bpct = clamp(Game.boss.hp / Game.boss.maxHp, 0, 1);
+    // Boss bar pulsing glow on enrage
+    if (Game.boss.enrage) {
+      const bPulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 9);
+      ctx.fillStyle = `rgba(255,60,60,${0.18 + 0.14 * bPulse})`;
+      ctx.fillRect(bbX - 5, bbY - 5, bbW + 10, bbH + 10);
+    }
     ctx.fillStyle = Game.boss.enrage ? '#ff5050' : '#aa1a3a';
     ctx.fillRect(bbX, bbY, bbW * bpct, bbH);
     ctx.strokeStyle = '#ff5050'; ctx.strokeRect(bbX, bbY, bbW, bbH);
@@ -8611,19 +9023,26 @@ function drawLoadingOverlay() {
 
 function drawBossWarning() {
   if (Game.bossWarning <= 0 || !Game.boss) return;
-  const t = Game.bossWarning;
+  const t = activeBiomeTheme();
   const pulse = 0.5 + Math.sin(Game.animT * 14) * 0.5;
-  // red flash bands
+  // Biome-accent color for the warning bands instead of always red
+  const biome = Game.biome || 'wastes';
+  const warnColor = biome === 'neonruins' ? '0,200,255'
+    : biome === 'irradiated' ? '120,220,0'
+    : biome === 'thunderplains' ? '140,180,255'
+    : biome === 'frostwaste' ? '200,230,255'
+    : biome === 'scraparch' ? '255,190,50'
+    : '255,42,42';
   ctx.save();
   ctx.globalAlpha = 0.15 + pulse * 0.15;
-  ctx.fillStyle = '#ff2a2a';
+  ctx.fillStyle = `rgba(${warnColor},1)`;
   ctx.fillRect(0, H * 0.35, W, 4);
   ctx.fillRect(0, H * 0.55, W, 4);
   ctx.globalAlpha = 0.6 + pulse * 0.4;
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, H * 0.39, W, H * 0.16);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ff5050';
+  ctx.fillStyle = `rgba(${warnColor},1)`;
   ctx.font = `bold ${W < 500 ? 22 : 30}px "Courier New", monospace`;
   ctx.fillText('▲ WARNING ▲', W/2, H * 0.44);
   ctx.font = `bold ${W < 500 ? 14 : 18}px "Courier New", monospace`;
@@ -8659,6 +9078,13 @@ function drawVictoryOverlay() {
   ctx.fillStyle = '#f5d76e';
   ctx.fillText(seq.kind === 'boss' ? 'BOSS DOWN' : 'OBJECTIVE COMPLETE', W/2, H * 0.50);
   ctx.restore();
+  // Star burst particles — emit on the first few frames
+  if (seq.t < 0.5 && Math.random() < 0.6) {
+    const sx = W * 0.5 + rand(-W * 0.3, W * 0.3);
+    const sy = H * 0.42 + rand(-H * 0.1, H * 0.1);
+    emit(sx, sy, 3, { color: '#ffe07a', speed: 220, life: 0.7, size: 4, spread: Math.PI * 2 });
+    emit(sx, sy, 2, { color: '#7af07a', speed: 180, life: 0.6, size: 3, spread: Math.PI * 2 });
+  }
 }
 
 function drawDeathOverlay() {
@@ -8676,14 +9102,35 @@ function drawDeathOverlay() {
     const ta = (k - 0.5) / 0.5;
     ctx.globalAlpha = ta;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const sz = W < 500 ? 36 : 52;
+    // text scale-in effect
+    const tScale = 0.7 + ta * 0.3;
+    const sz = (W < 500 ? 36 : 52) * tScale;
     ctx.font = `bold ${sz}px "Courier New", monospace`;
     ctx.fillStyle = '#1a0f08';
     ctx.fillText('WRECKED', W/2 + 3, H * 0.45 + 3);
     ctx.fillStyle = '#ff5050';
     ctx.fillText('WRECKED', W/2, H * 0.45);
+    // sub message
+    ctx.font = `bold ${W < 500 ? 11 : 14}px "Courier New", monospace`;
+    ctx.globalAlpha = ta * 0.8;
+    ctx.fillStyle = '#ffb36a';
+    ctx.fillText('RUN ENDED', W/2, H * 0.53);
   }
   ctx.restore();
+  // Debris particles on early death frames
+  if (ds.t < 0.6 && Math.random() < 0.55) {
+    const bx = Game.wreck ? Game.wreck.x : W * 0.5;
+    const by = Game.wreck ? Game.wreck.y : H * 0.75;
+    emit(bx + rand(-20, 20), by + rand(-10, 10), 2, {
+      color: '#ff8a3d', speed: 160, life: 0.7, size: 4, spread: Math.PI * 2,
+    });
+    Game.particles.push({
+      x: bx + rand(-18, 18), y: by + rand(-8, 8),
+      vx: rand(-60, 60), vy: rand(-80, -20),
+      life: 0.6, max: 0.6, size: 5, shape: 'rect', rot: rand(0, Math.PI * 2),
+      color: 'rgba(90,60,30,0.75)',
+    });
+  }
 }
 
 function render() {
