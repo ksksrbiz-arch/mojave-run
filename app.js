@@ -7622,7 +7622,7 @@ const BIGWHEEL_SPOKE = '#f6fbff';
 function visualQualityLevel() {
   const q = (Settings.visualQuality || 'high');
   let base = q === 'low' ? 0 : q === 'medium' ? 1 : 2;
-  const perfQ = (typeof PerfMon !== 'undefined') ? PerfMon.quality : 1;
+  const perfQ = PerfMon.quality;
   if (perfQ < 0.22) base = 0;
   else if (perfQ < 0.5) base = Math.min(base, 1);
   return base;
@@ -12891,11 +12891,11 @@ function buildPlatformScreen() {
   const replays = Replay.list();
   const clanTag  = Clan.getTag()  || '';
   const clanName = Clan.getName() || '';
-  const pushAvailable = !!(typeof PushService !== 'undefined' && PushService.isAvailable);
+  const pushAvailable = !!PushService.isAvailable;
   const pushEnabled = !!(pushAvailable && PushService.permissionGranted);
-  const iapAvailable = !!(typeof IAPService !== 'undefined' && IAPService.isAvailable);
-  const products = (iapAvailable && IAPService.PRODUCTS) ? IAPService.PRODUCTS : [];
-  const splitActive = !!(typeof SplitScreen !== 'undefined' && typeof SplitScreen.isActive === 'function' && SplitScreen.isActive());
+  const iapAvailable = !!IAPService.isAvailable;
+  const products = iapAvailable ? IAPService.PRODUCTS : [];
+  const splitActive = SplitScreen.isActive();
   const cloudConnected = !!(localStorage.getItem(CLOUD_ID_KEY) && localStorage.getItem(CLOUD_TOKEN_KEY));
 
   return `
@@ -14032,7 +14032,7 @@ const Cinematic = (function () {
     // Hard gate: feature flag off OR very low quality kills cinematic FX so
     // the perf governor can fully relieve weak devices.
     if (!Settings.cinematic) return false;
-    if (typeof PerfMon !== 'undefined' && PerfMon.quality < 0.2) return false;
+    if (PerfMon.quality < 0.2) return false;
     return true;
   }
 
@@ -14040,7 +14040,7 @@ const Cinematic = (function () {
   // ~0 at LOW. Lets each layer cheap-out gracefully.
   function intensity() {
     if (!isOn()) return 0;
-    const q = (typeof PerfMon !== 'undefined') ? PerfMon.quality : 1;
+    const q = PerfMon.quality;
     return Math.max(0, Math.min(1, q));
   }
 
@@ -15620,12 +15620,8 @@ UI.act = function(action, data) {
   if (action === 'platform-sync-now') {
     SFX.click();
     try {
-      if (typeof cloudAutoSync === 'function') {
-        cloudAutoSync();
-        UI.toast('CLOUD SYNC QUEUED');
-      } else {
-        UI.toast('CLOUD SYNC UNAVAILABLE');
-      }
+      cloudAutoSync();
+      UI.toast('CLOUD SYNC QUEUED');
     } catch (_) {
       UI.toast('CLOUD SYNC FAILED');
     }
@@ -15633,7 +15629,7 @@ UI.act = function(action, data) {
   }
   if (action === 'push-enable') {
     SFX.click();
-    if (typeof PushService !== 'undefined' && PushService && typeof PushService.requestPermission === 'function') {
+    if (typeof PushService.requestPermission === 'function') {
       PushService.requestPermission().then(ok => {
         UI.toast(ok ? 'PUSH NOTIFICATIONS ENABLED' : 'PUSH PERMISSION DENIED');
       });
@@ -16242,11 +16238,10 @@ if (_origFrame) {
 const _origBoot = boot;
 boot = function() {
   _origBoot();
-  PlatformServices.initLifecycle();
   PlatformServices.syncAllAchievements();
   PlatformCompliance.initSuspendResume();
   ConsoleInput.assignGamepads();
-  if (typeof startCloudAutoSync === 'function') startCloudAutoSync();
+  startCloudAutoSync();
 };
 
 // ============================================================
