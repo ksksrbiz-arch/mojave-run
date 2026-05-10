@@ -13156,17 +13156,19 @@ function startVersusMode() {
 function _doVersusJoin() {
   const profile = Profile.active();
   const name = profile ? profile.name : 'DRIVER';
-  const room = prompt('ENTER VERSUS ROOM CODE:', 'ARENA') || 'ARENA';
   Versus.active = false;
   Versus.ended = false;
   Versus.endData = null;
   Versus.state = null;
   Versus.countdown = 0;
   Versus.countdownActive = false;
-  MP.vsJoin(room.toUpperCase().slice(0, 12), name);
-  UI.toast('WAITING FOR OPPONENT…');
-  UI.hideAllScreens();
-  Game.state = 'versus-lobby';
+  UI.prompt('ENTER VERSUS ROOM CODE', function(room) {
+    const code = (room || 'ARENA').toUpperCase().slice(0, 12);
+    MP.vsJoin(code, name);
+    UI.toast('WAITING FOR OPPONENT…');
+    UI.hideAllScreens();
+    Game.state = 'versus-lobby';
+  });
 }
 
 // Wire up MP versus events

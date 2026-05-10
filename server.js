@@ -472,11 +472,22 @@ wss.on('connection', (ws, req) => {
         vsLobbies.set(room, lobby);
         send(ws, { type: 'vs-waiting', slot: 0, room });
       } else if (!lobby.slot1 && lobby.slot0.ws !== ws) {
-        lobby.slot1 = { ws, peer };
-        send(ws, { type: 'vs-waiting', slot: 1, room });
-        // Both players present — start the match
-        vsCreateMatch(lobby, room);
-        vsLobbies.delete(room);
+        // Prevent same peer from joining if they're already in another versus lobby
+        let alreadyInLobby = false;
+        for (const [, lb] of vsLobbies) {
+          if ((lb.slot0 && lb.slot0.ws === ws) || (lb.slot1 && lb.slot1.ws === ws)) {
+            alreadyInLobby = true; break;
+          }
+        }
+        if (alreadyInLobby) {
+          send(ws, { type: 'vs-full', room });
+        } else {
+          lobby.slot1 = { ws, peer };
+          send(ws, { type: 'vs-waiting', slot: 1, room });
+          // Both players present — start the match
+          vsCreateMatch(lobby, room);
+          vsLobbies.delete(room);
+        }
       } else {
         send(ws, { type: 'vs-full', room });
       }
