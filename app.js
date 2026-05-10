@@ -12894,8 +12894,8 @@ function buildPlatformScreen() {
   const pushAvailable = !!PushService.isAvailable;
   const pushEnabled = !!(pushAvailable && PushService.permissionGranted);
   const iapAvailable = !!IAPService.isAvailable;
-  const products = iapAvailable ? IAPService.PRODUCTS : [];
-  const splitActive = SplitScreen.isActive();
+  const products = (iapAvailable && IAPService.PRODUCTS) ? IAPService.PRODUCTS : [];
+  const splitActive = !!SplitScreen.isActive();
   const cloudConnected = !!(localStorage.getItem(CLOUD_ID_KEY) && localStorage.getItem(CLOUD_TOKEN_KEY));
 
   return `
