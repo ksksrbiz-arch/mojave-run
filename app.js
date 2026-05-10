@@ -11414,6 +11414,7 @@ function frame(now) {
   last = now;
   const frameStart = now;
   try {
+    if (Game.state !== 'playing') GamepadInput.poll();
     if (Game.state === 'playing' || Game.state === 'loading'
         || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
       update(dt);
@@ -14990,7 +14991,11 @@ const ConsoleInput = {
 
   getPlayerPad(playerIndex) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const idx = this.playerPads[playerIndex];
+    let idx = this.playerPads[playerIndex];
+    if (idx === null || !pads[idx] || !pads[idx].connected) {
+      this.assignGamepads();
+      idx = this.playerPads[playerIndex];
+    }
     return (idx !== null && pads[idx]) ? pads[idx] : null;
   },
 
