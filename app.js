@@ -2306,6 +2306,10 @@ const Profile = {
         if (!p.v23Counters || typeof p.v23Counters !== 'object') { p.v23Counters = {}; dirty = true; }
         if (!p.weeklyStreak || typeof p.weeklyStreak !== 'object') { p.weeklyStreak = { count:0, lastClaimed:null }; dirty = true; }
         if (!('wastelandPass' in p)) { p.wastelandPass = false; dirty = true; }
+        // === STRATEGY v3.1: retention & progression fields ===
+        if (!('lastLoginDate' in p)) { p.lastLoginDate = null; dirty = true; }
+        if (typeof p.loginStreak !== 'number') { p.loginStreak = 0; dirty = true; }
+        if (!Array.isArray(p.milestonesClaimed)) { p.milestonesClaimed = []; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2379,6 +2383,10 @@ const Profile = {
       v23Counters: {},             // granular V3 counters (spec kills, active ability uses, etc.)
       weeklyStreak: { count:0, lastClaimed:null },
       wastelandPass: false,        // optional cosmetic-only pass flag (web honor-system fallback)
+      // === STRATEGY v3.1: retention & progression fields ===
+      lastLoginDate: null,         // ISO date string (YYYY-MM-DD) of last login for streak tracking
+      loginStreak: 0,              // consecutive daily login count
+      milestonesClaimed: [],       // run-count milestones already rewarded (e.g. [10, 25, 50])
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -2573,6 +2581,17 @@ const Profile = {
       }
     }
     this.save();
+    // === STRATEGY v3.1: Milestone rewards ===
+    if (typeof MILESTONE_DEFS !== 'undefined') {
+      p.milestonesClaimed = p.milestonesClaimed || [];
+      for (const m of MILESTONE_DEFS) {
+        if (p.runs >= m.runs && !p.milestonesClaimed.includes(m.runs)) {
+          p.milestonesClaimed.push(m.runs);
+          Profile.earn(m.scrap);
+          Game._pendingMilestone = m;
+        }
+      }
+    }
     // === PLATFORM FEATURES: weekly challenge check (deferred until systems loaded) ===
     if (typeof checkWeeklyChallenge === 'function') {
       const wc = checkWeeklyChallenge(result);
@@ -4739,11 +4758,25 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   // award scrap (10% of score)
   const activeProfile = Profile.active();
   const previousRuns = activeProfile ? (activeProfile.runs || 0) : 0;
+  // === STRATEGY v3.1: capture personal best before recording for NEW RECORD detection ===
+  const _prevBestClassic  = activeProfile ? (activeProfile.bestClassic || 0) : 0;
+  const _prevBestWinding  = activeProfile ? (activeProfile.bestWinding || 0) : 0;
+  const _prevBestTime     = activeProfile ? (activeProfile.bestTime || 0) : 0;
+  const _prevBestBossRush = activeProfile ? (activeProfile.bestBossRush || 0) : 0;
+  const _prevBestZombie   = activeProfile ? (activeProfile.bestZombie || 0) : 0;
+  const _prevBestIronThrone = activeProfile ? (activeProfile.bestIronThrone || 0) : 0;
+  const _prevBestWasteland  = activeProfile ? (activeProfile.bestWastelandRun || 0) : 0;
+  Game._pendingMilestone = null;
+  Game._newPersonalBest = false;
   const baseScrap = Math.floor((Game.score / 10) * Game.scrapMul);
   let bonus = 0;
   if (reason === 'victory' && Game.levelData) bonus = Game.levelData.reward;
   if (reason === 'victory' && Game.mode === 'bossrush') {
     bonus += BOSS_RUSH_REWARD_BASE + Math.min(Game.bossRushStage, BOSS_RUSH_STAGES.length) * BOSS_RUSH_REWARD_PER_STAGE;
+  }
+  // === STRATEGY v3.1: mode-based victory bonus for structured modes ===
+  if (reason === 'victory' && MODE_VICTORY_BONUS_MULT[Game.mode]) {
+    bonus += Math.floor(baseScrap * MODE_VICTORY_BONUS_MULT[Game.mode]);
   }
   let bonusScrap = 0;
   if (previousRuns < EARLY_RUN_SCRAP_BONUS.length) bonusScrap += EARLY_RUN_SCRAP_BONUS[previousRuns];
@@ -4778,6 +4811,20 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
   };
   Profile.recordRunResult(runResult);
+  // === STRATEGY v3.1: detect new personal best after recording ===
+  const currentProfile = Profile.active();
+  if (currentProfile) {
+    const s = Math.floor(Game.score);
+    if ((Game.mode === 'classic'      && s > _prevBestClassic)   ||
+        (Game.mode === 'winding'      && s > _prevBestWinding)   ||
+        (Game.mode === 'timeattack'   && s > _prevBestTime)      ||
+        (Game.mode === 'bossrush'     && s > _prevBestBossRush)  ||
+        (Game.mode === 'zombie'       && s > _prevBestZombie)    ||
+        (Game.mode === 'ironthrone'   && s > _prevBestIronThrone)||
+        (Game.mode === 'wastelandrun' && s > _prevBestWasteland)) {
+      Game._newPersonalBest = true;
+    }
+  }
   // check achievements earned this run; also grant mastery vehicle if newly unlocked
   const _masteryWasUnlocked = !!(Profile.active() && Profile.active().ownedVehicles['warlordking']);
   Game._pendingBadges = Profile.checkAchievements();
@@ -9567,6 +9614,30 @@ const EARLY_RUN_SCRAP_BONUS = [280, 240, 200, 160, 120];
 const DAILY_SCRAP_BONUS = 150;
 const DAILY_VICTORY_SCRAP_BONUS = 300;
 
+// === STRATEGY v3.1: Run milestone rewards ===
+// Players who reach these run counts get a one-time bonus scrap deposit.
+const MILESTONE_DEFS = [
+  { runs:  10, scrap:  500, label: '10 RUNS',  icon: '🏁' },
+  { runs:  25, scrap:  900, label: '25 RUNS',  icon: '🔥' },
+  { runs:  50, scrap: 1500, label: '50 RUNS',  icon: '💀' },
+  { runs: 100, scrap: 2500, label: '100 RUNS', icon: '⚡' },
+  { runs: 250, scrap: 5000, label: '250 RUNS', icon: '☢' },
+  { runs: 500, scrap:10000, label: '500 RUNS', icon: '👑' },
+];
+
+// === STRATEGY v3.1: Mode victory scrap bonus multipliers ===
+// Structured modes (gauntlet, campaign, iron throne) award an extra fraction of
+// base scrap on victory to differentiate them from endless grind modes.
+const MODE_VICTORY_BONUS_MULT = {
+  gauntlet:   0.20,
+  campaign:   0.15,
+  ironthrone: 0.25,
+};
+
+// === STRATEGY v3.1: Login streak catch-up ===
+const LOGIN_STREAK_CATCH_UP_PER_DAY = 100; // scrap per absent day
+const LOGIN_STREAK_CATCH_UP_CAP = 1000;    // maximum catch-up grant
+
 function toDisplayWords(id) {
   return String(id || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toUpperCase();
 }
@@ -10227,6 +10298,8 @@ const UI = {
   showMenu() {
     const p = Profile.active();
     if (!p) return UI.showProfiles();
+    // === STRATEGY v3.1: login streak + catch-up check on every menu visit ===
+    if (typeof checkLoginStreak === 'function') checkLoginStreak();
     const ch = Profile.character();
     document.getElementById('menu-name').textContent = p.name;
     document.getElementById('menu-ctitle').textContent = ch ? ch.title : '';
@@ -10715,6 +10788,8 @@ const UI = {
     })();
     rows.push(['BEST MOMENT', bestMoment, false]);
     if (Game.scrapBonusEarned > 0) rows.push(['BONUS SALVAGE', '+' + Game.scrapBonusEarned, false]);
+    // === STRATEGY v3.1: personal best detection display ===
+    if (Game._newPersonalBest) rows.push(['★ NEW RECORD', 'PERSONAL BEST', false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
 
     document.getElementById('res-rows').innerHTML = rows.map(([l,v,big]) =>
@@ -10797,8 +10872,12 @@ const UI = {
     if (badgesEl) {
       const nb = Game._pendingBadges || [];
       const nc = Game._pendingCosmetics || [];
-      if (nb.length || nc.length) {
+      const nm = Game._pendingMilestone || null;
+      if (nb.length || nc.length || nm) {
         badgesEl.style.display = '';
+        const milestoneHtml = nm
+          ? `<div class="res-badge-title">MILESTONE REACHED</div><div class="res-badge-item"><span class="res-badge-icon">${nm.icon}</span><div><div class="res-badge-name">${escapeHtml(nm.label)} SURVIVOR</div><div class="res-badge-desc">+${nm.scrap} SCRAP BONUS DEPOSITED</div></div></div>`
+          : '';
         const badgeHtml = nb.length ? '<div class="res-badge-title">BADGE' + (nb.length > 1 ? 'S' : '') + ' EARNED</div>' +
           nb.map(a =>
             `<div class="res-badge-item"><span class="res-badge-icon">${a.icon}</span><div><div class="res-badge-name">${escapeHtml(a.name)}</div><div class="res-badge-desc">${escapeHtml(a.desc)}</div></div></div>`
@@ -10807,12 +10886,13 @@ const UI = {
           nc.map(c =>
             `<div class="res-badge-item"><span class="res-badge-icon">✦</span><div><div class="res-badge-name">${escapeHtml(c.name)}</div><div class="res-badge-desc">${escapeHtml(COSMETIC_LABELS[c.category] || 'COSMETIC')}</div></div></div>`
           ).join('') : '';
-        badgesEl.innerHTML = badgeHtml + cosmeticHtml;
+        badgesEl.innerHTML = milestoneHtml + badgeHtml + cosmeticHtml;
       } else {
         badgesEl.style.display = 'none';
       }
       Game._pendingBadges = [];
       Game._pendingCosmetics = [];
+      Game._pendingMilestone = null;
     }
 
     Game.lastResultsSnapshot = snapshotResultsState(reason);
@@ -10833,6 +10913,19 @@ const UI = {
     titleEl.textContent = isGlobal ? 'GLOBAL LEADERBOARD' : (MODES.find(m => m.id === modeId) || { name: 'GLOBAL' }).name;
     el.innerHTML = '<div class="small center" style="padding:14px">LOADING...</div>';
     this.show('scoreboard');
+    // === STRATEGY v3.1: personal best context header ===
+    const _p = Profile.active();
+    const _modeLocalBest = (() => {
+      if (!_p || isGlobal) return 0;
+      if (modeId === 'classic')      return _p.bestClassic  || 0;
+      if (modeId === 'winding')      return _p.bestWinding  || 0;
+      if (modeId === 'timeattack')   return _p.bestTime     || 0;
+      if (modeId === 'bossrush')     return _p.bestBossRush || 0;
+      if (modeId === 'zombie')       return _p.bestZombie   || 0;
+      if (modeId === 'ironthrone')   return _p.bestIronThrone || 0;
+      if (modeId === 'wastelandrun') return _p.bestWastelandRun || 0;
+      return 0;
+    })();
     const url = isGlobal
       ? (window.RENDER_API || '') + '/api/leaderboards?limit=25'
       : (window.RENDER_API || '') + '/api/scores?mode=' + encodeURIComponent(modeId);
@@ -10846,7 +10939,11 @@ const UI = {
         }
         const modeNames = Object.create(null);
         MODES.forEach(m => { modeNames[m.id] = m.name; });
-        el.innerHTML = rows.map((s, i) => {
+        // Personal best header row (per-mode only)
+        const pbHeader = (!isGlobal && _p && _modeLocalBest > 0)
+          ? `<div class="res-row" style="border-color:var(--accent);margin-bottom:6px"><div class="lbl" style="color:var(--accent)">★ YOUR BEST</div><div class="val" style="color:var(--accent)">${_modeLocalBest.toLocaleString()}</div></div>`
+          : '';
+        el.innerHTML = pbHeader + rows.map((s, i) => {
           const modeLabel = modeNames[s.mode] || (s.mode || 'CLASSIC').toUpperCase();
           return (
           `<div class="res-row${i === 0 ? ' big' : ''}">
@@ -15251,6 +15348,63 @@ const GamepadInput = {
 
 // ============================================================
 // === END v2.3 GAME EXPANSION ENHANCEMENTS ===
+// ============================================================
+
+// ============================================================
+// === STRATEGY v3.1: LOGIN STREAK & CATCH-UP MECHANIC ===
+// Track consecutive daily logins. Returning players who missed days
+// receive a scrap catch-up grant proportional to their absence.
+// ============================================================
+
+function todayDateString() {
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+// Returns the difference in calendar days between two YYYY-MM-DD strings.
+function daysBetween(a, b) {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  return Math.round((new Date(b) - new Date(a)) / MS_PER_DAY);
+}
+
+// Called once per showMenu() invocation. Updates login streak, awards catch-up
+// scrap for returning players, and shows a toast with the outcome.
+function checkLoginStreak() {
+  const p = Profile.active();
+  if (!p) return;
+  p.lastLoginDate    = p.lastLoginDate    || null;
+  p.loginStreak      = typeof p.loginStreak === 'number' ? p.loginStreak : 0;
+  p.milestonesClaimed = Array.isArray(p.milestonesClaimed) ? p.milestonesClaimed : [];
+  const today = todayDateString();
+  if (p.lastLoginDate === today) return; // already processed today
+  if (!p.lastLoginDate) {
+    // First-ever login record
+    p.lastLoginDate = today;
+    p.loginStreak   = 1;
+    Profile.save();
+    return;
+  }
+  const gap = daysBetween(p.lastLoginDate, today);
+  if (gap === 1) {
+    // Consecutive day — extend streak
+    p.loginStreak += 1;
+    p.lastLoginDate = today;
+    Profile.save();
+    if (p.loginStreak > 1) UI.toast('🔥 ' + p.loginStreak + '-DAY STREAK — KEEP IT UP!', 2200);
+  } else {
+    // Returning after a gap — award catch-up scrap and reset streak
+    const catchUp = Math.min(gap * LOGIN_STREAK_CATCH_UP_PER_DAY, LOGIN_STREAK_CATCH_UP_CAP);
+    p.loginStreak   = 1;
+    p.lastLoginDate = today;
+    Profile.earn(catchUp);
+    Profile.save();
+    UI.toast('WELCOME BACK! +' + catchUp + ' SALVAGE DEPOSITED', 2600);
+  }
+}
+// ============================================================
+// === END STRATEGY v3.1: LOGIN STREAK & CATCH-UP ===
 // ============================================================
 
 // ============================================================
