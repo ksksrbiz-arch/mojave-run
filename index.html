@@ -855,6 +855,24 @@
     border: 1px solid var(--gold-faint); border-radius: 4px; cursor: pointer;
   }
   body.photo-mode-on #photo-capture-btn { display: block; }
+  /* SW update toast */
+  #sw-update-toast{
+    position:fixed;top:calc(12px + var(--safe-t));left:50%;
+    transform:translateX(-50%) translateY(-200%);
+    z-index:9999;
+    background:var(--bg-3);
+    border:1px solid var(--gold);
+    color:var(--gold);
+    font-family:'Courier New',ui-monospace,monospace;
+    font-size:13px;letter-spacing:.06em;
+    padding:9px 18px;border-radius:4px;
+    cursor:pointer;white-space:nowrap;
+    box-shadow:0 4px 24px rgba(0,0,0,.65), inset 0 1px 0 rgba(245,215,110,.12);
+    transition:transform .38s cubic-bezier(.22,1,.36,1);
+    pointer-events:none;
+  }
+  #sw-update-toast.show{transform:translateX(-50%) translateY(0);pointer-events:auto;}
+  #sw-update-toast:focus-visible{outline:2px solid var(--gold);outline-offset:3px;}
 </style>
 
 <!-- SVG color-blind filter definitions (zero render cost when unused) -->
@@ -1362,14 +1380,32 @@
 <script>window.RENDER_API = 'https://mojave-run-lw3g.onrender.com';</script>
 <script src="/mp.js"></script>
 <script src="/app.js"></script>
+<div id="sw-update-toast" role="status" aria-live="polite" tabindex="0" aria-label="New version available – tap or press Enter to refresh">⚡ Update ready — tap to refresh</div>
 <script>
   // Service worker — enables offline play and faster repeat loads.
   // Registered on 'load' so it doesn't block the first paint. Failure is
   // non-fatal: the game still works, just without offline support.
+  //
+  // When a new SW version is found, the SW activates immediately (skipWaiting),
+  // which fires 'controllerchange'. We show a toast so the player knows to
+  // reload and pick up the already-cached new assets — no full re-download.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        // Only show the toast for returning users who already had a SW
+        // (i.e. this is an update, not first install).
+        if (!navigator.serviceWorker.controller) return;
+        navigator.serviceWorker.addEventListener('controllerchange', showSwUpdateToast);
+      }).catch(() => {});
     });
+  }
+  function showSwUpdateToast() {
+    const toast = document.getElementById('sw-update-toast');
+    if (!toast) return;
+    toast.classList.add('show');
+    function doReload() { toast.classList.remove('show'); location.reload(); }
+    toast.addEventListener('click', doReload, { once: true });
+    toast.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doReload(); } }, { once: true });
   }
 </script>
 </body>
