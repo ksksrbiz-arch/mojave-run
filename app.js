@@ -14228,7 +14228,7 @@ const VS_ENEMY_RENDER_VEHICLE = {
   base: { maxHp: 2, maxV: 640 },
 };
 function vsHealthRatio(p) {
-  return clamp((p && p.hp || 0) / Math.max(1, (p && p.maxHp) || VS_MAX_HP), 0, 1);
+  return clamp((p?.hp ?? 0) / Math.max(1, p?.maxHp ?? VS_MAX_HP), 0, 1);
 }
 
 const Versus = {
@@ -14489,7 +14489,7 @@ function renderVersus() {
       });
 
       // Name tag
-      const name = isMe ? 'YOU' : ((p.name || Versus.opponent || 'OPP').toUpperCase());
+      const name = isMe ? 'YOU' : (p.name || Versus.opponent || 'OPP').toUpperCase();
       ctx.font = 'bold 11px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
