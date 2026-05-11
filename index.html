@@ -736,9 +736,17 @@
   .story-text{font-size:13px;letter-spacing:1px;color:var(--gold-dim);line-height:1.7;max-width:340px;margin:0 auto;text-align:center;opacity:0;animation:story-rise .68s .42s cubic-bezier(.2,.8,.3,1) forwards}
   .story-sk-line{font-size:12px;font-weight:bold;letter-spacing:2px;margin-top:14px;text-align:center;color:var(--good);opacity:0;animation:story-rise .68s .58s cubic-bezier(.2,.8,.3,1) forwards}
   .story-tap-hint{margin-top:28px;opacity:.45;letter-spacing:1.5px;animation:li-hint 2.2s .8s ease-in-out infinite}
+  #screen-story[data-story-theme="boss"] .story-title{color:#ff9f73;animation:story-rise .68s .26s cubic-bezier(.2,.8,.3,1) forwards,story-flicker 2.8s 1.1s ease-in-out infinite}
+  #screen-story[data-story-theme="horde"] .story-title{color:#b6ff8d}
+  #screen-story[data-story-theme="zombie"] .story-title{color:#bce981}
+  #screen-story[data-story-theme="sidekick"] .story-sk-line{color:#7ad8ff}
+  #screen-story[data-story-theme="boss"]::before{filter:saturate(1.22) brightness(1.08)}
+  #screen-story[data-story-theme="zombie"]::before{filter:hue-rotate(35deg) saturate(1.1) brightness(.95)}
+  #screen-story[data-story-theme="horde"]::before{filter:saturate(1.16)}
   @keyframes story-rise{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
   @keyframes story-bg-pulse{0%,100%{filter:saturate(.95) brightness(.94)}50%{filter:saturate(1.12) brightness(1.04)}}
   @keyframes story-scan{0%{background-position:0 0,0 0}100%{background-position:0 18px,130px 0}}
+  @keyframes story-flicker{0%,100%{text-shadow:0 0 14px rgba(255,110,70,.28)}50%{text-shadow:0 0 24px rgba(255,110,70,.62)}}
 
   /* LOCATION INTRO CINEMATIC */
   #screen-loc-intro{background:#000 !important;backdrop-filter:none;-webkit-backdrop-filter:none}
@@ -761,6 +769,9 @@
   .loc-intro-divider{width:72px;height:1px;background:var(--gold-faint);margin-bottom:22px;transform:scaleX(0);animation:li-line 0.5s 1.1s ease-out forwards}
   .loc-intro-text{font-size:13px;letter-spacing:1px;color:var(--gold-dim);line-height:1.8;max-width:320px;opacity:0;animation:li-fade 0.8s 1.3s ease-out forwards}
   .loc-intro-hint{font-size:10px;letter-spacing:2px;color:rgba(245,215,110,.28);margin-top:36px;animation:li-hint 2.4s 2.2s ease-in-out infinite}
+  #screen-loc-intro[data-cine-theme="night"] .loc-intro-name{color:#d6e1ff;text-shadow:0 0 26px rgba(130,150,255,.48)}
+  #screen-loc-intro[data-cine-theme="storm"] .loc-intro-name{color:#ffe19e;text-shadow:0 0 28px rgba(255,165,90,.6)}
+  #screen-loc-intro[data-cine-theme="storm"]::after{opacity:.9}
   @keyframes li-fade{from{opacity:0}to{opacity:1}}
   @keyframes li-slide{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
   @keyframes li-line{from{transform:scaleX(0)}to{transform:scaleX(1)}}
@@ -788,6 +799,9 @@
   .zombie-cut-count{font-size:13px;letter-spacing:2px;color:#ff7070;margin-bottom:18px;opacity:0;animation:li-fade 0.6s 1.3s ease-out forwards}
   .zombie-cut-text{font-size:12px;letter-spacing:1px;color:rgba(255,140,140,.72);line-height:1.9;max-width:320px;opacity:0;animation:li-fade 0.8s 1.7s ease-out forwards}
   .zombie-cut-tap{font-size:10px;letter-spacing:2px;color:rgba(255,80,80,.3);margin-top:36px;animation:li-hint 2.4s 3s ease-in-out infinite}
+  #screen-zombie-cut[data-cine-theme="guilt"] .zombie-cut-title{color:#ff4040}
+  #screen-zombie-cut[data-cine-theme="omens"] .zombie-cut-title{color:#ff7a7a}
+  #screen-zombie-cut[data-cine-theme="omens"]::before{filter:hue-rotate(-16deg) saturate(.92)}
   @keyframes zc-pop{from{opacity:0;transform:scale(.5)}to{opacity:1;transform:scale(1)}}
   @keyframes zc-slide{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
   @keyframes zc-pulse{0%,100%{text-shadow:0 0 20px rgba(220,0,0,.35)}50%{text-shadow:0 0 34px rgba(255,40,40,.8)}}
