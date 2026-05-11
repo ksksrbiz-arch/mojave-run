@@ -7,6 +7,45 @@
 // ============================================================
 // FEATURE DETECT
 // ============================================================
+const localStorage = (() => {
+  const memory = new Map();
+  const fallback = {
+    getItem: key => memory.has(String(key)) ? memory.get(String(key)) : null,
+    setItem: (key, value) => { memory.set(String(key), String(value)); },
+    removeItem: key => { memory.delete(String(key)); },
+  };
+  try {
+    const store = window.localStorage;
+    const testKey = '__mojave_storage_probe__';
+    store.setItem(testKey, testKey);
+    store.removeItem(testKey);
+    return {
+      getItem: key => {
+        try { return store.getItem(key); } catch (_) { return fallback.getItem(key); }
+      },
+      setItem: (key, value) => {
+        try { store.setItem(key, value); } catch (_) { fallback.setItem(key, value); }
+      },
+      removeItem: key => {
+        try { store.removeItem(key); } catch (_) {}
+        fallback.removeItem(key);
+      },
+    };
+  } catch (_) {
+    return fallback;
+  }
+})();
+if (!window.performance) window.performance = {};
+if (typeof window.performance.now !== 'function') {
+  const start = Date.now();
+  window.performance.now = () => Date.now() - start;
+}
+if (typeof window.requestAnimationFrame !== 'function') {
+  window.requestAnimationFrame = cb => setTimeout(() => cb(window.performance.now()), 1000 / 60);
+}
+if (typeof window.cancelAnimationFrame !== 'function') {
+  window.cancelAnimationFrame = id => clearTimeout(id);
+}
 const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 const HAS_COARSE_POINTER = (() => {
   try {
@@ -14,6 +53,15 @@ const HAS_COARSE_POINTER = (() => {
   } catch (_) { return false; }
 })();
 const IS_MOBILE = HAS_COARSE_POINTER || (IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 1100);
+const PREFERS_REDUCED_MOTION = (() => {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch (_) { return false; }
+})();
+const LOW_POWER_DEVICE = (() => {
+  const mem = Number(navigator.deviceMemory || 0);
+  const cores = Number(navigator.hardwareConcurrency || 0);
+  return (mem && mem <= 2) || (cores && cores <= 4);
+})();
 
 // ============================================================
 // DATA — VEHICLES, UPGRADES, MODES, LEVELS
@@ -2744,7 +2792,7 @@ const Settings = {
   // screen-shake intensity multiplier 0..1.5
   shake: 1.0,
   // particle density multiplier 0..1.5 (gameplay-cosmetic only)
-  particles: 1.0,
+  particles: LOW_POWER_DEVICE ? 0.85 : 1.0,
   // navigator.vibrate-based haptic feedback on key events
   haptics: true,
   // 1.5x hit areas for menu buttons (accessibility)
@@ -2758,13 +2806,13 @@ const Settings = {
   // Cinematic post-FX layer (god rays, film grain, chromatic aberration on
   // high speed, speed-line vignette, bloom highlights, camera tilt+zoom).
   // Purely visual — disabling it has zero effect on gameplay/scoring.
-  cinematic: true,
+  cinematic: !PREFERS_REDUCED_MOTION && !LOW_POWER_DEVICE,
   // color-blind simulation filter applied to the game canvas ('none'|'protanopia'|'deuteranopia'|'tritanopia')
   colorBlind: 'none',
   // vehicle/element render detail budget ('low'|'medium'|'high')
-  visualQuality: 'high',
+  visualQuality: LOW_POWER_DEVICE ? 'medium' : 'high',
   // skip non-essential animations for users sensitive to motion
-  reducedMotion: false,
+  reducedMotion: PREFERS_REDUCED_MOTION,
   // === v2.3 SETTINGS — Wasteland Empire ===
   // Toggle new v2.3 content (vehicles, biomes, modes). When false, only v2.0 content is shown.
   empireExpansion: true,
@@ -2948,7 +2996,29 @@ function announceEvent(text, color = '#ffe07a') {
 // CANVAS
 // ============================================================
 const cvs = document.getElementById('game');
-const ctx = cvs.getContext('2d', { alpha: false });
+function getGameCanvasContext(canvas) {
+  if (!canvas || typeof canvas.getContext !== 'function') return null;
+  const preferred = [
+    { alpha: false, desynchronized: true },
+    { alpha: false },
+    undefined,
+  ];
+  for (let i = 0; i < preferred.length; i++) {
+    try {
+      const context = preferred[i] === undefined ? canvas.getContext('2d') : canvas.getContext('2d', preferred[i]);
+      if (context) return context;
+    } catch (_) {}
+  }
+  return null;
+}
+const ctx = getGameCanvasContext(cvs);
+if (!ctx) {
+  const msg = document.createElement('div');
+  msg.textContent = 'MOJAVE RUN needs a browser with HTML5 canvas support.';
+  msg.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:#1a0f08;color:#f5d76e;font:bold 16px "Courier New",monospace;text-align:center;z-index:9999';
+  document.body.appendChild(msg);
+  return;
+}
 let W = 0, H = 0, DPR = 1;
 const DPR_CAP = IS_MOBILE ? 1.5 : 2;
 // Keep mobile floor lower for thermal/battery headroom; keep desktop floor
@@ -2961,11 +3031,7 @@ const SCALE_PENALTY_LOW_MEMORY = 0.15;
 const SCALE_PENALTY_LOW_CORES = 0.1;
 let renderScale = (() => {
   let scale = IS_MOBILE ? 0.95 : 1;
-  const mem = Number(navigator.deviceMemory || 0);
-  const cores = Number(navigator.hardwareConcurrency || 0);
-  const memPenalty = (mem && mem <= 2) ? SCALE_PENALTY_LOW_MEMORY : 0;
-  const corePenalty = (cores && cores <= 4) ? SCALE_PENALTY_LOW_CORES : 0;
-  scale -= Math.max(memPenalty, corePenalty);
+  if (LOW_POWER_DEVICE) scale -= Math.max(SCALE_PENALTY_LOW_MEMORY, SCALE_PENALTY_LOW_CORES);
   return Math.min(1, Math.max(MIN_RENDER_SCALE, scale));
 })();
 let _resizeRaf = 0;
@@ -12149,7 +12215,7 @@ let last = performance.now();
 // modes.
 const PerfMon = {
   ewmaMs: 16.7,
-  quality: 1,
+  quality: LOW_POWER_DEVICE ? 0.65 : 1,
   lastAdjustAt: 0,
   lastScaleAdjustAt: 0,
   hidden: false,
