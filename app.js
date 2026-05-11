@@ -22,6 +22,11 @@ const APEX_VEHICLE_MIN_PRESTIGE = 10;
 const ALL_COMPLETABLE_MODES = ['classic','winding','timeattack','daily','bossrush','zombie','wastelandrun','extraction'];
 const CUSTOM_TARGETS = { score: 50000, distance: 3000, kills: 35, survive: 75 };
 const GAMEPAD_AXIS_THRESHOLD = 0.25;
+const GAMEPAD_DEADZONE_MIN = 0.05;
+const GAMEPAD_DEADZONE_MAX = 0.6;
+const GAMEPAD_SENSITIVITY_MIN = 0.5;
+const GAMEPAD_SENSITIVITY_MAX = 1.5;
+const GAMEPAD_BUTTON_ANALOG_THRESHOLD = 0.45;
 const GAMEPAD_BUTTON_A = 0;
 const GAMEPAD_BUTTON_B = 1;
 const GAMEPAD_BUTTON_DPAD_LEFT = 14;
@@ -2798,8 +2803,8 @@ const Settings = {
        if (typeof o.colorBlind === 'string') this.colorBlind = o.colorBlind;
         if (typeof o.reducedMotion === 'boolean') this.reducedMotion = o.reducedMotion;
         if (o.visualQuality === 'low' || o.visualQuality === 'medium' || o.visualQuality === 'high') this.visualQuality = o.visualQuality;
-        if (typeof o.gamepadDeadzone === 'number') this.gamepadDeadzone = clampSet(o.gamepadDeadzone, 0.05, 0.6);
-        if (typeof o.gamepadSensitivity === 'number') this.gamepadSensitivity = clampSet(o.gamepadSensitivity, 0.5, 1.5);
+        if (typeof o.gamepadDeadzone === 'number') this.gamepadDeadzone = clampSet(o.gamepadDeadzone, GAMEPAD_DEADZONE_MIN, GAMEPAD_DEADZONE_MAX);
+        if (typeof o.gamepadSensitivity === 'number') this.gamepadSensitivity = clampSet(o.gamepadSensitivity, GAMEPAD_SENSITIVITY_MIN, GAMEPAD_SENSITIVITY_MAX);
         if (o.gamepadLayout && GAMEPAD_LAYOUTS[o.gamepadLayout]) this.gamepadLayout = o.gamepadLayout;
         if (typeof o.browserAssist === 'boolean') this.browserAssist = o.browserAssist;
         if (typeof o.empireExpansion === 'boolean') this.empireExpansion = o.empireExpansion;
@@ -2846,7 +2851,9 @@ const BrowserPerfHelper = {
     const lowRam = !!(mem && mem <= 2);
     const olderCpu = !!(cores && cores <= 2);
     const modestCpu = !!(cores && cores <= 4);
-    const id = (saveData || lowRam || olderCpu) ? 'lean' : ((IS_MOBILE || modestCpu || (mem && mem <= 4)) ? 'balanced' : 'full');
+    let id = 'full';
+    if (saveData || lowRam || olderCpu) id = 'lean';
+    else if (IS_MOBILE || modestCpu || (mem && mem <= 4)) id = 'balanced';
     const profiles = {
       lean: { id:'lean', label:'LEAN', minScale: IS_MOBILE ? 0.62 : 0.72, startScale: IS_MOBILE ? 0.78 : 0.85, startQuality:0.35, visualCap:0.7, recoverMs:11 },
       balanced: { id:'balanced', label:'BALANCED', minScale: IS_MOBILE ? 0.7 : 0.85, startScale: IS_MOBILE ? 0.9 : 1, startQuality:0.75, visualCap:0.9, recoverMs:12.5 },
@@ -2877,7 +2884,8 @@ const BrowserPerfHelper = {
   },
   statusLabel() {
     const p = this.detect();
-    return (this.enabled() ? p.label : 'OFF') + (this.enabled() ? ` · SCALE ${p.minScale.toFixed(2)}-${p.startScale.toFixed(2)}` : '');
+    const enabled = this.enabled();
+    return (enabled ? p.label : 'OFF') + (enabled ? ` · SCALE ${p.minScale.toFixed(2)}-${p.startScale.toFixed(2)}` : '');
   },
 };
 
@@ -4210,13 +4218,13 @@ function syncTouchInput() {
 
 function readGamepadAxis(gp, axisIndex) {
   if (!gp || !gp.axes) return 0;
-  const raw = Number(gp.axes[axisIndex || 0] || 0);
+  const raw = Number(gp.axes[axisIndex ?? 0] || 0);
   if (!isFinite(raw)) return 0;
-  const deadzone = clampSet(Settings.gamepadDeadzone || GAMEPAD_AXIS_THRESHOLD, 0.05, 0.6);
+  const deadzone = clampSet(Settings.gamepadDeadzone || GAMEPAD_AXIS_THRESHOLD, GAMEPAD_DEADZONE_MIN, GAMEPAD_DEADZONE_MAX);
   const mag = Math.abs(raw);
   if (mag <= deadzone) return 0;
   const normalized = ((mag - deadzone) / (1 - deadzone)) * (raw < 0 ? -1 : 1);
-  return clampSet(normalized * clampSet(Settings.gamepadSensitivity || 1, 0.5, 1.5), -1, 1);
+  return clampSet(normalized * clampSet(Settings.gamepadSensitivity || 1, GAMEPAD_SENSITIVITY_MIN, GAMEPAD_SENSITIVITY_MAX), -1, 1);
 }
 
 function getGamepadActionButtons(action) {
@@ -4226,7 +4234,7 @@ function getGamepadActionButtons(action) {
 
 function isGamepadButtonPressed(gp, btnIndex) {
   const b = gp && gp.buttons && gp.buttons[btnIndex];
-  return !!(b && (b.pressed || Number(b.value || 0) > 0.45));
+  return !!(b && (b.pressed || Number(b.value || 0) > GAMEPAD_BUTTON_ANALOG_THRESHOLD));
 }
 
 function isGamepadActionPressed(gp, action) {
@@ -11372,7 +11380,7 @@ const UI = {
       ${slider('GAMEPAD DEADZONE', 'gamepadDeadzone', 0.05, 0.6, 0.01)}
       ${slider('STEERING SENSITIVITY', 'gamepadSensitivity', 0.5, 1.5, 0.05)}
       <div class="set-row">
-        <div class="set-head"><div><div class="set-name">GAMEPAD BUTTON MAP</div><div class="set-sub">STANDARD: A/B · TRIGGER: RT/LT · ACCESS: X/Y</div></div></div>
+        <div class="set-head"><div><div class="set-name">GAMEPAD BUTTON MAP</div><div class="set-sub">STANDARD: A/RT + B/LT · TRIGGER: RT/RB + LT/LB · ACCESS: X/A + Y/B</div></div></div>
         <div class="set-q-row">${gpOpts}</div>
       </div>
       <h2>READABILITY</h2>
@@ -12557,8 +12565,8 @@ window.MojaveControllerMapping = {
   },
   tune(opts) {
     opts = opts || {};
-    if (typeof opts.deadzone === 'number') Settings.gamepadDeadzone = clampSet(opts.deadzone, 0.05, 0.6);
-    if (typeof opts.sensitivity === 'number') Settings.gamepadSensitivity = clampSet(opts.sensitivity, 0.5, 1.5);
+    if (typeof opts.deadzone === 'number') Settings.gamepadDeadzone = clampSet(opts.deadzone, GAMEPAD_DEADZONE_MIN, GAMEPAD_DEADZONE_MAX);
+    if (typeof opts.sensitivity === 'number') Settings.gamepadSensitivity = clampSet(opts.sensitivity, GAMEPAD_SENSITIVITY_MIN, GAMEPAD_SENSITIVITY_MAX);
     Settings.save();
     return {
       layout: Settings.gamepadLayout,
@@ -14093,6 +14101,7 @@ UI.act = function(action, data) {
 
 function boot() {
   Settings.load();
+  // Browser helpers need persisted settings before choosing startup quality.
   loadQualityPref();
   BrowserPerfHelper.applyStartupProfile();
   resize();
