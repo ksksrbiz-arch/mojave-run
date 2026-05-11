@@ -7655,6 +7655,17 @@ const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
 const BRAKE_PULSE_AMPLITUDE = 0.2;
 const BRAKE_PULSE_RATE = 8;
 const MUZZLE_RECOIL_WINDOW = 0.08;
+// Enemy fire timing windows in seconds for visual recoil and flash reads.
+const ENEMY_FIRE_RECOIL_WINDOW = 0.26;
+const ENEMY_FIRE_SPARK_WINDOW = 0.24;
+const BIKE_FIRE_LEAN_WINDOW = 0.22;
+const MIN_FIRE_GLOW_THRESHOLD = 0.05;
+const ENEMY_FIRE_SPARK_CHANCE = 0.25;
+const BIKE_DUST_VELOCITY_THRESHOLD = 55;
+const BIKE_DUST_SPAWN_CHANCE = 0.2;
+const RUNNER_DUST_SPAWN_CHANCE = 0.18;
+const UPGRADE_PULSE_RATE = 10;
+const WEAPON_SWAY_RATE = 12;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
 const DAMAGE_SMOKE_SPAWN_CHANCE = 0.28;
 const SKID_ROTATION_FACTOR = 0.05;
@@ -7767,7 +7778,7 @@ function drawVehicleWheelSet(w, h, wheelSpin, turnLean, detail, treadMultiplier 
   }
 }
 
-function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades) {
+function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades, opts = {}) {
   const shellGrad = ctx.createLinearGradient(-w/2, -h*0.2, w/2, h*0.3);
   shellGrad.addColorStop(0, c.body);
   shellGrad.addColorStop(0.45, shade(c.body, -18));
@@ -7863,14 +7874,39 @@ function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades)
       ctx.closePath();
       ctx.fill();
     }
+    if (detail >= 1 && (upgrades.plating || 0) >= 2) {
+      const armorPulse = 0.16 + 0.08 * Math.sin((Game.t || 0) * UPGRADE_PULSE_RATE + w * 0.04);
+      ctx.fillStyle = `rgba(210,210,220,${armorPulse})`;
+      ctx.fillRect(-w * 0.49, -h * 0.16, 1.8, h * 0.46);
+      ctx.fillRect(w * 0.49 - 1.8, -h * 0.16, 1.8, h * 0.46);
+    }
   }
   if ((upgrades.weapons || 0) > 0) {
     const turretW = 2.5 + Math.min(4.5, upgrades.weapons * 0.7);
+    const muzzleN = clamp((Game.muzzleT || 0) / MUZZLE_RECOIL_WINDOW, 0, 1);
+    // Enemy fireT counts down to zero, so invert normalization to get a
+    // forward-intensity pulse (1 = just fired, 0 = calm).
+    const enemyMuzzleN = opts.enemy && opts.enemy.fireT !== undefined && opts.enemy.fireT < ENEMY_FIRE_RECOIL_WINDOW
+      ? 1 - clamp((opts.enemy.fireT || 0) / ENEMY_FIRE_RECOIL_WINDOW, 0, 1)
+      : 0;
+    const fireN = Math.max(muzzleN, enemyMuzzleN);
+    const turretKick = fireN * (1.4 + upgrades.weapons * 0.35);
+    const weaponSway = detail >= 1 ? Math.sin((Game.t || 0) * WEAPON_SWAY_RATE + h * 0.03) * (0.4 + upgrades.weapons * 0.08) : 0;
     ctx.fillStyle = '#0f0c0b';
-    ctx.fillRect(-turretW / 2, -h * 0.56, turretW, 14 + upgrades.weapons);
+    ctx.fillRect(-turretW / 2, -h * 0.56 + turretKick * 0.28, turretW, 14 + upgrades.weapons - turretKick * 0.34);
+    if ((upgrades.weapons || 0) >= 2) {
+      ctx.fillRect(-w * 0.25 - 1.4, -h * 0.36 + weaponSway, 2.4, 10);
+      ctx.fillRect(w * 0.25 - 1.0, -h * 0.36 - weaponSway, 2.4, 10);
+    }
     if ((upgrades.weapons || 0) >= 3) {
       ctx.fillRect(-w * 0.18, -h * 0.4, 3, 11);
       ctx.fillRect(w * 0.15, -h * 0.4, 3, 11);
+    }
+    if (detail >= 1 && fireN > MIN_FIRE_GLOW_THRESHOLD) {
+      ctx.fillStyle = `rgba(255,190,110,${0.26 + fireN * 0.34})`;
+      ctx.beginPath();
+      ctx.ellipse(0, -h * 0.61, 2 + upgrades.weapons * 0.45, 4 + fireN * 6, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   if ((upgrades.engine || 0) > 0) {
@@ -7878,6 +7914,12 @@ function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades)
     for (let i = 0; i < Math.min(4, visual.vents + Math.floor(upgrades.engine / 2)); i++) {
       const vx = -w * 0.22 + i * (w * 0.14);
       ctx.fillRect(vx, -h * 0.34, 4, 10);
+    }
+    if (detail >= 1 && (upgrades.engine || 0) >= 2) {
+      const heatA = 0.16 + 0.18 * Math.sin((Game.t || 0) * 13 + speedN * 8 + w * 0.03);
+      ctx.fillStyle = `rgba(255,150,70,${heatA})`;
+      ctx.fillRect(-w * 0.2, -h * 0.23, 3, 6);
+      ctx.fillRect(w * 0.17, -h * 0.23, 3, 6);
     }
   }
 
@@ -8060,7 +8102,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
       ctx.fillRect(-tw/2 - 7, ty, 12, 2);
       ctx.fillRect(tw/2 - 5, ty, 12, 2);
     }
-    drawVehicleBodyCore(tw, th, c, visual, detail, speedN, damageR, upgrades);
+    drawVehicleBodyCore(tw, th, c, visual, detail, speedN, damageR, upgrades, opts);
     ctx.fillStyle = c.cab;
     pathRoundRect(-tw / 4, -th / 4, tw / 2, th / 2.4, 4);
     ctx.fill();
@@ -8082,7 +8124,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   }
 
   drawVehicleWheelSet(w, h, wheelSpin, lean, detail, 1 + speedN * 0.35);
-  drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades);
+  drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades, opts);
   drawVehicleExtras(w, h, visual, detail);
   drawVehicleLightsAndFx(w, h, c, detail, speedN, t, opts, visual, upgrades, damageR);
 
@@ -8426,7 +8468,7 @@ function drawEnemy(e) {
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
-    extraTilt: Math.sin((Game.t || 0) * 4 + e.x * 0.02) * 0.04,
+    extraTilt: Math.sin((Game.t || 0) * 4 + e.x * 0.02) * 0.04 + (e.fireT !== undefined && e.fireT < ENEMY_FIRE_RECOIL_WINDOW ? -0.07 : 0),
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -8467,6 +8509,15 @@ function drawEnemy(e) {
       });
     }
   }
+  if (visualQualityLevel() >= 1 && e.fireT !== undefined && e.fireT < ENEMY_FIRE_SPARK_WINDOW && Math.random() < ENEMY_FIRE_SPARK_CHANCE) {
+    Game.particles.push({
+      x: e.x + rand(-4, 4), y: e.y - e.h * 0.5,
+      vx: rand(-20, 20), vy: rand(-60, -16),
+      life: 0.22, max: 0.22, size: 2 + rand(0, 2) | 0,
+      color: 'rgba(255,170,90,0.75)',
+      shape: 'rect', rot: rand(0, Math.PI * 2),
+    });
+  }
 }
 
 function drawBike(e) {
@@ -8479,7 +8530,7 @@ function drawBike(e) {
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
-    extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07,
+    extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07 + (e.fireT !== undefined && e.fireT < BIKE_FIRE_LEAN_WINDOW ? -0.09 : 0),
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -8507,6 +8558,14 @@ function drawBike(e) {
       vx: rand(-15, 15), vy: rand(-25, -5),
       life: 0.5, max: 0.5, size: 4,
       color: 'rgba(110,90,70,0.45)',
+    });
+  }
+  if (visualQualityLevel() >= 1 && Math.abs(e.vx || 0) > BIKE_DUST_VELOCITY_THRESHOLD && Math.random() < BIKE_DUST_SPAWN_CHANCE) {
+    Game.particles.push({
+      x: e.x + rand(-e.w * 0.45, e.w * 0.45), y: e.y + e.h * 0.44,
+      vx: rand(-18, 18), vy: rand(20, 50),
+      life: 0.3, max: 0.3, size: 3,
+      color: 'rgba(110,90,70,0.5)',
     });
   }
 }
@@ -8545,11 +8604,16 @@ function drawZombie(e) {
   ctx.translate(e.x, e.y);
   const isBruiser = e.zombieType === 'tank' || e.zombieType === 'charger';
   const isRunner  = e.zombieType === 'runner' || e.zombieType === 'hunter';
+  const animT = (Game.t || 0) * (isRunner ? 8.5 : 6.1) + (e.wobble || 0) * 1.7 + e.x * 0.03;
+  const torsoBob = Math.sin(animT) * (isRunner ? 2.2 : 1.2);
+  const bodyLean = clamp((e.vx || 0) / 170, -1, 1) * 0.18 + Math.sin(animT * 0.36) * 0.05;
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(1, e.h/2 + 2, e.w/2 + 2, 4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.translate(0, torsoBob);
+  ctx.rotate(bodyLean);
   // legs (two rects, offset for shamble animation)
-  const legOffset = Math.sin((e.wobble || 0) * 1.8) * (isRunner ? 5 : 3);
+  const legOffset = Math.sin(animT * 1.4) * (isRunner ? 5.8 : 3.4);
   ctx.fillStyle = e.goreColor || '#2a3a18';
   ctx.fillRect(-e.w/2 + 2, e.h/4, e.w/2 - 3, e.h/4 + 2 + legOffset);
   ctx.fillRect(3, e.h/4, e.w/2 - 3, e.h/4 + 2 - legOffset);
@@ -8565,15 +8629,20 @@ function drawZombie(e) {
     ctx.fillRect(e.w * 0.04, e.h * 0.03, 4, 3);
   }
   // arms (reaching forward / swinging)
-  const armSwing = Math.sin((e.wobble || 0)) * (isBruiser ? 4 : 6);
+  const armSwing = Math.sin(animT * 1.2) * (isBruiser ? 4 : 6.5);
   ctx.fillStyle = e.goreColor || '#2a3a18';
   ctx.fillRect(-e.w/2 - 4, -e.h/4 + armSwing, 5, isBruiser ? 14 : 10);
   ctx.fillRect( e.w/2 - 1, -e.h/4 - armSwing, 5, isBruiser ? 14 : 10);
   // head
-  const headWobble = Math.sin((e.wobble || 0) * 0.7) * 1.5;
+  const headWobble = Math.sin(animT * 0.62) * 1.9;
   ctx.fillStyle = e.color || '#3a4a28';
   const hw = isBruiser ? 12 : 8, hh = isBruiser ? 12 : 9;
   ctx.fillRect(-hw/2 + headWobble, -e.h/2, hw, hh);
+  if (visualQualityLevel() >= 1) {
+    const jawSnap = Math.max(0, Math.sin(animT * 2.3)) * (isBruiser ? 3 : 2);
+    ctx.fillStyle = 'rgba(36,26,20,0.8)';
+    ctx.fillRect(-hw/2 + 1 + headWobble, -e.h/2 + hh - 1, hw - 2, 2 + jawSnap);
+  }
   // glowing eyes
   ctx.fillStyle = isRunner ? '#c8ff80' : isBruiser ? '#ff8040' : '#90c860';
   ctx.fillRect(-hw/2 + 2 + headWobble, -e.h/2 + 3, hw/2 - 3, 2);
@@ -8592,6 +8661,14 @@ function drawZombie(e) {
     ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
   }
   ctx.restore();
+  if (isRunner && visualQualityLevel() >= 1 && Math.random() < RUNNER_DUST_SPAWN_CHANCE) {
+    Game.particles.push({
+      x: e.x + rand(-3, 3), y: e.y + e.h * 0.42,
+      vx: rand(-15, 15), vy: rand(20, 55),
+      life: 0.28, max: 0.28, size: 3,
+      color: 'rgba(95,120,70,0.45)',
+    });
+  }
 }
 
 function drawDrone(e) {
@@ -11560,6 +11637,7 @@ const UI = {
     }
     const ch = Profile.character();
     portEl.innerHTML = characterPortraitSVG(ch ? ch.id : DEFAULT_CHARACTER_ID) + '<div class="pframe"></div>';
+    this._resetAnimations('story', '#story-portrait,.story-title,.story-text,.story-sk-line,.story-tap-hint');
     this.show('story');
     const dismiss = () => {
       UI.hideAllScreens();
