@@ -3181,6 +3181,8 @@ const BIOME_MUSIC_ROOT_MUL = {
   neonruins: 1.2,
   irradiated: 0.95,
   scraparch: 1.05,
+  thunderplains: 1.15,
+  frostwaste: 0.84,
 };
 
 function initAudioGraph() {
@@ -3337,6 +3339,11 @@ function scheduleMusicBeat(when, mode, preset) {
   if (mode === 'boss' && step % 2 === 0) {
     filteredNoise(0.05, 0.013, 1700 + Math.random() * 600, when, audioMusicGain, 'bandpass', 0.95);
   }
+  // Thunderplains biome: add punchy rain-like percussion on every beat
+  if ((Game.biome === 'thunderplains') && step % 2 === 0) {
+    filteredNoise(0.04, 0.018, 2400 + Math.random() * 400, when, audioMusicGain, 'bandpass', 1.4);
+    tone(musicFreq(root, -12), 0.06, 'triangle', preset.gain * 0.28, -20, when + 0.01, audioMusicGain, 0.0004);
+  }
   if (mode === 'victory' && step % 4 === 0) {
     tone(musicFreq(root, 19), 0.16, 'triangle', preset.gain * 0.65, -4, when + 0.05, audioMusicGain, 0.0004);
   }
@@ -3385,6 +3392,12 @@ const SFX = {
   combo:  (tier) => { const f = 430 + Math.min(tier, 12) * 90; tone(f, 0.09, 'square', 0.058, 40); tone(f * 1.5, 0.06, 'triangle', 0.04, 60, audioCtx ? audioCtx.currentTime + 0.01 : 0); },
   mortar: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(64, 0.54, 'sawtooth', 0.085, -18, t); filteredNoise(0.42, 0.11, 620, t + 0.01); },
   rocket: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(150, 0.38, 'square', 0.078, -58, t); filteredNoise(0.24, 0.09, 1900, t + 0.01); },
+  // Electric crack for the thunder horn and lightning strikes
+  lightning: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(1800, 0.04, 'sawtooth', 0.06, -2200, t); filteredNoise(0.18, 0.22, 3400, t, audioSfxGain, 'bandpass', 1.6); tone(420, 0.12, 'sine', 0.04, -300, t + 0.02, audioSfxGain); },
+  // Buzzy mechanical snarl for the chainsaw powerup activation
+  chainsaw: () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.32, 0.14, 600, t, audioSfxGain, 'lowpass', 0.6); tone(88, 0.3, 'sawtooth', 0.07, 30, t, audioSfxGain); tone(175, 0.2, 'sawtooth', 0.04, 20, t + 0.04, audioSfxGain); },
+  // Rising adrenaline sweep for the adrenaline powerup
+  adrenaline: () => { const t = audioCtx ? audioCtx.currentTime : 0; [320, 480, 720, 1080, 1520].forEach((f, i) => tone(f, 0.09, 'square', 0.052, 40, t + i * 0.04)); filteredNoise(0.22, 0.06, 2800, t + 0.1, audioSfxGain, 'highpass', 0.9); },
 };
 
 // ============================================================
@@ -3660,6 +3673,8 @@ function activatePowerup(id, src) {
   if (id === 'shield')      SFX.shieldOn();
   else if (id === 'nitro')  SFX.nitroOn();
   else if (id === 'nuke')   SFX.bigBoom && SFX.bigBoom();
+  else if (id === 'chainsaw') SFX.chainsaw && SFX.chainsaw();
+  else if (id === 'adrenaline') SFX.adrenaline && SFX.adrenaline();
   else                      SFX.powerUp();
   if (src) {
     addPopup(def.name, src.x, src.y - 16, def.color, 14);
@@ -5986,6 +6001,8 @@ function update(dt) {
     Game.lightning -= dt;
     if (Game.lightning < -rand(2.5, 6)) {
       Game.lightning = rand(0.18, 0.32);
+      // Play the electric crack SFX on thunderplains lightning strikes
+      if (Game.biome === 'thunderplains') SFX.lightning && SFX.lightning();
     }
   }
   for (let i = Game.dustDevils.length - 1; i >= 0; i--) {
@@ -9889,6 +9906,18 @@ function drawLoadingOverlay() {
   const alpha = k < 0.85 ? 1 : 1 - (k - 0.85) / 0.15;
   ctx.save();
   ctx.globalAlpha = alpha;
+
+  // Cinematic letterbox bars — slide in from top and bottom at run start
+  const barSlide = k < 0.25 ? k / 0.25 : 1;
+  const lboxH = Math.round(H * 0.09 * barSlide);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, lboxH);
+  ctx.fillRect(0, H - lboxH, W, lboxH);
+  // Gold accent lines at inner bar edges
+  ctx.fillStyle = 'rgba(245,215,110,0.55)';
+  ctx.fillRect(0, lboxH, W, 1);
+  ctx.fillRect(0, H - lboxH - 1, W, 1);
+
   // dark band across center
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, H * 0.30, W, H * 0.22);
@@ -9980,6 +10009,22 @@ function drawLoadingOverlay() {
       ctx.fillText(tip, W/2, H * 0.59);
     }
   }
+
+  // "GET READY" flash — appears in the final 20% of the loading animation
+  // as a cinematic cue that the run is about to start.
+  if (k > 0.80) {
+    const readyK = (k - 0.80) / 0.20;
+    // Pulsing scale
+    const scale = 0.85 + readyK * 0.15 + Math.sin(readyK * Math.PI * 3) * 0.04;
+    const readyA = alpha * Math.min(1, readyK * 3);
+    ctx.globalAlpha = readyA;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round((W < 500 ? 28 : 42) * scale)}px "Courier New", monospace`;
+    ctx.fillStyle = '#1a0f08';
+    ctx.fillText('GET READY', W/2 + 2, H * 0.70 + 2);
+    ctx.fillStyle = '#7af07a';
+    ctx.fillText('GET READY', W/2, H * 0.70);
+  }
   ctx.restore();
 }
 
@@ -9995,6 +10040,15 @@ function drawBossWarning() {
     : biome === 'scraparch' ? '255,190,50'
     : '255,42,42';
   ctx.save();
+  // Pulsing edge vignette — radial gradient that bleeds in from all four
+  // corners so the whole screen feels like it's breathing red/biome danger.
+  const edgeA = (0.10 + pulse * 0.12);
+  const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.18, W * 0.5, H * 0.5, Math.max(W, H) * 0.72);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, `rgba(${warnColor},${edgeA})`);
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+
   ctx.globalAlpha = 0.15 + pulse * 0.15;
   ctx.fillStyle = `rgba(${warnColor},1)`;
   ctx.fillRect(0, H * 0.35, W, 4);
@@ -10022,6 +10076,20 @@ function drawVictoryOverlay() {
   ctx.globalAlpha = a * 0.5;
   ctx.fillStyle = '#fff3b0';
   ctx.fillRect(0, 0, W, H);
+
+  // Cinematic letterbox bars — slide in from top/bottom as the overlay fades in
+  const barSlide = k < 0.2 ? k / 0.2 : 1;
+  const barH = Math.round(H * 0.10 * barSlide);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, barH);
+  ctx.fillRect(0, H - barH, W, barH);
+
+  // Thin gold accent lines at the inner bar edges
+  ctx.fillStyle = 'rgba(245,215,110,0.7)';
+  ctx.fillRect(0, barH, W, 1);
+  ctx.fillRect(0, H - barH - 1, W, 1);
+
   ctx.globalAlpha = a;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   // bouncing letters
@@ -14402,19 +14470,25 @@ const Cinematic = (function () {
       drawChromatic(ctx, k, sp);
     }
 
-    // ---- 5. Film grain (always last, lowest-cost) ----
+    // ---- 5. Biome color grading — per-biome atmospheric tint ----
+    if (k > 0.3) {
+      drawBiomeGrade(ctx, k, playing);
+    }
+
+    // ---- 6. Film grain (always last, lowest-cost) ----
     if (k > 0.2) {
       drawGrain(ctx, k * (playing ? 0.55 : 0.4));
     }
   }
 
   // Lighter pass for the menu / idle background — no speed lines, no
-  // chromatic, just god rays + grain to give the idle screen the same
-  // production-value vibe.
+  // chromatic, just god rays + biome grade + grain to give the idle screen
+  // the same production-value vibe.
   function postFxMenu(ctx) {
     if (!isOn()) return;
     const k = intensity() * 0.85;
     if (k > 0.35) drawGodRays(ctx, k * 0.85);
+    if (k > 0.3)  drawBiomeGrade(ctx, k * 0.6, false);
     if (k > 0.2)  drawGrain(ctx, k * 0.4);
   }
 
@@ -14554,6 +14628,99 @@ const Cinematic = (function () {
     ctx.restore();
   }
 
+  // ----- biome color grading -----
+  // Adds a subtle per-biome atmospheric tint and, for thunderplains, an
+  // electric lightning-flash strobe tied to Game.lightning. All alpha values
+  // are small so the grade is felt but never overpowering.
+  function drawBiomeGrade(ctx, k, playing) {
+    const biome = (Game && Game.biome) || 'wastes';
+    const t = (Game && Game.t) || 0;
+
+    // Per-biome tint: (r, g, b, base-alpha, composite-op)
+    // We pick colors that reinforce the biome mood without drowning the art.
+    let r = 0, g = 0, b = 0, baseA = 0, comp = 'multiply';
+    if (biome === 'neonruins') {
+      // Magenta/purple neon bloom that slowly pulses
+      const pulse = 0.75 + 0.25 * Math.sin(t * 1.8);
+      r = 200; g = 60; b = 220;
+      baseA = 0.045 * k * pulse;
+      comp = 'screen';
+    } else if (biome === 'thunderplains') {
+      // Cold electric blue atmospheric tint
+      r = 100; g = 140; b = 255;
+      baseA = 0.04 * k;
+      comp = 'screen';
+    } else if (biome === 'frostwaste') {
+      // Icy blue-white desaturation wash
+      r = 200; g = 225; b = 255;
+      baseA = 0.055 * k;
+      comp = 'screen';
+    } else if (biome === 'irradiated') {
+      // Sickly green chromatic tinge
+      r = 80; g = 220; b = 60;
+      baseA = 0.035 * k;
+      comp = 'screen';
+    } else if (biome === 'midnight') {
+      // Deep blue vignette to intensify the night atmosphere
+      r = 10; g = 20; b = 80;
+      baseA = 0.06 * k;
+      comp = 'multiply';
+    } else if (biome === 'redcanyon' || biome === 'wastes') {
+      // Warm amber heat-haze tint — tiny subtle shimmer in bottom half
+      r = 255; g = 110; b = 40;
+      baseA = 0.028 * k;
+      comp = 'screen';
+    }
+
+    if (baseA > 0.003) {
+      ctx.save();
+      ctx.globalCompositeOperation = comp;
+      ctx.globalAlpha = baseA;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+
+    // Thunderplains lightning flash: brief bright blue-white strobe when
+    // Game.lightning > 0 (the strike phase). Purely additive, very fast decay.
+    if (playing && biome === 'thunderplains') {
+      const lv = (Game && Game.lightning) || 0;
+      if (lv > 0) {
+        const flashA = clamp(lv / 0.28, 0, 1) * 0.22 * k;
+        if (flashA > 0.005) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'screen';
+          ctx.globalAlpha = flashA;
+          ctx.fillStyle = 'rgb(210,230,255)';
+          ctx.fillRect(0, 0, W, H);
+          ctx.restore();
+        }
+      }
+    }
+
+    // Neonruins: edge-bleeding neon glow from screen borders that pulses
+    if (playing && biome === 'neonruins' && k > 0.4) {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 2.3 + 1.1);
+      const edgeA = 0.065 * k * pulse;
+      if (edgeA > 0.004) {
+        const edgeBand = Math.max(30, W * 0.06);
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const glLeft = ctx.createLinearGradient(0, 0, edgeBand, 0);
+        glLeft.addColorStop(0, `rgba(200,60,255,${edgeA})`);
+        glLeft.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glLeft;
+        ctx.fillRect(0, 0, edgeBand, H);
+        const glRight = ctx.createLinearGradient(W - edgeBand, 0, W, 0);
+        glRight.addColorStop(0, 'rgba(0,0,0,0)');
+        glRight.addColorStop(1, `rgba(200,60,255,${edgeA})`);
+        ctx.fillStyle = glRight;
+        ctx.fillRect(W - edgeBand, 0, edgeBand, H);
+        ctx.restore();
+      }
+    }
+  }
+
   // ========================================================================
   // PHOTO MODE — composites the current canvas into a poster (title, score,
   // brand, dramatic frame). Returns a dataURL or null. Used by the results
@@ -14612,7 +14779,7 @@ const Cinematic = (function () {
       c.font = `${Math.round(h * 0.018)}px "Courier New", monospace`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText('— WASTELAND CINEMATIC v2.1 —', w / 2, bar / 2);
+      c.fillText('— WASTELAND CINEMATIC v3.0 —', w / 2, bar / 2);
       return out.toDataURL('image/png');
     } catch (e) {
       console.warn('[Cinematic] poster build failed', e);
@@ -15273,6 +15440,7 @@ function updateWastelandRun(dt) {
     Game._wrBossSector = Math.floor(Game.distance / 2500);
     spawnBoss(Math.min(5, 1 + Game._wrBossSector));
     Game.bossWarning = 2.0;
+    SFX.boss && SFX.boss();
     announceEvent('DOUBLE THREAT BOSS', '#ff5050');
   }
 }
