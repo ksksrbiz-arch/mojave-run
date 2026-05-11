@@ -28,13 +28,14 @@ const PRECACHE = [
   '/manifest.webmanifest',
   '/privacy-policy.html',
 ];
+const PRECACHE_PATHS = new Set(PRECACHE);
 
 const STATIC_EXTENSIONS = ['.html', '.js', '.css', '.svg', '.png', '.json', '.webmanifest', '.ico', '.txt'];
 
 function isStaticAsset(url) {
   const lastDot = url.pathname.lastIndexOf('.');
   if (lastDot === -1) return false;
-  return STATIC_EXTENSIONS.indexOf(url.pathname.slice(lastDot).toLowerCase()) !== -1;
+  return STATIC_EXTENSIONS.includes(url.pathname.slice(lastDot).toLowerCase());
 }
 
 function cacheableResponse(res) {
@@ -63,7 +64,7 @@ function putInCache(req, res) {
 function trimCache(cache) {
   return cache.keys().then(keys => {
     if (keys.length <= MAX_RUNTIME_ENTRIES) return null;
-    const removable = keys.filter(req => PRECACHE.indexOf(new URL(req.url).pathname) === -1);
+    const removable = keys.filter(req => !PRECACHE_PATHS.has(new URL(req.url).pathname));
     const overflow = Math.max(0, keys.length - MAX_RUNTIME_ENTRIES);
     return Promise.all(removable.slice(0, overflow).map(req => cache.delete(req)));
   });
@@ -83,7 +84,7 @@ self.addEventListener('activate', event => {
         keys.filter(k => k.startsWith('mojave-run-') && k !== CACHE_NAME)
             .map(k => caches.delete(k))
       ))
-      .then(() => self.registration.navigationPreload && self.registration.navigationPreload.enable
+      .then(() => self.registration.navigationPreload && typeof self.registration.navigationPreload.enable === 'function'
         ? self.registration.navigationPreload.enable().catch(() => {})
         : null)
       .then(() => self.clients.claim())

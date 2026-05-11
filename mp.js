@@ -51,6 +51,11 @@
     (MP.listeners[ev] || []).forEach(fn => { try { fn(...args); } catch (e) { console.error(e); } });
   }
 
+  function now() {
+    const perf = window.performance;
+    return perf && typeof perf.now === 'function' ? perf.now() : Date.now();
+  }
+
   // Themed status messages — UI maps these to toasts/banners.
   function setStatus(code, detail) {
     emit('status', { code, detail: detail || '' });
@@ -140,7 +145,7 @@
     ws.onopen = () => {
       if (!isCurrent()) return;
       MP._reconnectAttempts = 0;
-      MP._lastPongAt = performance.now();
+      MP._lastPongAt = now();
       MP._awaitingPongSince = 0;
       try {
         ws.send(JSON.stringify({
@@ -166,8 +171,8 @@
           MP.peers.clear();
           (msg.peers || []).forEach(p => MP.peers.set(p.id, {
             name: p.name, color: p.color, vehicleId: p.vehicleId,
-            s: p.state || null, prev: null, recvAt: performance.now(),
-            lastSeen: performance.now(),
+            s: p.state || null, prev: null, recvAt: now(),
+            lastSeen: now(),
           }));
           startHeartbeat();
           startFlusher();
@@ -178,7 +183,7 @@
         case 'peer-join':
           MP.peers.set(msg.id, {
             name: msg.name, color: msg.color, vehicleId: msg.vehicleId,
-            s: null, prev: null, recvAt: performance.now(), lastSeen: performance.now(),
+            s: null, prev: null, recvAt: now(), lastSeen: now(),
           });
           setStatus('peer-join', `${(msg.name || 'DRIVER').toUpperCase()} ROLLED IN`);
           emit('peers');
@@ -195,7 +200,7 @@
           // keep previous sample for interpolation
           p.prev = p.s ? { s: p.s, t: p.recvAt } : null;
           p.s = msg.s;
-          p.recvAt = performance.now();
+          p.recvAt = now();
           p.lastSeen = p.recvAt;
           break;
         }
@@ -215,7 +220,7 @@
           emit('event', msg.id, { kind: 'revive', target: msg.target });
           break;
         case 'pong': {
-          const now = performance.now();
+          const now = now();
           MP._lastPongAt = now;
           MP._awaitingPongSince = 0;
           if (typeof msg.t === 'number') {
@@ -297,7 +302,7 @@
     if (MP._pingTimer) clearInterval(MP._pingTimer);
     MP._pingTimer = setInterval(() => {
       if (!MP.ws || MP.ws.readyState !== 1) return;
-      const now = performance.now();
+      const now = now();
       // dead-link guard: once a ping is outstanding, require a pong in time.
       if (MP._awaitingPongSince && now - MP._awaitingPongSince > PING_TIMEOUT_MS) {
         try { MP.ws.close(); } catch (_) {}
@@ -316,7 +321,7 @@
     MP._flushTimer = setInterval(() => {
       if (!MP._pendingState) return;
       if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
-      const now = performance.now();
+      const now = now();
       if (now - MP._lastSent < 1000 / STATE_HZ) return;
       MP._lastSent = now;
       try { MP.ws.send(JSON.stringify({ type: 'player-state', s: MP._pendingState })); } catch (_) {}
@@ -407,7 +412,7 @@
   }
 
   function pruneStale() {
-    const now = performance.now();
+    const now = now();
     let removed = false;
     for (const [id, p] of MP.peers) {
       if (now - p.lastSeen > PEER_TIMEOUT_MS) { MP.peers.delete(id); removed = true; }
@@ -419,9 +424,9 @@
   // immediately so the heartbeat doesn't sit stale for the full interval.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && MP.ws && MP.ws.readyState === 1) {
-      MP._lastPongAt = performance.now();
+      MP._lastPongAt = now();
       if (!MP._awaitingPongSince) {
-        const now = performance.now();
+        const now = now();
         MP._lastPingSentAt = now;
         MP._awaitingPongSince = now;
         try { MP.ws.send(JSON.stringify({ type: 'ping', t: now })); } catch (_) {}

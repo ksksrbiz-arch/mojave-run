@@ -7,7 +7,7 @@
 // ============================================================
 // FEATURE DETECT
 // ============================================================
-const localStorage = (() => {
+const safeLocalStorage = (() => {
   const memory = new Map();
   const fallback = {
     getItem: key => memory.has(String(key)) ? memory.get(String(key)) : null,
@@ -35,13 +35,14 @@ const localStorage = (() => {
     return fallback;
   }
 })();
-if (!window.performance) window.performance = {};
-if (typeof window.performance.now !== 'function') {
+const perfNow = (() => {
+  const perf = window.performance;
+  if (perf && typeof perf.now === 'function') return () => perf.now();
   const start = Date.now();
-  window.performance.now = () => Date.now() - start;
-}
+  return () => Date.now() - start;
+})();
 if (typeof window.requestAnimationFrame !== 'function') {
-  window.requestAnimationFrame = cb => setTimeout(() => cb(window.performance.now()), 1000 / 60);
+  window.requestAnimationFrame = cb => setTimeout(() => cb(perfNow()), 1000 / 60);
 }
 if (typeof window.cancelAnimationFrame !== 'function') {
   window.cancelAnimationFrame = id => clearTimeout(id);
@@ -2283,7 +2284,7 @@ const Profile = {
   _data: null,
   load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = safeLocalStorage.getItem(STORAGE_KEY);
       this._data = raw ? JSON.parse(raw) : { profiles: [] };
     } catch (e) { this._data = { profiles: [] }; }
     // migrate: ensure every profile has a characterId and complete upgrade keys
@@ -2369,18 +2370,18 @@ const Profile = {
     return this._data;
   },
   save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this._data)); } catch (e) {}
+    try { safeLocalStorage.setItem(STORAGE_KEY, JSON.stringify(this._data)); } catch (e) {}
   },
   list() { return this._data.profiles.slice(); },
   activeId() {
-    try { return localStorage.getItem(ACTIVE_KEY); } catch (e) { return null; }
+    try { return safeLocalStorage.getItem(ACTIVE_KEY); } catch (e) { return null; }
   },
   active() {
     const id = this.activeId();
     return this._data.profiles.find(p => p.id === id) || null;
   },
   setActive(id) {
-    try { localStorage.setItem(ACTIVE_KEY, id); } catch (e) {}
+    try { safeLocalStorage.setItem(ACTIVE_KEY, id); } catch (e) {}
   },
   create(name, characterId) {
     name = (name || '').trim().toUpperCase().slice(0, 14);
@@ -2443,7 +2444,7 @@ const Profile = {
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
-      const legacy = parseInt(localStorage.getItem(LEGACY_BEST) || '0', 10);
+      const legacy = parseInt(safeLocalStorage.getItem(LEGACY_BEST) || '0', 10);
       if (legacy > 0) p.bestClassic = legacy;
     }
     this._data.profiles.push(p);
@@ -2457,7 +2458,7 @@ const Profile = {
     if (this.activeId() === id) {
       const first = this._data.profiles[0];
       if (first) this.setActive(first.id);
-      else { try { localStorage.removeItem(ACTIVE_KEY); } catch (e) {} }
+      else { try { safeLocalStorage.removeItem(ACTIVE_KEY); } catch (e) {} }
     }
   },
   earn(amt) {
@@ -2823,7 +2824,7 @@ const Settings = {
   empireExpansion: true,
   load() {
     try {
-      const raw = localStorage.getItem(SETTINGS_KEY);
+      const raw = safeLocalStorage.getItem(SETTINGS_KEY);
       if (!raw) return;
       const o = JSON.parse(raw);
       if (typeof o.master === 'number')    this.master    = clampSet(o.master, 0, 1);
@@ -2845,7 +2846,7 @@ const Settings = {
   },
   save() {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      safeLocalStorage.setItem(SETTINGS_KEY, JSON.stringify({
         master: this.master, music: this.music, sfx: this.sfx, shake: this.shake,
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
@@ -4169,7 +4170,7 @@ window.addEventListener('keydown', e => {
     }
   }
   // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
-  // persists the choice in localStorage. Skipped while typing in the
+  // persists the choice in resilient local storage. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
   if (key === 'q' && !isTypingField(document.activeElement)) {
     if (Game.state === 'playing') triggerVehicleAbility();
@@ -12212,7 +12213,7 @@ function updateHint() {
 // ============================================================
 // LOOP
 // ============================================================
-let last = performance.now();
+let last = perfNow();
 // Adaptive quality governor: tracks an EWMA of frame cost and dials runtime
 // caps up/down. Quality 1 = full detail, 0 = stripped (fewer particles, no
 // weather, smaller bullet/popup buffers). The governor only nudges by small
@@ -12263,7 +12264,7 @@ function loadQualityPref() {
   } catch (_) {}
   if (!pref) {
     try {
-      const s = localStorage.getItem(QUALITY_KEY);
+      const s = safeLocalStorage.getItem(QUALITY_KEY);
       if (s && (s === 'auto' || s in QUALITY_PRESETS)) pref = s;
     } catch (_) {}
   }
@@ -12275,7 +12276,7 @@ function setQualityMode(mode, persist) {
   if (mode !== 'auto') PerfMon.quality = QUALITY_PRESETS[mode];
   applyQualityCaps();
   if (persist) {
-    try { localStorage.setItem(QUALITY_KEY, mode); } catch (_) {}
+    try { safeLocalStorage.setItem(QUALITY_KEY, mode); } catch (_) {}
   }
 }
 function cycleQualityMode() {
@@ -12298,7 +12299,7 @@ document.addEventListener('visibilitychange', () => {
   PerfMon.hidden = (document.visibilityState !== 'visible');
   // Reset the dt baseline when we come back so the first post-resume frame
   // doesn't carry a giant elapsed time.
-  if (!PerfMon.hidden) last = performance.now();
+  if (!PerfMon.hidden) last = perfNow();
 });
 
 // Flag set by the adaptive scale governor when it changes renderScale.
@@ -12387,7 +12388,7 @@ function frame(now) {
 
   // EWMA of total frame cost — used by the quality governor below and the
   // debug HUD overlay.
-  const cost = performance.now() - frameStart;
+  const cost = perfNow() - frameStart;
   PerfMon.ewmaMs = PerfMon.ewmaMs * 0.92 + cost * 0.08;
   // Sliding 1s FPS window for the debug HUD.
   PerfMon.frames++;
@@ -12519,7 +12520,7 @@ function drawMpGhosts() {
   const inGame = (Game.state === 'playing' || Game.state === 'loading'
     || Game.state === 'dying' || Game.state === 'victory');
   if (!inGame) return;
-  const now = performance.now();
+  const now = perfNow();
   ctx.save();
   for (const [id, p] of MP.peers) {
     const s = p.s; if (!s || s.inMenu) continue;
@@ -12903,10 +12904,10 @@ const LevelEditor = {
   },
   // Persist a draft config in localStorage
   saveDraft(cfg) {
-    try { localStorage.setItem('mojave_editor_draft', JSON.stringify(cfg)); } catch (_) {}
+    try { safeLocalStorage.setItem('mojave_editor_draft', JSON.stringify(cfg)); } catch (_) {}
   },
   loadDraft() {
-    try { return JSON.parse(localStorage.getItem('mojave_editor_draft') || 'null'); } catch (_) { return null; }
+    try { return JSON.parse(safeLocalStorage.getItem('mojave_editor_draft') || 'null'); } catch (_) { return null; }
   },
 };
 
@@ -13077,11 +13078,11 @@ const MAX_RIVALS = 5;
 const Rivals = {
   _list: null,
   load() {
-    try { this._list = JSON.parse(localStorage.getItem(RIVALS_STORAGE_KEY) || '[]'); }
+    try { this._list = JSON.parse(safeLocalStorage.getItem(RIVALS_STORAGE_KEY) || '[]'); }
     catch (_) { this._list = []; }
     if (!Array.isArray(this._list)) this._list = [];
   },
-  save() { try { localStorage.setItem(RIVALS_STORAGE_KEY, JSON.stringify(this._list)); } catch (_) {} },
+  save() { try { safeLocalStorage.setItem(RIVALS_STORAGE_KEY, JSON.stringify(this._list)); } catch (_) {} },
   list() { if (!this._list) this.load(); return this._list.slice(); },
   // Generate a shareable rival code from the active profile
   generateCode() {
@@ -13159,11 +13160,11 @@ const MAX_REPLAYS = 8;
 const Replay = {
   _recording: false, _frames: [], _lastCapture: 0, _list: null,
   load() {
-    try { this._list = JSON.parse(localStorage.getItem(REPLAY_STORAGE_KEY) || '[]'); }
+    try { this._list = JSON.parse(safeLocalStorage.getItem(REPLAY_STORAGE_KEY) || '[]'); }
     catch (_) { this._list = []; }
     if (!Array.isArray(this._list)) this._list = [];
   },
-  save() { try { localStorage.setItem(REPLAY_STORAGE_KEY, JSON.stringify(this._list)); } catch (_) {} },
+  save() { try { safeLocalStorage.setItem(REPLAY_STORAGE_KEY, JSON.stringify(this._list)); } catch (_) {} },
   list() { if (!this._list) this.load(); return this._list.slice(); },
   startRecording() { this._recording = true; this._frames = []; this._lastCapture = 0; },
   stopRecording()  { this._recording = false; },
@@ -13310,7 +13311,7 @@ function buildPlatformScreen() {
   const iapAvailable = !!IAPService.isAvailable;
   const products = (iapAvailable && IAPService.PRODUCTS) ? IAPService.PRODUCTS : [];
   const splitActive = !!SplitScreen.isActive();
-  const cloudConnected = !!(localStorage.getItem(CLOUD_ID_KEY) && localStorage.getItem(CLOUD_TOKEN_KEY));
+  const cloudConnected = !!(safeLocalStorage.getItem(CLOUD_ID_KEY) && safeLocalStorage.getItem(CLOUD_TOKEN_KEY));
 
   return `
     <h2>✦ NEW GAME+ PRESTIGE</h2>
@@ -13793,7 +13794,7 @@ UI.act = function(action, data) {
   // 5 fps replay capture interval — runs independently of the render loop
   setInterval(function() {
     if (Game.state === 'playing' && !Game.paused) {
-      Replay.captureFrame(performance.now());
+      Replay.captureFrame(perfNow());
     }
   }, 1000 / REPLAY_FPS);
 
@@ -13943,8 +13944,8 @@ function cloudSave() {
       .catch(err => UI.toast('CLOUD SAVE FAILED: ' + err.message));
   };
 
-  const existingId    = localStorage.getItem(CLOUD_ID_KEY);
-  const existingToken = localStorage.getItem(CLOUD_TOKEN_KEY);
+  const existingId    = safeLocalStorage.getItem(CLOUD_ID_KEY);
+  const existingToken = safeLocalStorage.getItem(CLOUD_TOKEN_KEY);
   if (existingId && existingToken) {
     doSave(existingId, existingToken);
     return;
@@ -13953,8 +13954,8 @@ function cloudSave() {
   fetch(base + '/api/accounts/register', { method: 'POST' })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
     .then(resp => {
-      localStorage.setItem(CLOUD_ID_KEY, resp.id);
-      localStorage.setItem(CLOUD_TOKEN_KEY, resp.token);
+      safeLocalStorage.setItem(CLOUD_ID_KEY, resp.id);
+      safeLocalStorage.setItem(CLOUD_TOKEN_KEY, resp.token);
       doSave(resp.id, resp.token);
     })
     .catch(err => UI.toast('COULD NOT REACH CLOUD: ' + err.message));
@@ -13963,8 +13964,8 @@ function cloudSave() {
 function cloudRestore() {
   const base = cloudApiBase();
   if (!base) { UI.toast('CLOUD NOT CONFIGURED'); return; }
-  const existing = localStorage.getItem(CLOUD_ID_KEY);
-  const existingToken = localStorage.getItem(CLOUD_TOKEN_KEY);
+  const existing = safeLocalStorage.getItem(CLOUD_ID_KEY);
+  const existingToken = safeLocalStorage.getItem(CLOUD_TOKEN_KEY);
   const hintHtml = existing
     ? `YOUR CURRENT CODE: <b style="color:var(--gold)">${escapeHtml(existing + '-' + existingToken)}</b><br/><br/>ENTER A CODE TO RESTORE A DIFFERENT ACCOUNT.`
     : 'ENTER THE CLOUD CODE YOU WERE GIVEN WHEN YOU SAVED.';
@@ -13991,8 +13992,8 @@ function cloudRestore() {
           resp.data.profiles.forEach(pp => existing2.set(pp.id, pp));
           merged.profiles = Array.from(existing2.values());
           Profile.save();
-          localStorage.setItem(CLOUD_ID_KEY, id);
-          localStorage.setItem(CLOUD_TOKEN_KEY, token);
+          safeLocalStorage.setItem(CLOUD_ID_KEY, id);
+          safeLocalStorage.setItem(CLOUD_TOKEN_KEY, token);
           UI.showProfiles();
           UI.toast('CLOUD RESTORE COMPLETE!');
         })
@@ -14687,7 +14688,7 @@ const Cinematic = (function () {
   function drawGrain(ctx, k) {
     const a = 0.07 * k;
     if (a < 0.005) return;
-    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    const now = perfNow();
     if (!_grainCanvas || (now - _grainBuiltAt) > 2800) buildGrain(now);
     ctx.save();
     ctx.globalCompositeOperation = 'overlay';
@@ -15586,22 +15587,22 @@ const WASTELAND_RUN_SCORE_KEY = 'mojave_wasteland_scores_v1';
 function recordWastelandRunScore(profile, seedKey, score) {
   if (!seedKey) return;
   try {
-    const all = JSON.parse(localStorage.getItem(WASTELAND_RUN_SCORE_KEY) || '{}');
+    const all = JSON.parse(safeLocalStorage.getItem(WASTELAND_RUN_SCORE_KEY) || '{}');
     const arr = all[seedKey] || [];
     arr.push({ name: profile.name, score: Math.floor(score), vehicle: profile.activeVehicle, at: Date.now() });
     all[seedKey] = arr.sort((a,b)=>b.score-a.score).slice(0, 10);
-    localStorage.setItem(WASTELAND_RUN_SCORE_KEY, JSON.stringify(all));
+    safeLocalStorage.setItem(WASTELAND_RUN_SCORE_KEY, JSON.stringify(all));
   } catch (_) {}
 }
 function recordDailyLeagueScore(profile, seedKey, score) {
   try {
     const key = 'mojave_daily_league_v1';
-    const all = JSON.parse(localStorage.getItem(key) || '{}');
+    const all = JSON.parse(safeLocalStorage.getItem(key) || '{}');
     const week = thisWeekKey();
     const arr = all[week] || [];
     arr.push({ name: profile.name, score: Math.floor(score), seed: seedKey, at: Date.now() });
     all[week] = arr.sort((a,b)=>b.score-a.score).slice(0, 3);
-    localStorage.setItem(key, JSON.stringify(all));
+    safeLocalStorage.setItem(key, JSON.stringify(all));
   } catch (_) {}
 }
 
@@ -15843,7 +15844,7 @@ const PushService = (() => {
   let _permissionGranted = false;
 
   function savedToken() {
-    try { return localStorage.getItem(PUSH_TOKEN_KEY); } catch (_) { return null; }
+    try { return safeLocalStorage.getItem(PUSH_TOKEN_KEY); } catch (_) { return null; }
   }
 
   async function requestPermission() {
@@ -15869,7 +15870,7 @@ const PushService = (() => {
 
       PushNotifications.addListener('registration', (token) => {
         _token = token.value;
-        try { localStorage.setItem(PUSH_TOKEN_KEY, _token); } catch (_) {}
+        try { safeLocalStorage.setItem(PUSH_TOKEN_KEY, _token); } catch (_) {}
         registerTokenWithServer(_token);
       });
 
@@ -15900,8 +15901,8 @@ const PushService = (() => {
   function registerTokenWithServer(token) {
     const base = cloudApiBase();
     if (!base || !token) return;
-    const cloudId = localStorage.getItem(CLOUD_ID_KEY);
-    const cloudToken = localStorage.getItem(CLOUD_TOKEN_KEY);
+    const cloudId = safeLocalStorage.getItem(CLOUD_ID_KEY);
+    const cloudToken = safeLocalStorage.getItem(CLOUD_TOKEN_KEY);
     if (!cloudId || !cloudToken) return;
     fetch(base + '/api/push/register', {
       method: 'POST',
@@ -15942,12 +15943,12 @@ const IAPService = (() => {
 
   function loadEntitlements() {
     try {
-      _entitlements = JSON.parse(localStorage.getItem(IAP_ENTITLEMENTS_KEY) || '{}');
+      _entitlements = JSON.parse(safeLocalStorage.getItem(IAP_ENTITLEMENTS_KEY) || '{}');
     } catch (_) { _entitlements = {}; }
   }
 
   function saveEntitlements() {
-    try { localStorage.setItem(IAP_ENTITLEMENTS_KEY, JSON.stringify(_entitlements)); } catch (_) {}
+    try { safeLocalStorage.setItem(IAP_ENTITLEMENTS_KEY, JSON.stringify(_entitlements)); } catch (_) {}
   }
 
   function hasEntitlement(productId) {
@@ -16101,18 +16102,18 @@ function cloudSyncPackage() {
     savedAt: Date.now(),
     deviceId: getDeviceId(),
     profiles,
-    entitlements: (() => { try { return JSON.parse(localStorage.getItem('mojaveRun_iap_entitlements') || '{}'); } catch (_) { return {}; } })(),
-    settings: (() => { try { return JSON.parse(localStorage.getItem('mojaveRunSettings') || '{}'); } catch (_) { return {}; } })(),
+    entitlements: (() => { try { return JSON.parse(safeLocalStorage.getItem('mojaveRun_iap_entitlements') || '{}'); } catch (_) { return {}; } })(),
+    settings: (() => { try { return JSON.parse(safeLocalStorage.getItem('mojaveRunSettings') || '{}'); } catch (_) { return {}; } })(),
   };
 }
 
 function getDeviceId() {
   const key = 'mojaveRun_device_id';
   let id = null;
-  try { id = localStorage.getItem(key); } catch (_) {}
+  try { id = safeLocalStorage.getItem(key); } catch (_) {}
   if (!id) {
     id = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-    try { localStorage.setItem(key, id); } catch (_) {}
+    try { safeLocalStorage.setItem(key, id); } catch (_) {}
   }
   return id;
 }
@@ -16149,8 +16150,8 @@ function cloudSyncMerge(local, remote) {
 function cloudAutoSync() {
   const base = cloudApiBase();
   if (!base) return;
-  const id = localStorage.getItem(CLOUD_ID_KEY);
-  const token = localStorage.getItem(CLOUD_TOKEN_KEY);
+  const id = safeLocalStorage.getItem(CLOUD_ID_KEY);
+  const token = safeLocalStorage.getItem(CLOUD_TOKEN_KEY);
   if (!id || !token) return;
 
   const data = cloudSyncPackage();
@@ -16505,7 +16506,7 @@ const ConsoleInput = {
     const gp = this.getPlayerPad(0);
     if (!gp) return;
 
-    const now = performance.now();
+    const now = perfNow();
     if (now < this._menuCooldown) { this.updatePrevState(gp, 0); return; }
 
     if (this.justPressed(gp, GAMEPAD_BUTTON_DPAD_UP, 0)) {
@@ -16869,9 +16870,9 @@ const PlatformCompliance = {
     const results = [];
     try {
       const testKey = '_mojave_cert_test';
-      localStorage.setItem(testKey, 'ok');
-      const read = localStorage.getItem(testKey);
-      localStorage.removeItem(testKey);
+      safeLocalStorage.setItem(testKey, 'ok');
+      const read = safeLocalStorage.getItem(testKey);
+      safeLocalStorage.removeItem(testKey);
       results.push({ test: 'localStorage', pass: read === 'ok' });
     } catch (_) {
       results.push({ test: 'localStorage', pass: false });
