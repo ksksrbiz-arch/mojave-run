@@ -4302,6 +4302,7 @@ const Game = {
   sidekick: null,
   sidekickHealT: 0,
   magnetRangeMul: 1,
+  storyBeatT: 0,
   zombie: null,              // Zombie Wasteland optional wave/objective state
   coopDowned: false,          // multiplayer revive helper only
   // badges earned at the end of this run (populated by endRun)
@@ -4555,6 +4556,7 @@ function startRun(mode, level) {
     Game.windingRoad = null;
   }
   Game._lastStoryDistance = 0; // reset story chapter tracker
+  Game.storyBeatT = 0;
   Game.isNight = !!(Game.levelData && Game.levelData.night);
   Game.isStorm = !!(Game.levelData && Game.levelData.storm);
   if (Game.runMutators.some(m => m.id === 'blackout')) Game.isNight = true;
@@ -5856,6 +5858,7 @@ function update(dt) {
   if (Game.hintTime > 0) Game.hintTime -= dt;
   if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.hitFlash > 0) Game.hitFlash -= dt;
+  if (Game.storyBeatT > 0) Game.storyBeatT -= dt;
   if (Game.eventBanner) {
     Game.eventBanner.t -= dt;
     if (Game.eventBanner.t <= 0) Game.eventBanner = null;
@@ -5946,6 +5949,7 @@ function update(dt) {
     const ch = STORY_CHAPTERS.find(c => c.distance > 0 && Game.distance >= c.distance && Game._lastStoryDistance < c.distance);
     if (ch) {
       Game._lastStoryDistance = ch.distance;
+      Game.storyBeatT = ENEMY_STORY_ANIM_WINDOW;
       announceEvent(ch.title, '#a8c890');
       const maxLen = 40;
       const text = ch.text;
@@ -6246,6 +6250,9 @@ function update(dt) {
   // ---- enemies ----
   for (let i = Game.enemies.length - 1; i >= 0; i--) {
     const e = Game.enemies[i];
+    if (e.spawnAnimT > 0) e.spawnAnimT = Math.max(0, e.spawnAnimT - dt);
+    if (e.hitAnimT > 0) e.hitAnimT = Math.max(0, e.hitAnimT - dt);
+    if (e.storyAnimT > 0) e.storyAnimT = Math.max(0, e.storyAnimT - dt);
     // movement per kind
     if (e.kind === 'bike') {
       e.wave += e.waveSpeed * dt;
@@ -6371,6 +6378,8 @@ function update(dt) {
           ((isPowerupActive('nitro') ? Game.nitroDamageMul : 1));
         const dmg = rawDmg * (1 - (e.damageReduction || 0));
         e.hp -= dmg;
+        e.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
+        if (dmg >= Math.max(8, (e.maxHp || 1) * 0.22)) e.storyAnimT = Math.max(e.storyAnimT || 0, 0.45);
         applyWeaponSpecHit(b, e, dmg);
         if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', 11);
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
@@ -6419,7 +6428,10 @@ function update(dt) {
       const isZombie = e.kind === 'zombie';
       // Zombies: running them down damages them, they claw the player
       const ramDmg = isZombie ? 3 : BASE_RAM_DAMAGE * Game.contactDamageMul;
-      if (ramDmg > 0) e.hp -= ramDmg;
+      if (ramDmg > 0) {
+        e.hp -= ramDmg;
+        e.hitAnimT = ENEMY_HIT_ANIM_WINDOW * 0.8;
+      }
       // shield blocks contact damage but breaks the enemy
       if (isPowerupActive('shield')) {
         emit(e.x, e.y, 24, { color:'#7aaaff', speed: 280, life: 0.5, size: 3 });
@@ -6448,6 +6460,7 @@ function update(dt) {
           // zombie survives the hit but bounces back
           e.vy *= 0.7;
           e.vx = (e.x < Game.player.x ? -1 : 1) * 40;
+          e.storyAnimT = Math.max(e.storyAnimT || 0, 0.5);
         } else {
           emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
           Game.enemies.splice(i,1);
@@ -7664,6 +7677,9 @@ const ENEMY_FIRE_SPARK_CHANCE = 0.25;
 const BIKE_DUST_VELOCITY_THRESHOLD = 55;
 const BIKE_DUST_SPAWN_CHANCE = 0.2;
 const RUNNER_DUST_SPAWN_CHANCE = 0.18;
+const ENEMY_SPAWN_ANIM_WINDOW = 0.42;
+const ENEMY_HIT_ANIM_WINDOW = 0.22;
+const ENEMY_STORY_ANIM_WINDOW = 1.15;
 const UPGRADE_PULSE_RATE = 10;
 const WEAPON_SWAY_RATE = 12;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
@@ -8065,12 +8081,17 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const speed = Math.abs(vx || 0);
   const speedN = clamp(speed / 460, 0, 1);
   const detail = opts.detailLevel !== undefined ? opts.detailLevel : visualQualityLevel();
+  const spawnN = clamp((opts.spawnAnimT || 0) / ENEMY_SPAWN_ANIM_WINDOW, 0, 1);
+  const hitN = clamp((opts.hitAnimT || 0) / ENEMY_HIT_ANIM_WINDOW, 0, 1);
+  const storyN = clamp((opts.storyAnimT || 0) / ENEMY_STORY_ANIM_WINDOW, 0, 1);
   const biomeRough = BIOME_ROUGHNESS_MAP[Game.biome] || 0.15;
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
   const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
   const lean = clamp(vx / 460, -1, 1) * (0.12 + speedN * 0.12) + idleRock;
-  const tilt = opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0);
+  const hitPunch = Math.sin(hitN * Math.PI);
+  const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
+  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0)) + hitPunch * 0.08;
   const wheelSpin = t * (5.5 + speedN * 30);
   const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
   const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
@@ -8078,8 +8099,9 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
     : 1;
 
   ctx.save();
-  ctx.translate(x, y + suspensionBob);
+  ctx.translate(x, y + suspensionBob - spawnN * 6);
   ctx.rotate(tilt);
+  ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03);
   ctx.globalAlpha *= ghostAlpha * cloakFade;
 
   const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.92);
@@ -8127,6 +8149,11 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades, opts);
   drawVehicleExtras(w, h, visual, detail);
   drawVehicleLightsAndFx(w, h, c, detail, speedN, t, opts, visual, upgrades, damageR);
+  if (hitPunch > 0.01) {
+    ctx.fillStyle = `rgba(255,245,210,${0.35 * hitPunch})`;
+    pathVehicleSilhouette(w, h, visual.silhouette);
+    ctx.fill();
+  }
 
   if (opts.ghost && detail >= 1) {
     ctx.fillStyle = 'rgba(170,210,255,0.22)';
@@ -8453,7 +8480,15 @@ function drawEnemyThreatHalos() {
   ctx.restore();
 }
 
+function enemyAnimState(e) {
+  const spawnN = clamp((e && e.spawnAnimT ? e.spawnAnimT : 0) / ENEMY_SPAWN_ANIM_WINDOW, 0, 1);
+  const hitN = clamp((e && e.hitAnimT ? e.hitAnimT : 0) / ENEMY_HIT_ANIM_WINDOW, 0, 1);
+  const storyN = clamp((e && e.storyAnimT ? e.storyAnimT : 0) / ENEMY_STORY_ANIM_WINDOW, 0, 1);
+  return { spawnN, hitN, storyN };
+}
+
 function drawEnemy(e) {
+  const anim = enemyAnimState(e);
   if (e.kind === 'bike')   { drawBike(e);   return; }
   if (e.kind === 'mortar') { drawMortar(e); return; }
   if (e.kind === 'zombie') { drawZombie(e); return; }
@@ -8469,6 +8504,9 @@ function drawEnemy(e) {
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
     extraTilt: Math.sin((Game.t || 0) * 4 + e.x * 0.02) * 0.04 + (e.fireT !== undefined && e.fireT < ENEMY_FIRE_RECOIL_WINDOW ? -0.07 : 0),
+    spawnAnimT: e.spawnAnimT || 0,
+    hitAnimT: e.hitAnimT || 0,
+    storyAnimT: e.storyAnimT || 0,
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -8518,6 +8556,15 @@ function drawEnemy(e) {
       shape: 'rect', rot: rand(0, Math.PI * 2),
     });
   }
+  if (anim.storyN > 0.01 && visualQualityLevel() >= 1) {
+    const pulse = 0.2 + Math.sin((Game.t || 0) * 10) * 0.1;
+    ctx.save();
+    ctx.globalAlpha = (anim.storyN * 0.35) + pulse;
+    ctx.strokeStyle = e.kind === 'zombie' ? 'rgba(160,220,110,0.8)' : 'rgba(255,155,90,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(e.x - e.w / 2 - 5, e.y - e.h / 2 - 5, e.w + 10, e.h + 10);
+    ctx.restore();
+  }
 }
 
 function drawBike(e) {
@@ -8531,6 +8578,9 @@ function drawBike(e) {
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
     extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07 + (e.fireT !== undefined && e.fireT < BIKE_FIRE_LEAN_WINDOW ? -0.09 : 0),
+    spawnAnimT: e.spawnAnimT || 0,
+    hitAnimT: e.hitAnimT || 0,
+    storyAnimT: e.storyAnimT || 0,
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -8580,6 +8630,9 @@ function drawMortar(e) {
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
+    spawnAnimT: e.spawnAnimT || 0,
+    hitAnimT: e.hitAnimT || 0,
+    storyAnimT: e.storyAnimT || 0,
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -8600,6 +8653,7 @@ function drawMortar(e) {
 }
 
 function drawZombie(e) {
+  const anim = enemyAnimState(e);
   ctx.save();
   ctx.translate(e.x, e.y);
   const isBruiser = e.zombieType === 'tank' || e.zombieType === 'charger';
@@ -8607,11 +8661,15 @@ function drawZombie(e) {
   const animT = (Game.t || 0) * (isRunner ? 8.5 : 6.1) + (e.wobble || 0) * 1.7 + e.x * 0.03;
   const torsoBob = Math.sin(animT) * (isRunner ? 2.2 : 1.2);
   const bodyLean = clamp((e.vx || 0) / 170, -1, 1) * 0.18 + Math.sin(animT * 0.36) * 0.05;
+  const spawnLift = anim.spawnN * (isRunner ? 9 : 7);
+  const hitPunch = Math.sin(anim.hitN * Math.PI);
+  const storyPulse = 1 + anim.storyN * 0.08 * (0.5 + 0.5 * Math.sin((Game.t || 0) * 8));
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(1, e.h/2 + 2, e.w/2 + 2, 4, 0, 0, Math.PI*2); ctx.fill();
-  ctx.translate(0, torsoBob);
-  ctx.rotate(bodyLean);
+  ctx.translate(0, torsoBob - spawnLift);
+  ctx.rotate(bodyLean + hitPunch * 0.08);
+  ctx.scale(storyPulse + hitPunch * 0.05, storyPulse - hitPunch * 0.03);
   // legs (two rects, offset for shamble animation)
   const legOffset = Math.sin(animT * 1.4) * (isRunner ? 5.8 : 3.4);
   ctx.fillStyle = e.goreColor || '#2a3a18';
@@ -8659,6 +8717,11 @@ function drawZombie(e) {
     ctx.strokeStyle = '#c8ff80';
     ctx.lineWidth = 2;
     ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
+  }
+  if (hitPunch > 0.01) {
+    ctx.globalAlpha = hitPunch * 0.4;
+    ctx.fillStyle = '#fff2c2';
+    ctx.fillRect(-e.w/2 - 3, -e.h/2 - 3, e.w + 6, e.h + 6);
   }
   ctx.restore();
   if (isRunner && visualQualityLevel() >= 1 && Math.random() < RUNNER_DUST_SPAWN_CHANCE) {
@@ -8725,6 +8788,9 @@ function drawTank(e) {
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
+    spawnAnimT: e.spawnAnimT || 0,
+    hitAnimT: e.hitAnimT || 0,
+    storyAnimT: e.storyAnimT || 0,
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -10096,6 +10162,7 @@ function render() {
             damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
             ghost: false,
             cloak: isCloakActive,
+            storyAnimT: Game.storyBeatT || 0,
           }
         ));
       if (isChargeActive && Math.random() < 0.35 && visualQualityLevel() >= 1) {
@@ -11544,12 +11611,14 @@ const UI = {
 
   // Show a fullscreen cinematic overlay (screenId without 'screen-' prefix),
   // then call cb when dismissed (tap or auto-dismiss after durationMs).
-  _showCinematic(screenId, durationMs, cb) {
+  _showCinematic(screenId, durationMs, cb, opts = null) {
     this.show(screenId);
     const overlay = document.getElementById('screen-' + screenId);
+    if (overlay && opts && opts.theme) overlay.setAttribute('data-cine-theme', opts.theme);
     const dismiss = () => {
       if (overlay) overlay.removeEventListener('pointerdown', once);
       clearTimeout(timer);
+      if (overlay && overlay.hasAttribute('data-cine-theme')) overlay.removeAttribute('data-cine-theme');
       UI.hideAllScreens();
       cb();
     };
@@ -11569,7 +11638,7 @@ const UI = {
     if (stateEl) stateEl.textContent = loc.state.toUpperCase();
     if (textEl)  textEl.textContent  = loc.intro;
     this._resetAnimations('loc-intro', '.loc-intro-eyebrow,.loc-intro-name,.loc-intro-state,.loc-intro-divider,.loc-intro-text');
-    this._showCinematic('loc-intro', this._LOCATION_INTRO_DURATION, cb);
+    this._showCinematic('loc-intro', this._LOCATION_INTRO_DURATION, cb, { theme: loc.night ? 'night' : loc.storm ? 'storm' : 'road' });
   },
 
   // ---- ZOMBIE PORT EMOTIONAL CUTSCENE ----
@@ -11591,7 +11660,7 @@ const UI = {
         : 'You didn\'t pull the trigger on them yourself. But the violence you drove through left a wake. The dead rise from every battlefield you passed through. They\'re coming. The zombie horde begins here.';
     }
     this._resetAnimations('zombie-cut', '.zombie-cut-icon,.zombie-cut-title,.zombie-cut-count,.zombie-cut-text');
-    this._showCinematic('zombie-cut', this._ZOMBIE_CUTSCENE_DURATION, cb);
+    this._showCinematic('zombie-cut', this._ZOMBIE_CUTSCENE_DURATION, cb, { theme: civCount > 0 ? 'guilt' : 'omens' });
   },
 
   // ---- CAMPAIGN STORY OVERLAY ----
@@ -11621,6 +11690,16 @@ const UI = {
     const skLine  = document.getElementById('story-sk-line');
     titleEl.textContent = isLocCleared ? loc.name.toUpperCase() + ' CLEARED' : lvl.name.toUpperCase() + ' CLEARED';
     textEl.textContent  = isLocCleared ? loc.outro : (lvl.obj === 'boss' ? 'BOSS ELIMINATED. THE ROAD OPENS.' : lvl.obj === 'horde' ? 'HORDE BROKEN. THE STREETS ARE QUIET — FOR NOW.' : 'OBJECTIVE COMPLETE. KEEP MOVING.');
+    const storyOverlay = document.getElementById('screen-story');
+    if (storyOverlay) {
+      const theme = zombieUnlocked ? 'zombie'
+        : lvl.obj === 'boss' ? 'boss'
+        : lvl.obj === 'horde' ? 'horde'
+        : sidekickId ? 'sidekick'
+        : isLocCleared ? 'region'
+        : 'mission';
+      storyOverlay.setAttribute('data-story-theme', theme);
+    }
     if (skLine) {
       const notices = [];
       if (sidekickId) {
@@ -11640,6 +11719,7 @@ const UI = {
     this._resetAnimations('story', '#story-portrait,.story-title,.story-text,.story-sk-line,.story-tap-hint');
     this.show('story');
     const dismiss = () => {
+      if (storyOverlay && storyOverlay.hasAttribute('data-story-theme')) storyOverlay.removeAttribute('data-story-theme');
       UI.hideAllScreens();
       cb();
     };
@@ -15036,6 +15116,12 @@ function applyV3SpawnTuning(startIndex) {
     if (e.fireT && Game.enemyFireMul) e.fireT *= Game.enemyFireMul;
     if (Game.enemyDamageReduction) e.damageReduction = Game.enemyDamageReduction;
     if (Game.enemyContactMul && e.contact) e.contact *= Game.enemyContactMul;
+    if (e.spawnAnimT === undefined) e.spawnAnimT = ENEMY_SPAWN_ANIM_WINDOW * rand(0.8, 1.15);
+    if (e.hitAnimT === undefined) e.hitAnimT = 0;
+    if (e.storyAnimT === undefined) {
+      const dramatic = !!(e.elite || e.special || e.miniBoss || e.kind === 'tank' || e.kind === 'drone');
+      e.storyAnimT = dramatic ? ENEMY_STORY_ANIM_WINDOW * rand(0.7, 1.05) : 0;
+    }
     e._v3Tuned = true;
   }
 }
