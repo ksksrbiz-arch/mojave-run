@@ -4812,8 +4812,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   };
   Profile.recordRunResult(runResult);
   // === STRATEGY v3.1: detect new personal best after recording ===
-  const _ap2 = Profile.active();
-  if (_ap2) {
+  const currentProfile = Profile.active();
+  if (currentProfile) {
     const s = Math.floor(Game.score);
     if ((Game.mode === 'classic'      && s > _prevBestClassic)   ||
         (Game.mode === 'winding'      && s > _prevBestWinding)   ||
@@ -10788,7 +10788,7 @@ const UI = {
     })();
     rows.push(['BEST MOMENT', bestMoment, false]);
     if (Game.scrapBonusEarned > 0) rows.push(['BONUS SALVAGE', '+' + Game.scrapBonusEarned, false]);
-    // === STRATEGY v3.1: mode victory bonus labeling ===
+    // === STRATEGY v3.1: personal best detection display ===
     if (Game._newPersonalBest) rows.push(['★ NEW RECORD', 'PERSONAL BEST', false]);
     rows.push(['+ SCRAP EARNED', '+' + Game.scrapEarned, false]);
 
@@ -15365,8 +15365,8 @@ function todayDateString() {
 
 // Returns the difference in calendar days between two YYYY-MM-DD strings.
 function daysBetween(a, b) {
-  const msPerDay = 86400000;
-  return Math.round((new Date(b) - new Date(a)) / msPerDay);
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  return Math.round((new Date(b) - new Date(a)) / MS_PER_DAY);
 }
 
 // Called once per showMenu() invocation. Updates login streak, awards catch-up
