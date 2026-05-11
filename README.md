@@ -21,7 +21,7 @@ Version: **3.0.1**
 - **Wasteland Run** — roguelite seeded runs with rotating mutators and local seed leaderboards.
 - **Platform hub** — prestige/New Game+, seasons, weekly challenges, crafting, level editor, rivals, replays, clan tags, photo mode, cloud operations, and native-service hooks.
 - **Multiplayer relay** — room-based ghost co-op presence, shared events/revive messages, global/per-mode scoreboards, and an authoritative Versus mode through the Node relay.
-- **Experimental split-screen** — controller input preview is available in the Platform hub; full shared local co-op gameplay is not yet final.
+- **Local co-op** — two-controller shared-run support rig gameplay is available from the Platform hub.
 - **Offline-first PWA** — service worker caches the game for repeat loads and offline play.
 
 ## Controls

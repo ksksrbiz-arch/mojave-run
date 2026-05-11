@@ -4631,6 +4631,9 @@ function startRun(mode, level) {
   Game.player = {
     x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
   };
+  if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
+    SplitScreen.attachRun(profile, v, Game.vehicleStats);
+  }
   Game.boss = null;
   Game.bossWarning = 0;
   Game.wreck = null;
@@ -6137,6 +6140,9 @@ function update(dt) {
     const siegeMul = isPowerupActive('siege') ? 0.45 : 1;
     const specFireMul = Game.weaponSpecState && Game.weaponSpecState.fireRateMul ? Game.weaponSpecState.fireRateMul : 1;
     Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul * siegeMul * specFireMul;
+  }
+  if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
+    SplitScreen.update(dt);
   }
 
   // ---- bullets ----
@@ -10274,6 +10280,9 @@ function render() {
         ctx.globalAlpha = 1;
       }
     }
+    if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
+      SplitScreen.drawCoopPlayers(ctx);
+    }
     drawParticles();
     drawShockwaves();
     drawPopups();
@@ -10304,6 +10313,7 @@ function render() {
       drawHUD();
       drawPowerupStrip();
       drawComboMeter();
+      if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) SplitScreen.drawOverlay(ctx, W, H);
       if (Game.state === 'replay') drawReplayOverlay();
     }
     if (Game.state === 'playing' && Game.paused) drawPause();
@@ -13310,7 +13320,7 @@ function buildPlatformScreen() {
     <h2>🎮 CONSOLE SERVICES</h2>
     <div class="set-row">
       <div class="set-head">
-        <div><div class="set-name">SPLIT-SCREEN CO-OP · EXPERIMENTAL</div><div class="set-sub">CONTROLLER INPUT PREVIEW — FULL SHARED GAMEPLAY IS NOT YET FINAL</div></div>
+        <div><div class="set-name">LOCAL CO-OP · TWO CONTROLLERS</div><div class="set-sub">P2 DRIVES A SHARED-RUN SUPPORT RIG WITH INDEPENDENT STEERING AND FIRE</div></div>
         ${splitActive
           ? '<button class="btn set-toggle on" data-act="split-stop">STOP</button>'
           : '<button class="btn set-toggle" data-act="split-start">START</button>'}
@@ -16509,8 +16519,23 @@ window.addEventListener('gamepaddisconnected', () => ConsoleInput.assignGamepads
 
 // --- SPLIT-SCREEN CO-OP ---
 const SplitScreen = (() => {
+  // Support rigs are useful co-op assists, not full duplicate players: lighter
+  // damage, slightly slower handling, and a modest fire-delay keep solo balance intact.
+  const SUPPORT_RIG_DAMAGE_MUL = 0.65;
+  const SUPPORT_RIG_FIRE_RATE_MUL = 1.15;
+  const SUPPORT_RIG_MIN_FIRE_COOLDOWN = 0.12;
+  const SUPPORT_RIG_HP_MUL = 0.7;
+  const SUPPORT_RIG_MIN_HP = 40;
+  const SUPPORT_RIG_MOVE_MUL = 0.9;
+  const SUPPORT_RIG_MIN_SPEED = 260;
+  const SUPPORT_RIG_LANE_OFFSET = 38;
+  const SUPPORT_RIG_SHOOT_SFX_CHANCE = 0.55;
+  const SUPPORT_RIG_EXHAUST_CHANCE = 0.2;
+  const SUPPORT_RIG_EXHAUST_X = 10;
+  const SUPPORT_RIG_EXHAUST_Y = 4;
   let _active = false;
   let _players = [];
+  let _runAttached = false;
 
   const LAYOUT = {
     2: [
@@ -16549,13 +16574,14 @@ const SplitScreen = (() => {
       });
     }
 
-    UI.toast('EXPERIMENTAL SPLIT-SCREEN INPUT — ' + playerCount + ' PLAYERS');
+    UI.toast('LOCAL CO-OP READY — START ANY RUN');
     return true;
   }
 
   function stop() {
     _active = false;
     _players = [];
+    _runAttached = false;
   }
 
   function getPlayer(index) {
@@ -16582,6 +16608,125 @@ const SplitScreen = (() => {
       p.input.special = false;
       ConsoleInput.pollPlayer(i, p.input);
     }
+  }
+
+  function attachRun(profile, vehicle, stats) {
+    if (!_active || !_players.length || !vehicle || !stats) return;
+    _runAttached = true;
+    const bounds = roadBounds();
+    for (let i = 0; i < _players.length; i++) {
+      const p = _players[i];
+      const laneOffset = i === 0 ? -SUPPORT_RIG_LANE_OFFSET : SUPPORT_RIG_LANE_OFFSET;
+      p.profile = profile || null;
+      p.vehicle = vehicle;
+      p.stats = Object.assign({}, stats);
+      p.w = 42;
+      p.h = 64;
+      p.x = clamp(W * 0.5 + laneOffset, bounds.x0 + p.w / 2 + 6, bounds.x1 - p.w / 2 - 6);
+      p.y = H - 110;
+      p.vx = 0;
+      p.fireCooldown = 0;
+      p.muzzleT = 0;
+      p.maxHp = i === 0 ? Game.maxHealth : Math.max(SUPPORT_RIG_MIN_HP, Math.round(Game.maxHealth * SUPPORT_RIG_HP_MUL));
+      p.hp = i === 0 ? Game.health : p.maxHp;
+      p.alive = true;
+    }
+  }
+
+  function syncPrimaryPlayer() {
+    const p0 = _players[0];
+    if (!p0 || !Game.player) return;
+    p0.x = Game.player.x;
+    p0.y = Game.player.y;
+    p0.vx = Game.player.vx || 0;
+    p0.w = Game.player.w || 42;
+    p0.h = Game.player.h || 64;
+    p0.hp = Game.health || 0;
+    p0.maxHp = Game.maxHealth || 1;
+    p0.vehicle = Game.vehicle || p0.vehicle;
+    p0.stats = Game.vehicleStats || p0.stats;
+    p0.alive = Game.state === 'playing' && Game.health > 0;
+  }
+
+  function fireSupportGuns(p) {
+    if (!p || !p.vehicle || !p.stats) return;
+    const stats = p.stats;
+    const dmg = Math.max(0.5, (stats.dmg || 1) * SUPPORT_RIG_DAMAGE_MUL);
+    const shotBase = { owner: 'p', dmg, coOp: true, hitIds: [] };
+    const guns = Math.max(1, Math.min(2, stats.guns || 1));
+    if (guns === 1) {
+      Game.bullets.push(Object.assign({}, shotBase, { x: p.x, y: p.y - 30, w: 4, h: 12, vy: -760 }));
+    } else {
+      Game.bullets.push(Object.assign({}, shotBase, { x: p.x - 9, y: p.y - 26, w: 4, h: 12, vy: -760 }));
+      Game.bullets.push(Object.assign({}, shotBase, { x: p.x + 9, y: p.y - 26, w: 4, h: 12, vy: -760 }));
+    }
+    p.muzzleT = 0.08;
+    if (Math.random() < SUPPORT_RIG_SHOOT_SFX_CHANCE) SFX.shoot();
+    emit(p.x, p.y - 30, 2, {
+      color: (p.vehicle.color && p.vehicle.color.glow) || '#fff3b0',
+      speed: 100, life: 0.18, size: 2, spread: Math.PI / 3,
+    });
+  }
+
+  function update(dt) {
+    if (!_active || !_runAttached || Game.state !== 'playing' || Game.paused) return;
+    syncPrimaryPlayer();
+    for (let i = 1; i < _players.length; i++) {
+      const p = _players[i];
+      if (!p || !p.alive || !p.stats) continue;
+      const accel = (p.stats.accel || 1800) * SUPPORT_RIG_MOVE_MUL;
+      const maxV = Math.max(SUPPORT_RIG_MIN_SPEED, (p.stats.maxV || 460) * SUPPORT_RIG_MOVE_MUL);
+      const drag = 6.5;
+      if (p.input.left) p.vx -= accel * dt;
+      if (p.input.right) p.vx += accel * dt;
+      if (!p.input.left && !p.input.right) p.vx -= p.vx * Math.min(1, drag * dt);
+      p.vx = clamp(p.vx, -maxV, maxV);
+      p.x += p.vx * dt;
+      const bounds = roadBounds();
+      if (p.x - p.w / 2 < bounds.x0 + 4) { p.x = bounds.x0 + 4 + p.w / 2; p.vx *= -0.4; }
+      if (p.x + p.w / 2 > bounds.x1 - 4) { p.x = bounds.x1 - 4 - p.w / 2; p.vx *= -0.4; }
+      p.y = H - 110;
+      p.fireCooldown = Math.max(0, (p.fireCooldown || 0) - dt);
+      p.muzzleT = Math.max(0, (p.muzzleT || 0) - dt);
+      if ((p.input.fire || Settings.autoFire) && p.fireCooldown <= 0) {
+        fireSupportGuns(p);
+        const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
+        p.fireCooldown = Math.max(SUPPORT_RIG_MIN_FIRE_COOLDOWN, (p.stats.fireRate || 0.18) * SUPPORT_RIG_FIRE_RATE_MUL * rapidMul);
+      }
+      if (Math.random() < SUPPORT_RIG_EXHAUST_CHANCE) {
+        emitExhaustTrail(p.x - SUPPORT_RIG_EXHAUST_X, p.y + p.h / 2 - SUPPORT_RIG_EXHAUST_Y, 1);
+        emitExhaustTrail(p.x + SUPPORT_RIG_EXHAUST_X, p.y + p.h / 2 - SUPPORT_RIG_EXHAUST_Y, 1);
+      }
+    }
+  }
+
+  function drawCoopPlayers(ctx) {
+    if (!_active || !_runAttached || Game.state !== 'playing') return;
+    for (let i = 1; i < _players.length; i++) {
+      const p = _players[i];
+      if (!p || !p.alive || !p.vehicle) continue;
+      drawVehicle(p.x, p.y, p.vehicle, p.vx || 0, p.w || 42, p.h || 64, {
+        ghost: true,
+        ghostAlpha: 0.78,
+        damageRatio: 1 - clamp((p.hp || 0) / Math.max(1, p.maxHp || 1), 0, 1),
+        noCosmetic: true,
+      });
+      if (p.muzzleT > 0) {
+        const a = clamp(p.muzzleT / 0.08, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = a * 0.65;
+        ctx.fillStyle = (p.vehicle.color && p.vehicle.color.glow) || '#fff3b0';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - p.h / 2 - 6, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawOverlay(ctx, W, H) {
+    if (!_active) return;
+    for (let i = 0; i < _players.length; i++) drawPlayerLabel(ctx, i, W, H);
   }
 
   function drawDivider(ctx, W, H) {
@@ -16626,6 +16771,10 @@ const SplitScreen = (() => {
     getPlayers,
     getViewport,
     pollInputs,
+    attachRun,
+    update,
+    drawCoopPlayers,
+    drawOverlay,
     drawDivider,
     drawPlayerLabel,
   };
@@ -16691,12 +16840,14 @@ UI.act = function(action, data) {
   if (action === 'split-start') {
     SFX.click();
     SplitScreen.start(2);
+    UI.showPlatform();
     return;
   }
   if (action === 'split-stop') {
     SFX.click();
     SplitScreen.stop();
-    UI.toast('SPLIT-SCREEN ENDED');
+    UI.toast('LOCAL CO-OP ENDED');
+    UI.showPlatform();
     return;
   }
   if (action === 'compliance-check') {
