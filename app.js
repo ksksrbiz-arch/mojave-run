@@ -14220,6 +14220,7 @@ function boot() {
 
 const VS_ROAD_W = 400;
 const VS_ROAD_H = 800;
+const VS_MAX_HP = 100;
 
 const Versus = {
   active: false,
@@ -14397,6 +14398,7 @@ function renderVersus() {
   }
 
   const st = Versus.state;
+  const activeProfile = Profile.active();
   const scaleX = W / VS_ROAD_W;
   const scaleY = H / VS_ROAD_H;
   const toScreenX = x => x * scaleX;
@@ -14472,14 +14474,14 @@ function renderVersus() {
       const pw = 42 * scaleX * 0.72;
       const ph = 64 * scaleY * 0.62;
       const isMe = i === Versus.slot;
-      const fallbackVehicleId = isMe ? ((Profile.active() && Profile.active().activeVehicle) || 'rust') : (Versus.opponentVehicleId || 'rust');
+      const fallbackVehicleId = isMe ? ((activeProfile && activeProfile.activeVehicle) || 'rust') : (Versus.opponentVehicleId || 'rust');
       const vehicleId = p.vehicleId || fallbackVehicleId;
       const vehicle = VEHICLE_BY_ID[vehicleId] || VEHICLES[0];
 
       drawVehicle(px, py, vehicle, p.vx || 0, Math.max(28, pw), Math.max(42, ph), {
         ghost: false,
         noCosmetic: false,
-        damageRatio: 1 - clamp((p.hp || 0) / Math.max(1, p.maxHp || 100), 0, 1),
+        damageRatio: 1 - clamp((p.hp || 0) / Math.max(1, p.maxHp || VS_MAX_HP), 0, 1),
       });
 
       // Name tag
@@ -14498,7 +14500,7 @@ function renderVersus() {
       const barY = py - ph / 2 - 6;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.fillRect(px - barW / 2, barY, barW, barH);
-      const hpRatio = clamp((p.hp || 0) / Math.max(1, p.maxHp || 100), 0, 1);
+      const hpRatio = clamp((p.hp || 0) / Math.max(1, p.maxHp || VS_MAX_HP), 0, 1);
       ctx.fillStyle = hpRatio > 0.3 ? '#7af07a' : '#ff5050';
       ctx.fillRect(px - barW / 2, barY, barW * hpRatio, barH);
     }
