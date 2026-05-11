@@ -7655,6 +7655,9 @@ const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
 const BRAKE_PULSE_AMPLITUDE = 0.2;
 const BRAKE_PULSE_RATE = 8;
 const MUZZLE_RECOIL_WINDOW = 0.08;
+const ENEMY_FIRE_RECOIL_WINDOW = 0.26;
+const ENEMY_FIRE_SPARK_WINDOW = 0.24;
+const BIKE_FIRE_LEAN_WINDOW = 0.22;
 const UPGRADE_PULSE_RATE = 10;
 const WEAPON_SWAY_RATE = 12;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
@@ -7875,8 +7878,8 @@ function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades,
   if ((upgrades.weapons || 0) > 0) {
     const turretW = 2.5 + Math.min(4.5, upgrades.weapons * 0.7);
     const muzzleN = clamp((Game.muzzleT || 0) / MUZZLE_RECOIL_WINDOW, 0, 1);
-    const enemyMuzzleN = opts.enemy && opts.enemy.fireT !== undefined && opts.enemy.fireT < 0.26
-      ? 1 - clamp((opts.enemy.fireT || 0) / 0.26, 0, 1)
+    const enemyMuzzleN = opts.enemy && opts.enemy.fireT !== undefined && opts.enemy.fireT < ENEMY_FIRE_RECOIL_WINDOW
+      ? 1 - clamp((opts.enemy.fireT || 0) / ENEMY_FIRE_RECOIL_WINDOW, 0, 1)
       : 0;
     const fireN = Math.max(muzzleN, enemyMuzzleN);
     const turretKick = fireN * (1.4 + upgrades.weapons * 0.35);
@@ -8457,7 +8460,7 @@ function drawEnemy(e) {
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
-    extraTilt: Math.sin((Game.t || 0) * 4 + e.x * 0.02) * 0.04 + (e.fireT !== undefined && e.fireT < 0.26 ? -0.07 : 0),
+    extraTilt: Math.sin((Game.t || 0) * 4 + e.x * 0.02) * 0.04 + (e.fireT !== undefined && e.fireT < ENEMY_FIRE_RECOIL_WINDOW ? -0.07 : 0),
   });
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -8498,7 +8501,7 @@ function drawEnemy(e) {
       });
     }
   }
-  if (visualQualityLevel() >= 1 && e.fireT !== undefined && e.fireT < 0.24 && Math.random() < 0.25) {
+  if (visualQualityLevel() >= 1 && e.fireT !== undefined && e.fireT < ENEMY_FIRE_SPARK_WINDOW && Math.random() < 0.25) {
     Game.particles.push({
       x: e.x + rand(-4, 4), y: e.y - e.h * 0.5,
       vx: rand(-20, 20), vy: rand(-60, -16),
@@ -8519,7 +8522,7 @@ function drawBike(e) {
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
-    extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07 + (e.fireT !== undefined && e.fireT < 0.22 ? -0.09 : 0),
+    extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07 + (e.fireT !== undefined && e.fireT < BIKE_FIRE_LEAN_WINDOW ? -0.09 : 0),
   });
   ctx.save();
   ctx.translate(e.x, e.y);
