@@ -16519,6 +16519,13 @@ window.addEventListener('gamepaddisconnected', () => ConsoleInput.assignGamepads
 
 // --- SPLIT-SCREEN CO-OP ---
 const SplitScreen = (() => {
+  const SUPPORT_RIG_DAMAGE_MUL = 0.65;
+  const SUPPORT_RIG_FIRE_RATE_MUL = 1.15;
+  const SUPPORT_RIG_MIN_FIRE_COOLDOWN = 0.12;
+  const SUPPORT_RIG_HP_MUL = 0.7;
+  const SUPPORT_RIG_MIN_HP = 40;
+  const SUPPORT_RIG_MOVE_MUL = 0.9;
+  const SUPPORT_RIG_MIN_SPEED = 260;
   let _active = false;
   let _players = [];
   let _runAttached = false;
@@ -16613,7 +16620,7 @@ const SplitScreen = (() => {
       p.vx = 0;
       p.fireCooldown = 0;
       p.muzzleT = 0;
-      p.maxHp = i === 0 ? Game.maxHealth : Math.max(40, Math.round(Game.maxHealth * 0.7));
+      p.maxHp = i === 0 ? Game.maxHealth : Math.max(SUPPORT_RIG_MIN_HP, Math.round(Game.maxHealth * SUPPORT_RIG_HP_MUL));
       p.hp = i === 0 ? Game.health : p.maxHp;
       p.alive = true;
     }
@@ -16637,7 +16644,7 @@ const SplitScreen = (() => {
   function fireSupportGuns(p) {
     if (!p || !p.vehicle || !p.stats) return;
     const stats = p.stats;
-    const dmg = Math.max(0.5, (stats.dmg || 1) * 0.65);
+    const dmg = Math.max(0.5, (stats.dmg || 1) * SUPPORT_RIG_DAMAGE_MUL);
     const shotBase = { owner: 'p', dmg, coOp: true, hitIds: [] };
     const guns = Math.max(1, Math.min(2, stats.guns || 1));
     if (guns === 1) {
@@ -16660,8 +16667,8 @@ const SplitScreen = (() => {
     for (let i = 1; i < _players.length; i++) {
       const p = _players[i];
       if (!p || !p.alive || !p.stats) continue;
-      const accel = (p.stats.accel || 1800) * 0.9;
-      const maxV = Math.max(260, (p.stats.maxV || 460) * 0.9);
+      const accel = (p.stats.accel || 1800) * SUPPORT_RIG_MOVE_MUL;
+      const maxV = Math.max(SUPPORT_RIG_MIN_SPEED, (p.stats.maxV || 460) * SUPPORT_RIG_MOVE_MUL);
       const drag = 6.5;
       if (p.input.left) p.vx -= accel * dt;
       if (p.input.right) p.vx += accel * dt;
@@ -16677,7 +16684,7 @@ const SplitScreen = (() => {
       if ((p.input.fire || Settings.autoFire) && p.fireCooldown <= 0) {
         fireSupportGuns(p);
         const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
-        p.fireCooldown = Math.max(0.12, (p.stats.fireRate || 0.18) * 1.15 * rapidMul);
+        p.fireCooldown = Math.max(SUPPORT_RIG_MIN_FIRE_COOLDOWN, (p.stats.fireRate || 0.18) * SUPPORT_RIG_FIRE_RATE_MUL * rapidMul);
       }
       if (Math.random() < 0.2) {
         emitExhaustTrail(p.x - 10, p.y + p.h / 2 - 4, 1);
