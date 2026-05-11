@@ -16519,6 +16519,8 @@ window.addEventListener('gamepaddisconnected', () => ConsoleInput.assignGamepads
 
 // --- SPLIT-SCREEN CO-OP ---
 const SplitScreen = (() => {
+  // Support rigs are useful co-op assists, not full duplicate players: lighter
+  // damage, slightly slower handling, and a modest fire-delay keep solo balance intact.
   const SUPPORT_RIG_DAMAGE_MUL = 0.65;
   const SUPPORT_RIG_FIRE_RATE_MUL = 1.15;
   const SUPPORT_RIG_MIN_FIRE_COOLDOWN = 0.12;
@@ -16526,6 +16528,11 @@ const SplitScreen = (() => {
   const SUPPORT_RIG_MIN_HP = 40;
   const SUPPORT_RIG_MOVE_MUL = 0.9;
   const SUPPORT_RIG_MIN_SPEED = 260;
+  const SUPPORT_RIG_LANE_OFFSET = 38;
+  const SUPPORT_RIG_SHOOT_SFX_CHANCE = 0.55;
+  const SUPPORT_RIG_EXHAUST_CHANCE = 0.2;
+  const SUPPORT_RIG_EXHAUST_X = 10;
+  const SUPPORT_RIG_EXHAUST_Y = 4;
   let _active = false;
   let _players = [];
   let _runAttached = false;
@@ -16609,7 +16616,7 @@ const SplitScreen = (() => {
     const bounds = roadBounds();
     for (let i = 0; i < _players.length; i++) {
       const p = _players[i];
-      const laneOffset = i === 0 ? -38 : 38;
+      const laneOffset = i === 0 ? -SUPPORT_RIG_LANE_OFFSET : SUPPORT_RIG_LANE_OFFSET;
       p.profile = profile || null;
       p.vehicle = vehicle;
       p.stats = Object.assign({}, stats);
@@ -16654,7 +16661,7 @@ const SplitScreen = (() => {
       Game.bullets.push(Object.assign({}, shotBase, { x: p.x + 9, y: p.y - 26, w: 4, h: 12, vy: -760 }));
     }
     p.muzzleT = 0.08;
-    if (Math.random() < 0.55) SFX.shoot();
+    if (Math.random() < SUPPORT_RIG_SHOOT_SFX_CHANCE) SFX.shoot();
     emit(p.x, p.y - 30, 2, {
       color: (p.vehicle.color && p.vehicle.color.glow) || '#fff3b0',
       speed: 100, life: 0.18, size: 2, spread: Math.PI / 3,
@@ -16686,9 +16693,9 @@ const SplitScreen = (() => {
         const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
         p.fireCooldown = Math.max(SUPPORT_RIG_MIN_FIRE_COOLDOWN, (p.stats.fireRate || 0.18) * SUPPORT_RIG_FIRE_RATE_MUL * rapidMul);
       }
-      if (Math.random() < 0.2) {
-        emitExhaustTrail(p.x - 10, p.y + p.h / 2 - 4, 1);
-        emitExhaustTrail(p.x + 10, p.y + p.h / 2 - 4, 1);
+      if (Math.random() < SUPPORT_RIG_EXHAUST_CHANCE) {
+        emitExhaustTrail(p.x - SUPPORT_RIG_EXHAUST_X, p.y + p.h / 2 - SUPPORT_RIG_EXHAUST_Y, 1);
+        emitExhaustTrail(p.x + SUPPORT_RIG_EXHAUST_X, p.y + p.h / 2 - SUPPORT_RIG_EXHAUST_Y, 1);
       }
     }
   }
