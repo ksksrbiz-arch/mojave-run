@@ -23,6 +23,8 @@
 <link rel="privacy-policy" href="/privacy-policy.html" />
 <link rel="icon" type="image/svg+xml" href="/icon.svg" />
 <link rel="apple-touch-icon" href="/icon.svg" />
+<link rel="preload" href="/mp.js" as="script" />
+<link rel="preload" href="/app.js" as="script" />
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -1392,6 +1394,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').then(reg => {
+        if (reg.active) reg.active.postMessage({ type: 'PREFETCH' });
         // Only show the toast for returning users who already had a SW
         // (i.e. this is an update, not first install).
         if (!navigator.serviceWorker.controller) return;
