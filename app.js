@@ -7655,9 +7655,15 @@ const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
 const BRAKE_PULSE_AMPLITUDE = 0.2;
 const BRAKE_PULSE_RATE = 8;
 const MUZZLE_RECOIL_WINDOW = 0.08;
+// Enemy fire timing windows in seconds for visual recoil and flash reads.
 const ENEMY_FIRE_RECOIL_WINDOW = 0.26;
 const ENEMY_FIRE_SPARK_WINDOW = 0.24;
 const BIKE_FIRE_LEAN_WINDOW = 0.22;
+const MIN_FIRE_GLOW_THRESHOLD = 0.05;
+const ENEMY_FIRE_SPARK_CHANCE = 0.25;
+const BIKE_DUST_VELOCITY_THRESHOLD = 55;
+const BIKE_DUST_SPAWN_CHANCE = 0.2;
+const RUNNER_DUST_SPAWN_CHANCE = 0.18;
 const UPGRADE_PULSE_RATE = 10;
 const WEAPON_SWAY_RATE = 12;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
@@ -7878,6 +7884,8 @@ function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades,
   if ((upgrades.weapons || 0) > 0) {
     const turretW = 2.5 + Math.min(4.5, upgrades.weapons * 0.7);
     const muzzleN = clamp((Game.muzzleT || 0) / MUZZLE_RECOIL_WINDOW, 0, 1);
+    // Enemy fireT counts down to zero, so invert normalization to get a
+    // forward-intensity pulse (1 = just fired, 0 = calm).
     const enemyMuzzleN = opts.enemy && opts.enemy.fireT !== undefined && opts.enemy.fireT < ENEMY_FIRE_RECOIL_WINDOW
       ? 1 - clamp((opts.enemy.fireT || 0) / ENEMY_FIRE_RECOIL_WINDOW, 0, 1)
       : 0;
@@ -7894,7 +7902,7 @@ function drawVehicleBodyCore(w, h, c, visual, detail, speedN, damageR, upgrades,
       ctx.fillRect(-w * 0.18, -h * 0.4, 3, 11);
       ctx.fillRect(w * 0.15, -h * 0.4, 3, 11);
     }
-    if (detail >= 1 && fireN > 0.05) {
+    if (detail >= 1 && fireN > MIN_FIRE_GLOW_THRESHOLD) {
       ctx.fillStyle = `rgba(255,190,110,${0.26 + fireN * 0.34})`;
       ctx.beginPath();
       ctx.ellipse(0, -h * 0.61, 2 + upgrades.weapons * 0.45, 4 + fireN * 6, 0, 0, Math.PI * 2);
@@ -8501,7 +8509,7 @@ function drawEnemy(e) {
       });
     }
   }
-  if (visualQualityLevel() >= 1 && e.fireT !== undefined && e.fireT < ENEMY_FIRE_SPARK_WINDOW && Math.random() < 0.25) {
+  if (visualQualityLevel() >= 1 && e.fireT !== undefined && e.fireT < ENEMY_FIRE_SPARK_WINDOW && Math.random() < ENEMY_FIRE_SPARK_CHANCE) {
     Game.particles.push({
       x: e.x + rand(-4, 4), y: e.y - e.h * 0.5,
       vx: rand(-20, 20), vy: rand(-60, -16),
@@ -8552,7 +8560,7 @@ function drawBike(e) {
       color: 'rgba(110,90,70,0.45)',
     });
   }
-  if (visualQualityLevel() >= 1 && Math.abs(e.vx || 0) > 55 && Math.random() < 0.2) {
+  if (visualQualityLevel() >= 1 && Math.abs(e.vx || 0) > BIKE_DUST_VELOCITY_THRESHOLD && Math.random() < BIKE_DUST_SPAWN_CHANCE) {
     Game.particles.push({
       x: e.x + rand(-e.w * 0.45, e.w * 0.45), y: e.y + e.h * 0.44,
       vx: rand(-18, 18), vy: rand(20, 50),
@@ -8653,7 +8661,7 @@ function drawZombie(e) {
     ctx.strokeRect(-e.w/2 - 4, -e.h/2 - 4, e.w + 8, e.h + 8);
   }
   ctx.restore();
-  if (isRunner && visualQualityLevel() >= 1 && Math.random() < 0.18) {
+  if (isRunner && visualQualityLevel() >= 1 && Math.random() < RUNNER_DUST_SPAWN_CHANCE) {
     Game.particles.push({
       x: e.x + rand(-3, 3), y: e.y + e.h * 0.42,
       vx: rand(-15, 15), vy: rand(20, 55),
