@@ -6379,7 +6379,9 @@ function update(dt) {
         const dmg = rawDmg * (1 - (e.damageReduction || 0));
         e.hp -= dmg;
         e.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
-        if (dmg >= Math.max(8, (e.maxHp || 1) * 0.22)) e.storyAnimT = Math.max(e.storyAnimT || 0, 0.45);
+        if (dmg >= Math.max(STORY_DAMAGE_MIN_THRESHOLD, (e.maxHp || 1) * STORY_DAMAGE_HP_RATIO)) {
+          e.storyAnimT = Math.max(e.storyAnimT || 0, STORY_ANIM_MIN_DURATION);
+        }
         applyWeaponSpecHit(b, e, dmg);
         if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', 11);
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
@@ -7680,6 +7682,12 @@ const RUNNER_DUST_SPAWN_CHANCE = 0.18;
 const ENEMY_SPAWN_ANIM_WINDOW = 0.42;
 const ENEMY_HIT_ANIM_WINDOW = 0.22;
 const ENEMY_STORY_ANIM_WINDOW = 1.15;
+const STORY_RING_PULSE_BASE = 0.2;
+const STORY_RING_PULSE_RATE = 10;
+const STORY_RING_PULSE_AMPLITUDE = 0.1;
+const STORY_DAMAGE_MIN_THRESHOLD = 8;
+const STORY_DAMAGE_HP_RATIO = 0.22;
+const STORY_ANIM_MIN_DURATION = 0.45;
 const UPGRADE_PULSE_RATE = 10;
 const WEAPON_SWAY_RATE = 12;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
@@ -8479,9 +8487,9 @@ function drawEnemyThreatHalos() {
 }
 
 function enemyAnimState(e) {
-  const spawnN = clamp((e && e.spawnAnimT ? e.spawnAnimT : 0) / ENEMY_SPAWN_ANIM_WINDOW, 0, 1);
-  const hitN = clamp((e && e.hitAnimT ? e.hitAnimT : 0) / ENEMY_HIT_ANIM_WINDOW, 0, 1);
-  const storyN = clamp((e && e.storyAnimT ? e.storyAnimT : 0) / ENEMY_STORY_ANIM_WINDOW, 0, 1);
+  const spawnN = clamp((e && (e.spawnAnimT ?? 0)) / ENEMY_SPAWN_ANIM_WINDOW, 0, 1);
+  const hitN = clamp((e && (e.hitAnimT ?? 0)) / ENEMY_HIT_ANIM_WINDOW, 0, 1);
+  const storyN = clamp((e && (e.storyAnimT ?? 0)) / ENEMY_STORY_ANIM_WINDOW, 0, 1);
   return { spawnN, hitN, storyN };
 }
 
@@ -8555,7 +8563,7 @@ function drawEnemy(e) {
     });
   }
   if (anim.storyN > 0.01 && visualQualityLevel() >= 1) {
-    const pulse = 0.2 + Math.sin((Game.t || 0) * 10) * 0.1;
+    const pulse = STORY_RING_PULSE_BASE + Math.sin((Game.t || 0) * STORY_RING_PULSE_RATE) * STORY_RING_PULSE_AMPLITUDE;
     ctx.save();
     ctx.globalAlpha = (anim.storyN * 0.35) + pulse;
     ctx.strokeStyle = e.kind === 'zombie' ? 'rgba(160,220,110,0.8)' : 'rgba(255,155,90,0.9)';
@@ -10355,6 +10363,15 @@ function restoreResultsState(snapshot) {
   return true;
 }
 
+function determineStoryTheme(zombieUnlocked, lvl, sidekickId, isLocCleared) {
+  if (zombieUnlocked) return 'zombie';
+  if (lvl && lvl.obj === 'boss') return 'boss';
+  if (lvl && lvl.obj === 'horde') return 'horde';
+  if (sidekickId) return 'sidekick';
+  if (isLocCleared) return 'region';
+  return 'mission';
+}
+
 // ============================================================
 // UI / SCREENS
 // ============================================================
@@ -11690,12 +11707,7 @@ const UI = {
     textEl.textContent  = isLocCleared ? loc.outro : (lvl.obj === 'boss' ? 'BOSS ELIMINATED. THE ROAD OPENS.' : lvl.obj === 'horde' ? 'HORDE BROKEN. THE STREETS ARE QUIET — FOR NOW.' : 'OBJECTIVE COMPLETE. KEEP MOVING.');
     const storyOverlay = document.getElementById('screen-story');
     if (storyOverlay) {
-      const theme = zombieUnlocked ? 'zombie'
-        : lvl.obj === 'boss' ? 'boss'
-        : lvl.obj === 'horde' ? 'horde'
-        : sidekickId ? 'sidekick'
-        : isLocCleared ? 'region'
-        : 'mission';
+      const theme = determineStoryTheme(zombieUnlocked, lvl, sidekickId, isLocCleared);
       storyOverlay.setAttribute('data-story-theme', theme);
     }
     if (skLine) {
@@ -15117,7 +15129,7 @@ function applyV3SpawnTuning(startIndex) {
     if (e.spawnAnimT === undefined) e.spawnAnimT = ENEMY_SPAWN_ANIM_WINDOW * rand(0.8, 1.15);
     if (e.hitAnimT === undefined) e.hitAnimT = 0;
     if (e.storyAnimT === undefined) {
-      const isDramaticEnemy = !!(e.elite || e.special || e.miniBoss || e.kind === 'tank' || e.kind === 'drone');
+      const isDramaticEnemy = (e.elite || e.special || e.miniBoss || e.kind === 'tank' || e.kind === 'drone');
       e.storyAnimT = isDramaticEnemy ? ENEMY_STORY_ANIM_WINDOW * rand(0.7, 1.05) : 0;
     }
     e._v3Tuned = true;
