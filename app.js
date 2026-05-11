@@ -59,7 +59,8 @@ const PREFERS_REDUCED_MOTION = (() => {
   catch (_) { return false; }
 })();
 // Conservative first-run defaults for devices most likely to thermal-throttle:
-// <=2GB RAM or <=4 cores usually indicates entry-level mobile/tablet hardware.
+// <=2GB RAM is a hard low-memory signal; <=4 cores catches older devices
+// without downbinning modern 6-8 core entry phones too aggressively.
 const LOW_POWER_MEMORY_GB = 2;
 const LOW_POWER_CPU_CORES = 4;
 const LOW_POWER_PARTICLE_MULTIPLIER = 0.85;
@@ -75,11 +76,21 @@ const LOW_POWER_DEVICE = (() => {
 const APEX_VEHICLE_MIN_PRESTIGE = 10;
 const ALL_COMPLETABLE_MODES = ['classic','winding','timeattack','daily','bossrush','zombie','wastelandrun','extraction'];
 const CUSTOM_TARGETS = { score: 50000, distance: 3000, kills: 35, survive: 75 };
-const GAMEPAD_AXIS_THRESHOLD = 0.25;
+const GAMEPAD_DEADZONE_DEFAULT = 0.22;
+const GAMEPAD_DEADZONE_MIN = 0.05;
+const GAMEPAD_DEADZONE_MAX = 0.6;
+const GAMEPAD_SENSITIVITY_MIN = 0.5;
+const GAMEPAD_SENSITIVITY_MAX = 1.5;
+const GAMEPAD_BUTTON_ANALOG_THRESHOLD = 0.45;
 const GAMEPAD_BUTTON_A = 0;
 const GAMEPAD_BUTTON_B = 1;
 const GAMEPAD_BUTTON_DPAD_LEFT = 14;
 const GAMEPAD_BUTTON_DPAD_RIGHT = 15;
+const GAMEPAD_LAYOUTS = {
+  standard: { label: 'STANDARD', fire: [0, 7], special: [1, 6] },
+  trigger: { label: 'TRIGGER', fire: [7, 5], special: [6, 4] },
+  access: { label: 'ACCESS', fire: [2, 0], special: [3, 1] },
+};
 const GRAVEYARD_SHIFT_WAVE_INTERVAL = 55;
 const MAX_ACTIVE_CRAFTING_MODS = 3;
 const BOSS_PART_TIERS = [
@@ -2819,6 +2830,12 @@ const Settings = {
   visualQuality: LOW_POWER_DEVICE ? 'medium' : 'high',
   // skip non-essential animations for users sensitive to motion
   reducedMotion: PREFERS_REDUCED_MOTION,
+  // gamepad tuning for controller comfort and accessibility
+  gamepadDeadzone: GAMEPAD_DEADZONE_DEFAULT,
+  gamepadSensitivity: 1.0,
+  gamepadLayout: 'standard',
+  // allow browser helper scripts to auto-tune visuals for low-end devices
+  browserAssist: true,
   // === v2.3 SETTINGS — Wasteland Empire ===
   // Toggle new v2.3 content (vehicles, biomes, modes). When false, only v2.0 content is shown.
   empireExpansion: true,
@@ -2841,6 +2858,10 @@ const Settings = {
        if (typeof o.colorBlind === 'string') this.colorBlind = o.colorBlind;
         if (typeof o.reducedMotion === 'boolean') this.reducedMotion = o.reducedMotion;
         if (o.visualQuality === 'low' || o.visualQuality === 'medium' || o.visualQuality === 'high') this.visualQuality = o.visualQuality;
+        if (typeof o.gamepadDeadzone === 'number' && isFinite(o.gamepadDeadzone)) this.gamepadDeadzone = clampSet(o.gamepadDeadzone, GAMEPAD_DEADZONE_MIN, GAMEPAD_DEADZONE_MAX);
+        if (typeof o.gamepadSensitivity === 'number' && isFinite(o.gamepadSensitivity)) this.gamepadSensitivity = clampSet(o.gamepadSensitivity, GAMEPAD_SENSITIVITY_MIN, GAMEPAD_SENSITIVITY_MAX);
+        if (o.gamepadLayout && GAMEPAD_LAYOUTS[o.gamepadLayout]) this.gamepadLayout = o.gamepadLayout;
+        if (typeof o.browserAssist === 'boolean') this.browserAssist = o.browserAssist;
         if (typeof o.empireExpansion === 'boolean') this.empireExpansion = o.empireExpansion;
     } catch (_) {}
   },
@@ -2851,6 +2872,8 @@ const Settings = {
         particles: this.particles, haptics: this.haptics, bigButtons: this.bigButtons,
         autoFire: this.autoFire, damageNumbers: this.damageNumbers, hudContrast: this.hudContrast,
         cinematic: this.cinematic, colorBlind: this.colorBlind, visualQuality: this.visualQuality, reducedMotion: this.reducedMotion,
+        gamepadDeadzone: this.gamepadDeadzone, gamepadSensitivity: this.gamepadSensitivity,
+        gamepadLayout: this.gamepadLayout, browserAssist: this.browserAssist,
         empireExpansion: this.empireExpansion,
       }));
     } catch (_) {}
@@ -2870,6 +2893,56 @@ const Settings = {
 };
 // local clamp (real `clamp` is defined later in HELPERS section)
 function clampSet(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// Browser helper profile: a tiny runtime "script" that inspects memory/CPU/data
+// hints and tunes cosmetic budgets without changing gameplay rules.
+const BrowserPerfHelper = {
+  _profile: null,
+  detect() {
+    if (this._profile) return this._profile;
+    const mem = Number(navigator.deviceMemory || 0);
+    const cores = Number(navigator.hardwareConcurrency || 0);
+    const saveData = !!(navigator.connection && navigator.connection.saveData);
+    const lowRam = !!(mem && mem <= 2);
+    const olderCpu = !!(cores && cores <= 2);
+    const modestCpu = !!(cores && cores <= 4);
+    let id = 'full';
+    if (saveData || lowRam || olderCpu) id = 'lean';
+    else if (IS_MOBILE || modestCpu || (mem && mem <= 4)) id = 'balanced';
+    const profiles = {
+      lean: { id:'lean', label:'LEAN', minScale: IS_MOBILE ? 0.62 : 0.72, startScale: IS_MOBILE ? 0.78 : 0.85, startQuality:0.35, visualCap:0.7, recoverMs:11 },
+      balanced: { id:'balanced', label:'BALANCED', minScale: IS_MOBILE ? 0.7 : 0.85, startScale: IS_MOBILE ? 0.9 : 1, startQuality:0.75, visualCap:0.9, recoverMs:12.5 },
+      full: { id:'full', label:'FULL', minScale: IS_MOBILE ? 0.7 : 0.85, startScale:1, startQuality:1, visualCap:1, recoverMs:13 },
+    };
+    this._profile = profiles[id];
+    return this._profile;
+  },
+  enabled() {
+    return Settings.browserAssist !== false;
+  },
+  minRenderScale() {
+    const p = this.detect();
+    return this.enabled() ? p.minScale : (IS_MOBILE ? 0.7 : 0.85);
+  },
+  recoverThreshold() {
+    return this.enabled() ? this.detect().recoverMs : 13;
+  },
+  visualCapMultiplier() {
+    return this.enabled() ? this.detect().visualCap : 1;
+  },
+  applyStartupProfile() {
+    if (!this.enabled()) return;
+    const p = this.detect();
+    renderScale = Math.min(renderScale, p.startScale);
+    if (PerfMon.mode === 'auto') PerfMon.quality = Math.min(PerfMon.quality, p.startQuality);
+    applyQualityCaps();
+  },
+  statusLabel() {
+    const p = this.detect();
+    const enabled = this.enabled();
+    return (enabled ? p.label : 'OFF') + (enabled ? ` · SCALE ${p.minScale.toFixed(2)}-${p.startScale.toFixed(2)}` : '');
+  },
+};
 
 // ============================================================
 // HAPTICS — opt-in vibration patterns for key events
@@ -3029,7 +3102,7 @@ let W = 0, H = 0, DPR = 1;
 const DPR_CAP = IS_MOBILE ? 1.5 : 2;
 // Keep mobile floor lower for thermal/battery headroom; keep desktop floor
 // higher so text/HUD stay sharp on larger screens.
-const MIN_RENDER_SCALE = IS_MOBILE ? 0.7 : 0.85;
+const MIN_RENDER_SCALE = BrowserPerfHelper.minRenderScale();
 const MIN_DPR = IS_MOBILE ? 0.75 : 1;
 const DPR_CHANGE_THRESHOLD = 0.01;
 const ORIENTATION_CHANGE_DELAY_MS = 160;
@@ -4170,7 +4243,7 @@ window.addEventListener('keydown', e => {
     }
   }
   // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
-  // persists the choice in resilient local storage. Skipped while typing in the
+  // persists the choice through the safe localStorage wrapper. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
   if (key === 'q' && !isTypingField(document.activeElement)) {
     if (Game.state === 'playing') triggerVehicleAbility();
@@ -4214,6 +4287,31 @@ function syncTouchInput() {
     input.touchTargetX = xs[xs.length - 1];
     input.touchFire = true;
   }
+}
+
+function readGamepadAxis(gp, axisIndex) {
+  if (!gp || !gp.axes) return 0;
+  const raw = Number(gp.axes[axisIndex ?? 0] || 0);
+  if (!isFinite(raw)) return 0;
+  const deadzone = clampSet(Settings.gamepadDeadzone || GAMEPAD_DEADZONE_DEFAULT, GAMEPAD_DEADZONE_MIN, GAMEPAD_DEADZONE_MAX);
+  const mag = Math.abs(raw);
+  if (mag <= deadzone) return 0;
+  const normalized = ((mag - deadzone) / (1 - deadzone)) * (raw < 0 ? -1 : 1);
+  return clampSet(normalized * clampSet(Settings.gamepadSensitivity || 1, GAMEPAD_SENSITIVITY_MIN, GAMEPAD_SENSITIVITY_MAX), -1, 1);
+}
+
+function getGamepadActionButtons(action) {
+  const layout = GAMEPAD_LAYOUTS[Settings.gamepadLayout] || GAMEPAD_LAYOUTS.standard;
+  return layout[action] || [];
+}
+
+function isGamepadButtonPressed(gp, btnIndex) {
+  const b = gp && gp.buttons && gp.buttons[btnIndex];
+  return !!(b && (b.pressed || Number(b.value || 0) > GAMEPAD_BUTTON_ANALOG_THRESHOLD));
+}
+
+function isGamepadActionPressed(gp, action) {
+  return getGamepadActionButtons(action).some(btn => isGamepadButtonPressed(gp, btn));
 }
 cvs.addEventListener('pointerdown', onPointerDown);
 cvs.addEventListener('pointermove', onPointerMove);
@@ -11313,6 +11411,9 @@ const UI = {
     const vqOpts = ['low','medium','high']
       .map(m => `<button class="btn set-q ${(Settings.visualQuality||'high') === m ? 'on' : ''}" data-vquality="${m}">${m.toUpperCase()}</button>`)
       .join('');
+    const gpOpts = Object.keys(GAMEPAD_LAYOUTS)
+      .map(k => `<button class="btn set-q ${(Settings.gamepadLayout||'standard') === k ? 'on' : ''}" data-gplayout="${k}">${GAMEPAD_LAYOUTS[k].label}</button>`)
+      .join('');
     // Prestige info for platform section
     const pTier = typeof getPrestigeTier === 'function' ? getPrestigeTier((Profile.active()||{}).prestigeTokens||0) : null;
     const pLabel = pTier ? pTier.label : '';
@@ -11336,6 +11437,8 @@ const UI = {
       </div>
       ${toggle('HIGH CONTRAST HUD', 'hudContrast', 'STRONGER HUD BACKDROP + BRIGHTER LABELS')}
       ${toggle('CINEMATIC FX', 'cinematic', 'GOD RAYS · FILM GRAIN · BLOOM · SPEED LINES · CAMERA TILT')}
+      ${toggle('BROWSER PERFORMANCE HELPER', 'browserAssist', 'AUTO-TUNES QUALITY FOR LOW RAM, OLDER CPU, OR DATA SAVER')}
+      <div class="set-row"><div class="set-head"><div><div class="set-name">HELPER PROFILE</div><div class="set-sub">${BrowserPerfHelper.statusLabel()}</div></div></div></div>
       <div class="set-row"><div class="set-head"><div class="set-name set-sub" style="opacity:.55">QUALITY presets also scale Cinematic FX intensity automatically.</div></div></div>
       <h2>ACCESSIBILITY</h2>
       <div class="set-row">
@@ -11347,6 +11450,12 @@ const UI = {
       ${toggle('HAPTICS', 'haptics', 'VIBRATE ON HIT / KILL / DEATH')}
       ${toggle('LARGE TOUCH TARGETS', 'bigButtons', 'EASIER TO TAP ON SMALL SCREENS')}
       ${toggle('AUTO FIRE', 'autoFire', 'CONTINUOUS FIRE ASSIST DURING RUNS')}
+      ${slider('GAMEPAD DEADZONE', 'gamepadDeadzone', 0.05, 0.6, 0.01)}
+      ${slider('STEERING SENSITIVITY', 'gamepadSensitivity', 0.5, 1.5, 0.05)}
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">GAMEPAD BUTTON MAP</div><div class="set-sub">STANDARD: A/RT · B/LT · TRIGGER: RT/RB · LT/LB · ACCESS: X/A · Y/B</div></div></div>
+        <div class="set-q-row">${gpOpts}</div>
+      </div>
       <h2>READABILITY</h2>
       ${toggle('DAMAGE NUMBERS', 'damageNumbers', 'SHOW DAMAGE POPUPS ON HITS')}
       <h2>PLATFORM</h2>
@@ -12144,6 +12253,15 @@ document.addEventListener('click', e => {
     UI.showSettings();
     return;
   }
+  const sgp = e.target.closest('[data-gplayout]');
+  if (sgp) {
+    const layout = sgp.dataset.gplayout || 'standard';
+    Settings.gamepadLayout = GAMEPAD_LAYOUTS[layout] ? layout : 'standard';
+    Settings.save();
+    SFX.click();
+    UI.showSettings();
+    return;
+  }
   const st = e.target.closest('[data-toggle]');
   if (st) {
     const key = st.dataset.toggle;
@@ -12288,11 +12406,12 @@ function applyQualityCaps() {
   // Scale a few non-essential caps; gameplay-critical ones (enemies, obstacles,
   // pickups) stay fixed so the simulation is identical at any quality level.
   const q = PerfMon.quality;
-  RUNTIME_CAPS.particles    = Math.round(300 + 400 * q);
+  const visualCap = BrowserPerfHelper.visualCapMultiplier();
+  RUNTIME_CAPS.particles    = Math.round((300 + 400 * q) * visualCap);
   RUNTIME_CAPS.bullets      = Math.round(120 + 80 * q);
   RUNTIME_CAPS.enemyBullets = Math.round(140 + 110 * q);
-  RUNTIME_CAPS.popups       = Math.round(40 + 40 * q);
-  RUNTIME_CAPS.shockwaves   = Math.round(12 + 12 * q);
+  RUNTIME_CAPS.popups       = Math.round((40 + 40 * q) * visualCap);
+  RUNTIME_CAPS.shockwaves   = Math.round((12 + 12 * q) * visualCap);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -12417,13 +12536,14 @@ function frame(now) {
   if (now - PerfMon.lastScaleAdjustAt > SCALE_ADJUST_INTERVAL_MS) {
     PerfMon.lastScaleAdjustAt = now;
     const prev = renderScale;
+    const minScale = BrowserPerfHelper.minRenderScale();
     // Intentional deadband between high and recover thresholds to avoid
     // oscillating scale around borderline frame times.
     if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS) {
-      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN_SEVERE);
+      renderScale = Math.max(minScale, renderScale - SCALE_STEP_DOWN_SEVERE);
     } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS) {
-      renderScale = Math.max(MIN_RENDER_SCALE, renderScale - SCALE_STEP_DOWN);
-    } else if (PerfMon.ewmaMs < SCALE_THRESHOLD_RECOVER_MS && renderScale < 1) {
+      renderScale = Math.max(minScale, renderScale - SCALE_STEP_DOWN);
+    } else if (PerfMon.ewmaMs < BrowserPerfHelper.recoverThreshold() && renderScale < 1) {
       renderScale = Math.min(1, renderScale + SCALE_STEP_UP);
     }
     // Flag for resize at the start of the NEXT frame — avoids the blank
@@ -12441,6 +12561,7 @@ function drawDebugHud() {
   const lines = [
     `FPS ${PerfMon.fps.toFixed(0)}  ${PerfMon.ewmaMs.toFixed(1)}ms`,
     `Q ${PerfMon.mode}${PerfMon.mode === 'auto' ? ` (${PerfMon.quality.toFixed(2)})` : ''}  DPR ${DPR}  RS ${renderScale.toFixed(2)}`,
+    `HELPER ${BrowserPerfHelper.statusLabel()}`,
     `enem ${Game.enemies.length}  obst ${Game.obstacles.length}  pick ${Game.pickups.length}`,
     `bull ${Game.bullets.length}  ebul ${Game.enemyBullets.length}  part ${Game.particles.length}`,
     `pop ${Game.popups.length}  sw ${Game.shockwaves.length}` +
@@ -12486,6 +12607,47 @@ function capRuntimeArrays() {
     }
   }
 }
+
+window.MojaveBrowserHelper = {
+  detectProfile() {
+    return Object.assign({}, BrowserPerfHelper.detect(), {
+      enabled: BrowserPerfHelper.enabled(),
+      renderScale,
+      quality: PerfMon.quality,
+    });
+  },
+  applyOptimizedProfile() {
+    Settings.browserAssist = true;
+    Settings.save();
+    if (PerfMon.mode !== 'auto') setQualityMode('auto', true);
+    BrowserPerfHelper.applyStartupProfile();
+    _pendingResize = true;
+    return this.detectProfile();
+  },
+};
+
+window.MojaveControllerMapping = {
+  layouts() {
+    return Object.keys(GAMEPAD_LAYOUTS).map(id => ({ id, label: GAMEPAD_LAYOUTS[id].label }));
+  },
+  setLayout(id) {
+    if (!GAMEPAD_LAYOUTS[id]) return false;
+    Settings.gamepadLayout = id;
+    Settings.save();
+    return true;
+  },
+  tune(opts) {
+    opts = opts || {};
+    if (typeof opts.deadzone === 'number' && isFinite(opts.deadzone)) Settings.gamepadDeadzone = clampSet(opts.deadzone, GAMEPAD_DEADZONE_MIN, GAMEPAD_DEADZONE_MAX);
+    if (typeof opts.sensitivity === 'number' && isFinite(opts.sensitivity)) Settings.gamepadSensitivity = clampSet(opts.sensitivity, GAMEPAD_SENSITIVITY_MIN, GAMEPAD_SENSITIVITY_MAX);
+    Settings.save();
+    return {
+      layout: Settings.gamepadLayout,
+      deadzone: Settings.gamepadDeadzone,
+      sensitivity: Settings.gamepadSensitivity,
+    };
+  },
+};
 
 // ============================================================
 // MULTIPLAYER (ghost overlay co-op)
@@ -14011,9 +14173,11 @@ UI.act = function(action, data) {
 };
 
 function boot() {
-  resize();
-  loadQualityPref();
   Settings.load();
+  // Browser helpers need persisted settings before choosing startup quality.
+  loadQualityPref();
+  BrowserPerfHelper.applyStartupProfile();
+  resize();
   Settings.applyBodyClass();
   Profile.load();
   // seed decor for menu backdrop
@@ -15749,12 +15913,13 @@ const GamepadInput = {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const gp = Array.from(pads || []).find(Boolean);
     if (!gp || Game.state !== 'playing') return;
-    const ax = (gp.axes && gp.axes[0]) || 0;
-    input.left = input.left || ax < -GAMEPAD_AXIS_THRESHOLD || (gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT] && gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT].pressed);
-    input.right = input.right || ax > GAMEPAD_AXIS_THRESHOLD || (gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT] && gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT].pressed);
-    input.fire = input.fire || !!(gp.buttons[GAMEPAD_BUTTON_A] && gp.buttons[GAMEPAD_BUTTON_A].pressed);
-    if (gp.buttons[GAMEPAD_BUTTON_B] && gp.buttons[GAMEPAD_BUTTON_B].pressed && !this._specialHeld) triggerVehicleAbility();
-    this._specialHeld = !!(gp.buttons[GAMEPAD_BUTTON_B] && gp.buttons[GAMEPAD_BUTTON_B].pressed);
+    const ax = readGamepadAxis(gp, 0);
+    input.left = input.left || ax < 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT] && gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT].pressed);
+    input.right = input.right || ax > 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT] && gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT].pressed);
+    input.fire = input.fire || isGamepadActionPressed(gp, 'fire');
+    const specialPressed = isGamepadActionPressed(gp, 'special');
+    if (specialPressed && !this._specialHeld) triggerVehicleAbility();
+    this._specialHeld = specialPressed;
     if (!this.active) { this.active = true; setControlHintMode('gamepad'); }
   }
 };
@@ -16485,13 +16650,21 @@ const ConsoleInput = {
   },
 
   isPressed(gp, btnIndex) {
-    return gp && gp.buttons[btnIndex] && gp.buttons[btnIndex].pressed;
+    return isGamepadButtonPressed(gp, btnIndex);
+  },
+
+  isActionPressed(gp, action) {
+    return isGamepadActionPressed(gp, action);
   },
 
   justPressed(gp, btnIndex, playerIndex) {
     const now = this.isPressed(gp, btnIndex);
     const prev = this._prevButtons[playerIndex || 0][btnIndex];
     return now && !prev;
+  },
+
+  justPressedAction(gp, action, playerIndex) {
+    return getGamepadActionButtons(action).some(btn => this.justPressed(gp, btn, playerIndex));
   },
 
   updatePrevState(gp, playerIndex) {
@@ -16557,11 +16730,11 @@ const ConsoleInput = {
   pollPlayer(playerIndex, inputObj) {
     const gp = this.getPlayerPad(playerIndex);
     if (!gp) return;
-    const ax = (gp.axes && gp.axes[0]) || 0;
-    inputObj.left = inputObj.left || ax < -GAMEPAD_AXIS_THRESHOLD || this.isPressed(gp, GAMEPAD_BUTTON_DPAD_LEFT);
-    inputObj.right = inputObj.right || ax > GAMEPAD_AXIS_THRESHOLD || this.isPressed(gp, GAMEPAD_BUTTON_DPAD_RIGHT);
-    inputObj.fire = inputObj.fire || this.isPressed(gp, GAMEPAD_BUTTON_A);
-    if (this.justPressed(gp, GAMEPAD_BUTTON_B, playerIndex) && typeof triggerVehicleAbility === 'function') {
+    const ax = readGamepadAxis(gp, 0);
+    inputObj.left = inputObj.left || ax < 0 || this.isPressed(gp, GAMEPAD_BUTTON_DPAD_LEFT);
+    inputObj.right = inputObj.right || ax > 0 || this.isPressed(gp, GAMEPAD_BUTTON_DPAD_RIGHT);
+    inputObj.fire = inputObj.fire || this.isActionPressed(gp, 'fire');
+    if (this.justPressedAction(gp, 'special', playerIndex) && typeof triggerVehicleAbility === 'function') {
       triggerVehicleAbility();
     }
     this.updatePrevState(gp, playerIndex);

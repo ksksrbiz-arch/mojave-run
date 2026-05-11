@@ -53,7 +53,7 @@
 
   function mpNow() {
     const perf = window.performance;
-    return perf && typeof perf.now === 'function' ? perf.mpNow() : Date.mpNow();
+    return perf && typeof perf.now === 'function' ? perf.now() : Date.now();
   }
 
   // Themed status messages — UI maps these to toasts/banners.
