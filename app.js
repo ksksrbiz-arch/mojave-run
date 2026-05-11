@@ -3340,7 +3340,7 @@ function scheduleMusicBeat(when, mode, preset) {
     filteredNoise(0.05, 0.013, 1700 + Math.random() * 600, when, audioMusicGain, 'bandpass', 0.95);
   }
   // Thunderplains biome: add punchy rain-like percussion on every beat
-  if ((Game.biome === 'thunderplains') && step % 2 === 0) {
+  if (Game.biome === 'thunderplains' && step % 2 === 0) {
     filteredNoise(0.04, 0.018, 2400 + Math.random() * 400, when, audioMusicGain, 'bandpass', 1.4);
     tone(musicFreq(root, -12), 0.06, 'triangle', preset.gain * 0.28, -20, when + 0.01, audioMusicGain, 0.0004);
   }
@@ -10014,8 +10014,9 @@ function drawLoadingOverlay() {
   // as a cinematic cue that the run is about to start.
   if (k > 0.80) {
     const readyK = (k - 0.80) / 0.20;
-    // Pulsing scale
-    const scale = 0.85 + readyK * 0.15 + Math.sin(readyK * Math.PI * 3) * 0.04;
+    // 3 half-cycles of sine give the text a quick triple-pulse as the run launches.
+    const READY_PULSE_FREQ = 3;
+    const scale = 0.85 + readyK * 0.15 + Math.sin(readyK * Math.PI * READY_PULSE_FREQ) * 0.04;
     const readyA = alpha * Math.min(1, readyK * 3);
     ctx.globalAlpha = readyA;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -14683,10 +14684,14 @@ const Cinematic = (function () {
 
     // Thunderplains lightning flash: brief bright blue-white strobe when
     // Game.lightning > 0 (the strike phase). Purely additive, very fast decay.
+    // 0.28 = max lightning countdown value set in the update loop (rand 0.18..0.32).
+    // 0.22 = peak additive screen alpha — bright but not fully white to stay legible.
     if (playing && biome === 'thunderplains') {
       const lv = (Game && Game.lightning) || 0;
       if (lv > 0) {
-        const flashA = clamp(lv / 0.28, 0, 1) * 0.22 * k;
+        const LIGHTNING_PEAK_VAL = 0.28;   // matches rand(0.18, 0.32) upper end
+        const LIGHTNING_PEAK_ALPHA = 0.22; // max additive flash opacity
+        const flashA = clamp(lv / LIGHTNING_PEAK_VAL, 0, 1) * LIGHTNING_PEAK_ALPHA * k;
         if (flashA > 0.005) {
           ctx.save();
           ctx.globalCompositeOperation = 'screen';
