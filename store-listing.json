@@ -11,8 +11,8 @@
   "listings": {
     "en-US": {
       "title": "Mojave Run: Wasteland Drive",
-      "shortDescription": "Survive the wasteland. Arcade driving with co-op, bosses, upgrades & zombies.",
-      "fullDescription": "MOJAVE RUN is a fast-paced wasteland arcade driving game. Race through the scorched Mojave desert, dodge obstacles, blast enemies, and survive as long as you can.\n\n🏎️ GARAGE & UPGRADES\nUnlock 20+ vehicles — from rusty pickups to armored war rigs. Upgrade speed, armor, and firepower in the garage. Each vehicle handles differently and has a unique special ability.\n\n💀 ZOMBIE HORDE MODE\nThe dead have risen in the wasteland. Fight through waves of zombies in a dedicated survival mode with co-op objectives, boss zombies, and exclusive rewards.\n\n🏆 GAUNTLET & CAMPAIGN\nConquer 18 tiered gauntlet sectors with escalating difficulty. Travel across 30+ campaign locations spanning the post-apocalyptic United States — from the Mojave to the frozen north.\n\n👑 IRON THRONE\nMaster every sector and campaign location to unlock the ultimate boss-only challenge: 8 legendary stages, each with a named weapon and unique boss pattern.\n\n🔄 PRESTIGE & SEASONS\nReset for powerful prestige bonuses. Compete in rotating seasonal events and weekly challenges for bonus scrap and exclusive rewards.\n\n🤝 CO-OP MULTIPLAYER\nTeam up with friends in real-time co-op. Share a room code and survive together. Voice your strategy — the wasteland is unforgiving alone.\n\n🛠️ CRAFTING & WORKSHOP\nCraft new components from salvaged scrap. Specialize weapons for your playstyle.\n\n📸 PHOTO MODE & REPLAYS\nCapture epic moments with the built-in photo mode. Record and share your best runs.\n\n🏴 CLANS & RIVALS\nCreate or join a clan. Import rival ghost data and race against their best runs.\n\nFeatures:\n• 20+ unlockable vehicles with unique abilities\n• 18 gauntlet sectors + 30+ campaign locations\n• Zombie Horde survival mode\n• Real-time co-op multiplayer\n• Prestige system with New Game+\n• Seasonal events & weekly challenges\n• Crafting workshop & weapon specializations\n• Cloud save & cross-device sync\n• Gamepad support\n• Offline play\n\nThe wasteland awaits. How far can you drive?",
+      "shortDescription": "Survive the wasteland. Arcade driving with ghost co-op, bosses, upgrades & zombies.",
+      "fullDescription": "MOJAVE RUN is a fast-paced wasteland arcade driving game. Race through the scorched Mojave desert, dodge obstacles, blast enemies, and survive as long as you can.\n\n🏎️ GARAGE & UPGRADES\nUnlock 18 vehicles — from rusty pickups to armored war rigs. Upgrade speed, armor, and firepower in the garage. Each vehicle handles differently, with unique abilities, cosmetics, crafting mods, and weapon specializations.\n\n💀 ZOMBIE HORDE MODE\nThe dead have risen in the wasteland. Fight through waves of zombies in a dedicated survival mode with special infected, survivor rescues, boss zombies, and exclusive tools.\n\n🏆 GAUNTLET & CAMPAIGN\nConquer 18 tiered gauntlet sectors with escalating difficulty. Travel across 36 campaign locations spanning the post-apocalyptic United States — from the Mojave to the frozen north.\n\n👑 IRON THRONE\nMaster every sector and campaign location to unlock the ultimate boss-only challenge: 8 legendary stages, each with a named weapon and unique boss pattern.\n\n🔄 PRESTIGE & SEASONS\nReset for powerful prestige bonuses. Compete in rotating seasonal events and weekly challenges for bonus scrap and exclusive rewards.\n\n🤝 MULTIPLAYER & VERSUS\nJoin room-code ghost co-op sessions so friends appear on your road, or enter server-authoritative 1v1 Versus matches through the relay.\n\n🛠️ CRAFTING & WORKSHOP\nCraft new components from salvaged scrap and boss parts. Specialize weapons for your playstyle.\n\n📸 PHOTO MODE & REPLAYS\nCapture epic moments with the built-in photo mode. Record and share your best runs.\n\n🏴 CLAN TAGS & RIVALS\nSet a clan tag for scoreboards. Import rival ghost data and race against their best runs.\n\nFeatures:\n• 18 unlockable vehicles with unique abilities\n• 18 gauntlet sectors + 36 campaign locations\n• Zombie Horde survival mode\n• Ghost co-op rooms and server-authoritative Versus\n• Prestige system with New Game+\n• Seasonal events & weekly challenges\n• Crafting workshop & weapon specializations\n• Cloud save & cross-device sync\n• Gamepad support\n• Offline play\n\nThe wasteland awaits. How far can you drive?",
       "privacyPolicyUrl": "https://mojave-run-lw3g.onrender.com/privacy-policy.html"
     }
   },
@@ -35,7 +35,7 @@
           "Garage: vehicle selection + upgrades",
           "Zombie Horde: action shot with zombie waves",
           "Campaign map: location selection screen",
-          "Co-op: multiplayer session in action",
+          "Ghost co-op: multiplayer room presence",
           "Iron Throne: boss fight sequence"
         ]
       },
@@ -48,7 +48,7 @@
     },
     "videoTrailer": {
       "format": "YouTube link, 30-60 seconds",
-      "note": "Highlight fast driving, explosions, upgrades, co-op, and zombie horde"
+      "note": "Highlight fast driving, explosions, upgrades, ghost co-op, versus, and zombie horde"
     }
   },
   "dataSafety": {

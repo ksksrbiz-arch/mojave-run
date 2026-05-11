@@ -744,7 +744,7 @@ const MODES = [
   { id: 'timeattack', name: 'TIME ATTACK', desc: '60 seconds. Frenzy spawns. Highest score wins.' },
   { id: 'daily',      name: 'DAILY CHALLENGE', desc: 'Seeded run. Same world for everyone today. Share your score.' },
   { id: 'bossrush',   name: 'BOSS RUSH',   desc: 'Five boss tiers back-to-back. Clear the convoy gauntlet without stopping.' },
-  { id: 'zombie',      name: 'ZOMBIE WASTELAND', desc: 'Unlockable co-op-ready zombie gauntlet: waves, special infected, survivor objectives, and exclusive tools.' },
+  { id: 'zombie',      name: 'ZOMBIE WASTELAND', desc: 'Unlockable zombie gauntlet: waves, special infected, survivor rescues, and exclusive tools.' },
   { id: 'ironthrone',  name: 'IRON THRONE',      desc: 'Full mastery unlocks the boss campaign. Eight Warlords with different weapons and armored rigs. No survivors.' },
   // === v2.3 NEW MODES — Wasteland Empire ===
   { id: 'wastelandrun', name: 'WASTELAND RUN',   desc: 'Roguelite endless mode. Procedural runs with random mutators, escalating difficulty, and high-score leaderboards per seed. Unlocked after full campaign.' },
@@ -1325,7 +1325,7 @@ const SIDEKICKS = [
   {
     id:'nova',    name:'NOVA',    title:'PLASMA TECH',
     bio:'Jury-rigged a railgun from a satellite dish and bad intentions. She\'ll overcharge anything.',
-    perk:'+20% BULLET DAMAGE · CHAIN SHOTS BOUNCE', unlockLoc:'boston', color:'#40e0ff', v23: true,
+    perk:'+20% BULLET DAMAGE', unlockLoc:'boston', color:'#40e0ff', v23: true,
   },
   {
     id:'recon',   name:'RECON',   title:'FORWARD SCOUT',
@@ -13164,11 +13164,6 @@ const Clan = {
   },
   // Format a driver name with the clan tag prefix
   formatName(name) { const tag = this.getTag(); return tag ? '[' + tag + '] ' + name : name; },
-  // Seasonal clan event stub: earn bonus scrap by finishing weekly challenges
-  getSeasonalEvent() {
-    const s = getCurrentSeason();
-    return { seasonName: s.name, goal: 'Complete 3 weekly challenges this season', reward: 5000 };
-  },
 };
 
 // === PHOTO / CINEMATIC MODE ===
@@ -13315,7 +13310,7 @@ function buildPlatformScreen() {
     <h2>🎮 CONSOLE SERVICES</h2>
     <div class="set-row">
       <div class="set-head">
-        <div><div class="set-name">SPLIT-SCREEN CO-OP</div><div class="set-sub">REQUIRES TWO CONNECTED CONTROLLERS</div></div>
+        <div><div class="set-name">SPLIT-SCREEN CO-OP · EXPERIMENTAL</div><div class="set-sub">CONTROLLER INPUT PREVIEW — FULL SHARED GAMEPLAY IS NOT YET FINAL</div></div>
         ${splitActive
           ? '<button class="btn set-toggle on" data-act="split-stop">STOP</button>'
           : '<button class="btn set-toggle" data-act="split-start">START</button>'}
@@ -13399,7 +13394,7 @@ function buildPlatformScreen() {
 
 function buildEditorScreen() {
   const raw = LevelEditor.loadDraft() || LevelEditor.defaultConfig();
-  const VALID_BIOMES = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch'];
+  const VALID_BIOMES = ['wastes','canyon','city','neon','neonruins','irradiated','scraparch','thunderplains','frostwaste'];
   const VALID_OBJECTIVES = ['score','distance','kills','survive'];
   // Sanitize all values from localStorage before inserting into HTML attributes
   const draft = {
@@ -15085,7 +15080,7 @@ function applyV23SidekickPassives(profile, gameState) {
   const sk = profile && profile.activeSidekick;
   if (!sk) return;
   if (sk === 'nova') {
-    // +20% bullet damage, chain shots stub
+    // +20% bullet damage
     if (gameState) gameState._sidekickDmgBonus = (gameState._sidekickDmgBonus || 1) * 1.20;
   } else if (sk === 'recon') {
     // +15% kill score
@@ -15098,19 +15093,6 @@ function applyV23SidekickPassives(profile, gameState) {
     if (gameState) gameState._sidekickPowerupDurMul = (gameState._sidekickPowerupDurMul || 1) * 2.0;
   }
 }
-
-// === ZOMBIE HORDE ENHANCEMENTS ===
-// New special infected types (spitter, screamer, mutant) are defined in ZOMBIE_DEFS above.
-// Additional objective types for co-op/zombie mode:
-
-const ZOMBIE_COOP_OBJECTIVES = [
-  { id:'revive',     name:'REVIVE TEAMMATES',      desc:'Revive downed partners 3 times.',              coopOnly: true },
-  { id:'barricade',  name:'HOLD BARRICADE',         desc:'Keep the shared barricade above 50% for 60s.', coopOnly: true },
-  { id:'survivor',   name:'ESCORT SURVIVORS',       desc:'Escort 3 civilian survivors to the checkpoint.',coopOnly: false },
-  { id:'cleanwave',  name:'CLEAN WAVE',             desc:'Clear a full wave without any teammate taking damage.', coopOnly: true },
-  { id:'siphon',     name:'POWER SIPHON',           desc:'Capture 3 reactor nodes before they overload.', coopOnly: false },
-  { id:'stormhold',  name:'HOLD STORM GATE',        desc:'Defend a lightning gate for 75 seconds.',      coopOnly: true },
-];
 
 // === ACHIEVEMENTS — 50+ NEW BADGES (v2.3) ===
 // New achievement IDs recognized by the achievement system.
@@ -15147,8 +15129,6 @@ const ACHIEVEMENTS_V23 = [
   { id:'scrap_hoard',      name:'SCRAP BARON',             desc:'Accumulate 100,000 lifetime scrap.',                secret:false },
   { id:'prestige5',        name:'LEGEND REBORN',           desc:'Reach prestige tier 5.',                            secret:true },
   { id:'iron_season',      name:'SEASON CHAMPION',         desc:'Complete 5 weekly challenges in Iron Season.',      secret:false },
-  { id:'coop_revive',      name:'GUARDIAN ANGEL',          desc:'Revive a teammate 5 times in co-op.',              secret:false },
-  { id:'coop_barricade',   name:'IRON FRONT',              desc:'Hold the barricade for 120s without breaking.',     secret:true },
   { id:'epilogue_boston',  name:'FREEDOM FIGHTER',         desc:'Clear Boston Ruins.',                               secret:false },
   { id:'epilogue_chicago', name:'CHICAGO TOUGH',           desc:'Clear Chicago Deadzone.',                           secret:false },
   { id:'epilogue_miami',   name:'COASTAL WRAITH',          desc:'Clear Miami Neon Coast.',                           secret:false },
@@ -16569,7 +16549,7 @@ const SplitScreen = (() => {
       });
     }
 
-    UI.toast('SPLIT-SCREEN CO-OP — ' + playerCount + ' PLAYERS');
+    UI.toast('EXPERIMENTAL SPLIT-SCREEN INPUT — ' + playerCount + ' PLAYERS');
     return true;
   }
 

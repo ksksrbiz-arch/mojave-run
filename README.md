@@ -1,144 +1,127 @@
 # MOJAVE RUN
 
-A wasteland arcade driver. Survive the Mojave.
+A mobile-first wasteland arcade driver. Survive the Mojave, earn scrap, upgrade your rig, and push deeper into the road war.
 
 🎮 **Live:** https://mojave-run.netlify.app
+🛰️ **Relay/API:** https://mojave-run-lw3g.onrender.com
 
-Mobile-first browser game. Zero build for the client, with an optional Node relay for multiplayer ghost co-op.
+Version: **3.0.1**
 
 ## Features
 
-- **Driver profiles** — up to 6 named drivers per device, persistent locally
-- **7 vehicles** — Rust Bucket / Junker / Roadrunner / Goliath / Phantom / Sand Viper / Ironclad — each with unique stats
-- **4 upgrade tracks × 5 tiers + specialization branches** — Engine, Plating, Weapons, Reactor plus unlockable per-vehicle build branches
-- **7 modes** — Classic (endless), Campaign (18-location story road trip), Gauntlet (18 tiered sectors with 5 bosses), Time Attack (60s frenzy), **Daily Challenge** (seeded run, same world for everyone, shareable score), Boss Rush (5 chained bosses), Zombie Horde
-- **18-level Gauntlet** — survive / kill / distance / boss objectives across multiple biome maps
-- **5 boss tiers** — Alpha Raider, Twin Demons, The Overlord, Warlord Titan, The Chimera — each with unique attack patterns and enrage at 30% HP
-- **Biome map themes** — Wastes, Salt Flats, Ash Fields, Red Canyon, Midnight Rift with distinct visual palettes
-- **Driver perks** — each character now has active gameplay bonuses (scrap, vision, or kill-score boosts)
-- **Day / night / sandstorm** — late levels feature night sky with stars + boosted headlight cones, or sandstorm streaks
-- **Currency loop** — earn SCRAP from runs (10% of score + boss bonuses), spend on vehicles & upgrades
-- **Stats screen** — lifetime tracking per driver
-- **Dynamic run events** — raider ambushes, scrap convoys, hazard fields, rotating mutators, elite enemies
-- **Expanded item pool** — shield / triple / rapid / nitro / magnet / x2 plus overdrive / salvage / pulse / supply caches
-- **Settings panel** — master/SFX volume, screen-shake intensity, particle density, haptics toggle, large touch targets, graphics quality, auto-fire, damage numbers, HUD contrast
-- **In-game pause menu** — resume / restart / settings / quit, with full DOM tap targets
-- **Offline-first PWA** — service worker caches the game so it loads instantly and plays without a network
+- **Driver profiles** — up to 6 named drivers per device with local persistence and optional cloud save/restore.
+- **18 vehicles** — base garage rigs, mastery/prestige rewards, Wasteland Empire vehicles, and Storm Frontier vehicles.
+- **Garage progression** — 4 upgrade tracks × 5 tiers, per-vehicle specialization branches, cosmetics, weapon specializations, and crafting mods.
+- **13 modes** — Classic, Winding Run, Campaign, Gauntlet, Time Attack, Daily Challenge, Boss Rush, Zombie Wasteland, Iron Throne, Wasteland Run, Extraction, Custom Run, and Versus.
+- **36-location campaign** — original coast-to-coast route plus epilogue locations with story, bosses, sidekicks, and unlocks.
+- **18-sector Gauntlet + boss horde levels** — survive, elimination, distance, and boss objectives across multiple biome maps.
+- **Iron Throne** — 8-stage mastery boss campaign with unique boss cars and weapon patterns.
+- **Expanded biomes** — Wastes, Salt Flats, Ash Fields, Red Canyon, Midnight Rift, Neon Ruins, Irradiated Zone, Scrap Archipelago, Thunder Plains, and Frostwaste.
+- **Zombie Wasteland** — wave survival with special infected, survivor rescues, zombie-only powerups, and boss zombies.
+- **Wasteland Run** — roguelite seeded runs with rotating mutators and local seed leaderboards.
+- **Platform hub** — prestige/New Game+, seasons, weekly challenges, crafting, level editor, rivals, replays, clan tags, photo mode, cloud operations, and native-service hooks.
+- **Multiplayer relay** — room-based ghost co-op presence, shared events/revive messages, global/per-mode scoreboards, and an authoritative Versus mode through the Node relay.
+- **Experimental split-screen** — controller input preview is available in the Platform hub; full shared local co-op gameplay is not yet final.
+- **Offline-first PWA** — service worker caches the game for repeat loads and offline play.
 
 ## Controls
 
 **Touch:** drag to steer · hold to fire · tap pause/fullscreen icons
-
 **Keyboard:** `◄ ►` / `A D` steer · `Space` / `Z` / `X` fire · `R` restart · `P` pause · `F` fullscreen
-
-**Controller (Bluetooth/USB on desktop or mobile):** left stick / D-pad steer · `A` fire · `B` special · `Start` pause
+**Controller:** left stick / D-pad steer · `A` fire · `B` special · `Start` pause
 
 ## Vehicles
 
-| Vehicle    | HP  | Top Speed | Accel | Fire Rate | Damage | Cost |
-|------------|-----|-----------|-------|-----------|--------|------|
-| Rust Bucket| 100 | 460       | 1800  | 0.18s     | 1×2    | FREE |
-| Junker     | 160 | 380       | 1400  | 0.22s     | 1×2    | 500  |
-| Roadrunner | 70  | 580       | 2400  | 0.14s     | 1×2    | 1200 |
-| Goliath    | 200 | 360       | 1200  | 0.32s     | 3×1    | 2500 |
-| Phantom    | 60  | 520       | 2000  | 0.10s     | 1×4    | 4500 |
-| Sand Viper | 85  | 640       | 2700  | 0.12s     | 1×3    | 6200 |
-| Ironclad   | 260 | 340       | 1250  | 0.34s     | 4×2    | 8800 |
+| Group | Vehicles |
+| --- | --- |
+| Base garage | Rust Bucket, Junker, Roadrunner, Goliath, Phantom, Sand Viper, Ironclad |
+| Mastery / prestige | Warlord King, Cemetery Tank, Apex Warlord |
+| Wasteland Empire | Vortex Hover, Blood Raven Bomber, Iron Titan, Spectre Stealth, Doom Hauler, Neon Phantom |
+| Storm Frontier | Storm Reaver, Grave Warden, Sun Lancer |
 
-Upgrades stack multiplicatively: +60% accel/speed at engine T5, +100% HP at plating T5, -40% fire delay at weapons T5, +52% shot damage at reactor T5.
+## Modes
+
+- **Classic** — endless survival with escalating difficulty.
+- **Winding Run** — procedural winding highway with faster rhythm.
+- **Campaign** — 36 US road-trip locations with story progression.
+- **Gauntlet** — 18 objective sectors plus horde challenges.
+- **Time Attack** — 60-second score frenzy.
+- **Daily Challenge** — deterministic daily seed and shareable score.
+- **Boss Rush** — five boss tiers back-to-back.
+- **Zombie Wasteland** — special infected, survivor rescues, zombie tools.
+- **Iron Throne** — mastery-only 8-stage boss campaign.
+- **Wasteland Run** — roguelite mutator mode unlocked after campaign completion.
+- **Extraction** — convoy escort survival to an evac marker.
+- **Custom Run** — play a share-code level from the in-browser editor.
+- **Versus** — server-authoritative 1v1 via the relay.
 
 ## Mobile-first stack
 
-- HTML5 Canvas (game) + DOM screens (menus) — proper tap targets
-- Pointer Events for unified mouse/touch/stylus input
-- iOS safe-area-inset support, touch-action: none, viewport-fit cover
-- Wake Lock API + visibility-change pause
-- Fullscreen API + portrait orientation lock
-- PWA manifest + SVG icon — installable to home screen
-- Adaptive canvas render scale + quality governor for smoother Android/iPhone/iPad/desktop play
+- HTML5 Canvas game with DOM menus and mobile tap targets.
+- Pointer Events for mouse/touch/stylus input.
+- iOS safe-area-inset support, touch-action locking, viewport-fit cover.
+- Wake Lock, visibility pause, fullscreen, and portrait orientation support.
+- PWA manifest, SVG icon, and offline service worker cache.
+- Adaptive render scale and quality governor for mobile/desktop performance.
+- Vanilla JavaScript, synthesized WebAudio SFX, localStorage persistence, and no client build step.
 
-## Stack
+## Local play
 
-Vanilla JS + HTML5 Canvas. Synthesized WebAudio SFX. localStorage persistence. Netlify static deploy.
-
-## Local (single-player only)
+Static single-player/PWA testing:
 
 ```bash
 python3 -m http.server 8000  # → http://localhost:8000
 ```
 
-## Multiplayer (co-op ghost run)
-
-Host a Node.js server that serves the game **and** relays player positions
-between everyone in the same room. Each player sees other players as
-translucent "ghost" cars on their own road, plus a shared scoreboard.
-Gameplay itself stays per-player — no shared simulation, no lag spikes.
+Full relay/API testing:
 
 ```bash
-npm install      # one-time, installs `ws`
-npm start        # → http://localhost:8787
+npm install
+npm start                    # → http://localhost:8787
 ```
 
-Then in the browser:
+## Multiplayer relay and API
 
-1. Open the served URL on every device.
-2. Tap **MULTIPLAYER** on the menu.
-3. Pick a room code (e.g. `FRIENDS`) and tap **JOIN ROOM**.
-4. Tap **◄ BACK → ▶ PLAY** and start any mode. Ghosts appear automatically.
+`server.js` serves the static game, relays WebSocket rooms, runs authoritative Versus matches, and exposes:
 
-### Joining from anywhere (not just LAN)
+- `GET /healthz`
+- `GET /api/scores?mode=...`
+- `GET /api/leaderboards`
+- `POST /api/scores`
+- `POST /api/accounts/register`
+- `POST /api/accounts/save`
+- `GET /api/accounts/load?id=&token=`
+- `POST /api/push/register`
+- `POST /api/iap/validate`
 
-The simplest cross-internet path is a Cloudflare quick tunnel — no account, no
-config, no port forwarding:
+The public Netlify frontend is static-only, so it points to the Render relay via `index.html`:
 
-```bash
-# in a second terminal, while `npm start` runs
-cloudflared tunnel --url http://localhost:8787
+```html
+<meta name="mp-server-url" content="wss://mojave-run-lw3g.onrender.com/ws" />
+<script>window.RENDER_API = 'https://mojave-run-lw3g.onrender.com';</script>
 ```
-
-Cloudflare prints a public `https://*.trycloudflare.com` URL. Share it with
-friends; they open it in any browser, the page loads from your machine, and
-the multiplayer WebSocket connects to the same host automatically. Works on
-phones, Chromebooks, anywhere.
-
-For LAN play (same WiFi) you can skip the tunnel and just share
-`http://<your-lan-ip>:8787`.
-
-### Deploying the relay so the public Netlify site can use it
-
-The Netlify deploy is **static-only** — it cannot run `server.js`, so the
-client cannot connect to `wss://mojave-run.netlify.app/ws` (there is no
-server there). Host `server.js` separately on any Node container host, then
-point the static site at it via the `mp-server-url` `<meta>` tag in
-`index.html`.
 
 Configs included in this repo:
 
-- **Render** — push to GitHub, then *New + → Blueprint* and pick the repo.
-  `render.yaml` is wired up; health check hits `/healthz`.
-- **Fly.io** — `fly launch --copy-config --no-deploy` then `fly deploy`.
-  Uses the included `Dockerfile` and `fly.toml`.
-- **Railway** — `railway up` from the repo root. `railway.json` configures
-  the start command + health check.
+- **Render** — `render.yaml`, health check at `/healthz`.
+- **Fly.io** — `Dockerfile` + `fly.toml`.
+- **Railway** — `railway.json`.
 - **Any container host** — `docker build -t mojave-run . && docker run -p 8787:8787 mojave-run`.
 
-Once deployed, copy the public URL (e.g. `https://mojave-run.onrender.com`)
-and edit `index.html`:
+## Native/mobile service notes
 
-```html
-<meta name="mp-server-url" content="wss://mojave-run.onrender.com/ws" />
+Push notifications and IAP hooks are implemented for native Capacitor builds, but require the appropriate platform plugins and production Apple/Google credentials at runtime. Web builds show these as unavailable unless running in a native shell.
+
+## Deploy health check
+
+From a network with DNS/internet access, verify:
+
+```bash
+curl -I https://mojave-run.netlify.app/
+curl https://mojave-run-lw3g.onrender.com/healthz
 ```
 
-Redeploy Netlify. The multiplayer screen now pre-fills with the right URL
-and connects automatically. (Players can still override the field
-manually — handy for self-hosting on LAN.)
-
-## Future (not built)
-
-- **Cloud sync** via Supabase — would need a 3rd Supabase project (currently capped at 2: Cathy + PrecisionCore). Local-first profiles cover 95% of perceived value at 5% complexity.
-- **Global leaderboard enhancements** — add pagination, anti-cheat, and account-linked rankings.
-- **Versus / shared simulation multiplayer** — would need server-authoritative state. Current MP is cosmetic ghost overlay.
-- **More vehicles / cosmetics / weapons** — open ended.
+This sandbox could not resolve those public hostnames during the 2026-05-11 audit, so live deploy health must be confirmed from an external network.
 
 ---
 
