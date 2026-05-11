@@ -8081,9 +8081,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const speed = Math.abs(vx || 0);
   const speedN = clamp(speed / 460, 0, 1);
   const detail = opts.detailLevel !== undefined ? opts.detailLevel : visualQualityLevel();
-  const spawnN = clamp((opts.spawnAnimT || 0) / ENEMY_SPAWN_ANIM_WINDOW, 0, 1);
-  const hitN = clamp((opts.hitAnimT || 0) / ENEMY_HIT_ANIM_WINDOW, 0, 1);
-  const storyN = clamp((opts.storyAnimT || 0) / ENEMY_STORY_ANIM_WINDOW, 0, 1);
+  const { spawnN, hitN, storyN } = enemyAnimState(opts);
   const biomeRough = BIOME_ROUGHNESS_MAP[Game.biome] || 0.15;
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
   const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
@@ -15119,8 +15117,8 @@ function applyV3SpawnTuning(startIndex) {
     if (e.spawnAnimT === undefined) e.spawnAnimT = ENEMY_SPAWN_ANIM_WINDOW * rand(0.8, 1.15);
     if (e.hitAnimT === undefined) e.hitAnimT = 0;
     if (e.storyAnimT === undefined) {
-      const dramatic = !!(e.elite || e.special || e.miniBoss || e.kind === 'tank' || e.kind === 'drone');
-      e.storyAnimT = dramatic ? ENEMY_STORY_ANIM_WINDOW * rand(0.7, 1.05) : 0;
+      const isDramaticEnemy = !!(e.elite || e.special || e.miniBoss || e.kind === 'tank' || e.kind === 'drone');
+      e.storyAnimT = isDramaticEnemy ? ENEMY_STORY_ANIM_WINDOW * rand(0.7, 1.05) : 0;
     }
     e._v3Tuned = true;
   }
