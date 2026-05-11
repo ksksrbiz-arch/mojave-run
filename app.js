@@ -6379,7 +6379,7 @@ function update(dt) {
         const dmg = rawDmg * (1 - (e.damageReduction || 0));
         e.hp -= dmg;
         e.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
-        if (dmg >= Math.max(STORY_DAMAGE_MIN_THRESHOLD, (e.maxHp || 1) * STORY_DAMAGE_HP_RATIO)) {
+        if (dmg >= Math.max(STORY_DAMAGE_MIN_THRESHOLD, (e.maxHp || 1) * STORY_DAMAGE_SIGNIFICANT_HIT_RATIO)) {
           e.storyAnimT = Math.max(e.storyAnimT || 0, STORY_ANIM_MIN_DURATION);
         }
         applyWeaponSpecHit(b, e, dmg);
@@ -7686,8 +7686,9 @@ const STORY_RING_PULSE_BASE = 0.2;
 const STORY_RING_PULSE_RATE = 10;
 const STORY_RING_PULSE_AMPLITUDE = 0.1;
 const STORY_DAMAGE_MIN_THRESHOLD = 8;
-const STORY_DAMAGE_HP_RATIO = 0.22;
+const STORY_DAMAGE_SIGNIFICANT_HIT_RATIO = 0.22;
 const STORY_ANIM_MIN_DURATION = 0.45;
+const STORY_ZOMBIE_PULSE_RATE = 8;
 const UPGRADE_PULSE_RATE = 10;
 const WEAPON_SWAY_RATE = 12;
 const TREAD_WOBBLE_AMPLITUDE = 0.2;
@@ -8492,6 +8493,9 @@ function enemyAnimState(e) {
   const storyN = clamp((e && (e.storyAnimT ?? 0)) / ENEMY_STORY_ANIM_WINDOW, 0, 1);
   return { spawnN, hitN, storyN };
 }
+function storyPulseWave(t, rate = STORY_RING_PULSE_RATE) {
+  return 0.5 + 0.5 * Math.sin((t || 0) * rate);
+}
 
 function drawEnemy(e) {
   const anim = enemyAnimState(e);
@@ -8563,7 +8567,7 @@ function drawEnemy(e) {
     });
   }
   if (anim.storyN > 0.01 && visualQualityLevel() >= 1) {
-    const pulse = STORY_RING_PULSE_BASE + Math.sin((Game.t || 0) * STORY_RING_PULSE_RATE) * STORY_RING_PULSE_AMPLITUDE;
+    const pulse = STORY_RING_PULSE_BASE + (storyPulseWave(Game.t, STORY_RING_PULSE_RATE) * 2 - 1) * STORY_RING_PULSE_AMPLITUDE;
     ctx.save();
     ctx.globalAlpha = (anim.storyN * 0.35) + pulse;
     ctx.strokeStyle = e.kind === 'zombie' ? 'rgba(160,220,110,0.8)' : 'rgba(255,155,90,0.9)';
@@ -8669,7 +8673,7 @@ function drawZombie(e) {
   const bodyLean = clamp((e.vx || 0) / 170, -1, 1) * 0.18 + Math.sin(animT * 0.36) * 0.05;
   const spawnLift = anim.spawnN * (isRunner ? 9 : 7);
   const hitPunch = Math.sin(anim.hitN * Math.PI);
-  const storyPulse = 1 + anim.storyN * 0.08 * (0.5 + 0.5 * Math.sin((Game.t || 0) * 8));
+  const storyPulse = 1 + anim.storyN * 0.08 * storyPulseWave(Game.t, STORY_ZOMBIE_PULSE_RATE);
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(1, e.h/2 + 2, e.w/2 + 2, 4, 0, 0, Math.PI*2); ctx.fill();
