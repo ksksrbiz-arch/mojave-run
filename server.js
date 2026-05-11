@@ -684,7 +684,7 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'vs-join') {
       const room = safeStr(msg.room || 'VS-LOBBY', 12).toUpperCase();
       peer.name = safeStr(msg.name || 'DRIVER', 14);
-      peer.vehicleId = safeStr(msg.vehicleId || peer.vehicleId || 'rust', 16);
+      peer.vehicleId = safeStr(msg.vehicleId || 'rust', 16);
       let lobby = vsLobbies.get(room);
       if (!lobby) {
         lobby = { slot0: { ws, peer }, slot1: null };

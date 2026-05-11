@@ -14221,6 +14221,15 @@ function boot() {
 const VS_ROAD_W = 400;
 const VS_ROAD_H = 800;
 const VS_MAX_HP = 100;
+const VS_BACKGROUND_OVERLAY = 'rgba(16,10,6,0.55)';
+const VS_ENEMY_RENDER_VEHICLE = {
+  id: 'enemy_buggy_vs',
+  color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
+  base: { maxHp: 2, maxV: 640 },
+};
+function vsHealthRatio(p) {
+  return clamp((p && p.hp || 0) / Math.max(1, (p && p.maxHp) || VS_MAX_HP), 0, 1);
+}
 
 const Versus = {
   active: false,
@@ -14377,7 +14386,7 @@ function renderVersus() {
 
   ctx.save();
   drawBackground();
-  ctx.fillStyle = 'rgba(16,10,6,0.55)';
+  ctx.fillStyle = VS_BACKGROUND_OVERLAY;
   ctx.fillRect(0, 0, W, H);
 
   if (Game.state === 'versus-lobby') {
@@ -14437,15 +14446,10 @@ function renderVersus() {
   if (st) {
     // Draw enemies with in-game vehicle renderer
     for (const e of st.e) {
-      const rv = {
-        id: 'enemy_buggy_vs',
-        color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
-        base: { maxHp: 2, maxV: 640 },
-      };
       drawVehicle(
         toScreenX(e.x),
         toScreenY(e.y),
-        rv,
+        VS_ENEMY_RENDER_VEHICLE,
         0,
         Math.max(22, e.w * scaleX * 0.9),
         Math.max(34, e.h * scaleY * 0.88),
@@ -14481,7 +14485,7 @@ function renderVersus() {
       drawVehicle(px, py, vehicle, p.vx || 0, Math.max(28, pw), Math.max(42, ph), {
         ghost: false,
         noCosmetic: false,
-        damageRatio: 1 - clamp((p.hp || 0) / Math.max(1, p.maxHp || VS_MAX_HP), 0, 1),
+        damageRatio: 1 - vsHealthRatio(p),
       });
 
       // Name tag
@@ -14500,7 +14504,7 @@ function renderVersus() {
       const barY = py - ph / 2 - 6;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.fillRect(px - barW / 2, barY, barW, barH);
-      const hpRatio = clamp((p.hp || 0) / Math.max(1, p.maxHp || VS_MAX_HP), 0, 1);
+      const hpRatio = vsHealthRatio(p);
       ctx.fillStyle = hpRatio > 0.3 ? '#7af07a' : '#ff5050';
       ctx.fillRect(px - barW / 2, barY, barW * hpRatio, barH);
     }
