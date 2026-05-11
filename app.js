@@ -14220,12 +14220,23 @@ function boot() {
 
 const VS_ROAD_W = 400;
 const VS_ROAD_H = 800;
+const VS_MAX_HP = 100;
+const VS_BACKGROUND_OVERLAY = 'rgba(16,10,6,0.55)';
+const VS_ENEMY_RENDER_VEHICLE = {
+  id: 'enemy_buggy_vs',
+  color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
+  base: { maxHp: 2, maxV: 640 },
+};
+function vsHealthRatio(p) {
+  return clamp((p?.hp ?? 0) / Math.max(1, p?.maxHp ?? VS_MAX_HP), 0, 1);
+}
 
 const Versus = {
   active: false,
   state: null,    // latest vs-state from server
   slot: -1,       // our slot (0 or 1)
   opponent: '',
+  opponentVehicleId: 'rust',
   countdown: 0,
   countdownActive: false,
   ended: false,
@@ -14242,7 +14253,8 @@ function startVersusMode() {
   if (!MP.connected) {
     const profile = Profile.active();
     const name = profile ? profile.name : 'DRIVER';
-    MP.connect({ room: 'VS', name });
+    const vehicle = profile ? (VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0]) : VEHICLES[0];
+    MP.connect({ room: 'VS', name, vehicleId: vehicle.id });
     UI.toast('CONNECTING TO SERVER…');
     // Wait for connection then join versus
     const _vsWaitConn = setInterval(() => {
@@ -14260,15 +14272,17 @@ function startVersusMode() {
 function _doVersusJoin() {
   const profile = Profile.active();
   const name = profile ? profile.name : 'DRIVER';
+  const vehicle = profile ? (VEHICLE_BY_ID[profile.activeVehicle] || VEHICLES[0]) : VEHICLES[0];
   Versus.active = false;
   Versus.ended = false;
   Versus.endData = null;
   Versus.state = null;
+  Versus.opponentVehicleId = 'rust';
   Versus.countdown = 0;
   Versus.countdownActive = false;
   UI.prompt('ENTER VERSUS ROOM CODE', function(room) {
     const code = (room || 'ARENA').toUpperCase().slice(0, 12);
-    MP.vsJoin(code, name);
+    MP.vsJoin(code, name, vehicle.id);
     UI.toast('WAITING FOR OPPONENT…');
     UI.hideAllScreens();
     Game.state = 'versus-lobby';
@@ -14293,6 +14307,7 @@ function _doVersusJoin() {
   MP.on('vs-countdown', function(msg) {
     Versus.slot = msg.slot;
     Versus.opponent = msg.opponent || 'OPPONENT';
+    Versus.opponentVehicleId = msg.opponentVehicleId || 'rust';
     Versus.countdown = msg.t;
     Versus.countdownActive = true;
     Versus.active = true;
@@ -14311,6 +14326,14 @@ function _doVersusJoin() {
 
   MP.on('vs-state', function(msg) {
     Versus.state = msg;
+    if (msg && Array.isArray(msg.p) && msg.p.length > 1 && Versus.slot >= 0) {
+      const oppSlot = Versus.slot === 0 ? 1 : 0;
+      const opp = msg.p[oppSlot];
+      if (opp) {
+        Versus.opponent = opp.name || Versus.opponent || 'OPPONENT';
+        Versus.opponentVehicleId = opp.vehicleId || Versus.opponentVehicleId || 'rust';
+      }
+    }
   });
 
   MP.on('vs-hit', function(msg) {
@@ -14362,8 +14385,8 @@ function renderVersus() {
   if (!Versus.active && Game.state !== 'versus-lobby' && Game.state !== 'versus-end') return;
 
   ctx.save();
-  // Black background
-  ctx.fillStyle = '#1a1408';
+  drawBackground();
+  ctx.fillStyle = VS_BACKGROUND_OVERLAY;
   ctx.fillRect(0, 0, W, H);
 
   if (Game.state === 'versus-lobby') {
@@ -14384,8 +14407,11 @@ function renderVersus() {
   }
 
   const st = Versus.state;
+  const activeProfile = Profile.active();
   const scaleX = W / VS_ROAD_W;
   const scaleY = H / VS_ROAD_H;
+  const toScreenX = x => x * scaleX;
+  const toScreenY = y => y * scaleY;
 
   // Draw split road
   ctx.fillStyle = '#2a2012';
@@ -14418,53 +14444,52 @@ function renderVersus() {
   ctx.setLineDash([]);
 
   if (st) {
-    // Draw enemies
-    ctx.fillStyle = '#a04020';
+    // Draw enemies with in-game vehicle renderer
     for (const e of st.e) {
-      const ex = e.x * scaleX;
-      const ey = e.y * scaleY;
-      const ew = e.w * scaleX;
-      const eh = e.h * scaleY;
-      ctx.fillRect(ex - ew / 2, ey - eh / 2, ew, eh);
-      // Windshield
-      ctx.fillStyle = '#ff8a3d';
-      ctx.fillRect(ex - ew * 0.3, ey - eh * 0.15, ew * 0.6, eh * 0.25);
-      ctx.fillStyle = '#a04020';
+      drawVehicle(
+        toScreenX(e.x),
+        toScreenY(e.y),
+        VS_ENEMY_RENDER_VEHICLE,
+        0,
+        Math.max(22, e.w * scaleX * 0.9),
+        Math.max(34, e.h * scaleY * 0.88),
+        { noCosmetic: true }
+      );
     }
 
-    // Draw bullets
+    // Draw bullets (owner-tinted glow)
     for (const b of st.b) {
-      ctx.fillStyle = b.o === Versus.slot ? '#7af07a' : '#ff5050';
-      ctx.fillRect(b.x * scaleX - 2, b.y * scaleY - 5, 4, 10);
+      const bx = toScreenX(b.x);
+      const by = toScreenY(b.y);
+      const mine = b.o === Versus.slot;
+      ctx.save();
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = mine ? 'rgba(150,255,190,0.95)' : 'rgba(255,120,120,0.95)';
+      ctx.fillStyle = mine ? '#c9ffd1' : '#ffd0d0';
+      ctx.fillRect(bx - 2, by - 7, 4, 14);
+      ctx.restore();
     }
 
-    // Draw players
+    // Draw players using selected vehicles from profile/server state
     for (let i = 0; i < st.p.length; i++) {
       const p = st.p[i];
-      const px = p.x * scaleX;
-      const py = p.y * scaleY;
-      const pw = 42 * scaleX * 0.7;
-      const ph = 64 * scaleY * 0.6;
+      const px = toScreenX(p.x);
+      const py = toScreenY(p.y);
+      const pw = 42 * scaleX * 0.72;
+      const ph = 64 * scaleY * 0.62;
       const isMe = i === Versus.slot;
+      const fallbackVehicleId = isMe ? ((activeProfile && activeProfile.activeVehicle) || 'rust') : (Versus.opponentVehicleId || 'rust');
+      const vehicleId = p.vehicleId || fallbackVehicleId;
+      const vehicle = VEHICLE_BY_ID[vehicleId] || VEHICLES[0];
 
-      ctx.save();
-      ctx.translate(px, py);
-      // Vehicle body
-      ctx.fillStyle = isMe ? '#f5d76e' : '#e05050';
-      ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
-      // Windshield
-      ctx.fillStyle = isMe ? '#7ad0ff' : '#ff9090';
-      ctx.fillRect(-pw * 0.35, -ph * 0.3, pw * 0.7, ph * 0.25);
-      // Wheels
-      ctx.fillStyle = '#222';
-      ctx.fillRect(-pw / 2 - 3, -ph * 0.35, 5, ph * 0.2);
-      ctx.fillRect(pw / 2 - 2, -ph * 0.35, 5, ph * 0.2);
-      ctx.fillRect(-pw / 2 - 3, ph * 0.15, 5, ph * 0.2);
-      ctx.fillRect(pw / 2 - 2, ph * 0.15, 5, ph * 0.2);
-      ctx.restore();
+      drawVehicle(px, py, vehicle, p.vx || 0, Math.max(28, pw), Math.max(42, ph), {
+        ghost: false,
+        noCosmetic: false,
+        damageRatio: 1 - vsHealthRatio(p),
+      });
 
       // Name tag
-      const name = isMe ? 'YOU' : (Versus.opponent || 'OPP').toUpperCase();
+      const name = isMe ? 'YOU' : (p.name || Versus.opponent || 'OPP').toUpperCase();
       ctx.font = 'bold 11px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -14479,7 +14504,7 @@ function renderVersus() {
       const barY = py - ph / 2 - 6;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.fillRect(px - barW / 2, barY, barW, barH);
-      const hpRatio = Math.max(0, p.hp / 100);
+      const hpRatio = vsHealthRatio(p);
       ctx.fillStyle = hpRatio > 0.3 ? '#7af07a' : '#ff5050';
       ctx.fillRect(px - barW / 2, barY, barW * hpRatio, barH);
     }
@@ -14496,7 +14521,8 @@ function renderVersus() {
     // Opponent score
     ctx.fillStyle = '#e05050';
     ctx.textAlign = 'right';
-    ctx.fillText((Versus.opponent || 'OPP') + ': ' + (oppP ? oppP.score : 0) + ' · K:' + (oppP ? oppP.kills : 0), W - 10, 10);
+    const oppName = (oppP && oppP.name) ? oppP.name : (Versus.opponent || 'OPP');
+    ctx.fillText(oppName + ': ' + (oppP ? oppP.score : 0) + ' · K:' + (oppP ? oppP.kills : 0), W - 10, 10);
     // Timer
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';

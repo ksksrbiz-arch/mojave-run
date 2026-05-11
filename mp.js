@@ -391,11 +391,18 @@
     try { MP.ws.send(JSON.stringify({ type: 'revive', target: target || null })); } catch (_) {}
   }
 
-  function vsJoin(room, name) {
+  function vsJoin(room, name, vehicleId) {
     if (!MP.connected || !MP.ws || MP.ws.readyState !== 1) return;
     MP.vsState = null;
     MP.vsSlot = null;
-    try { MP.ws.send(JSON.stringify({ type: 'vs-join', room: room || 'VS-LOBBY', name: name || MP.name })); } catch (_) {}
+    try {
+      MP.ws.send(JSON.stringify({
+        type: 'vs-join',
+        room: room || 'VS-LOBBY',
+        name: name || MP.name,
+        vehicleId: vehicleId || MP.vehicleId || 'rust',
+      }));
+    } catch (_) {}
   }
 
   function vsSendInput(input) {

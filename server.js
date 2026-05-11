@@ -684,6 +684,7 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'vs-join') {
       const room = safeStr(msg.room || 'VS-LOBBY', 12).toUpperCase();
       peer.name = safeStr(msg.name || 'DRIVER', 14);
+      peer.vehicleId = safeStr(msg.vehicleId || 'rust', 16);
       let lobby = vsLobbies.get(room);
       if (!lobby) {
         lobby = { slot0: { ws, peer }, slot1: null };
@@ -878,12 +879,14 @@ function vsCreateMatch(lobby, room) {
     players: [
       {
         ws: lobby.slot0.ws, peer: lobby.slot0.peer, name: lobby.slot0.peer.name,
+        vehicleId: lobby.slot0.peer.vehicleId || 'rust',
         x: VS_ROAD_W * 0.35, y: VS_ROAD_H - 110, vx: 0,
         hp: VS_MAX_HP, score: 0, kills: 0, fireCd: 0,
         input: { l: false, r: false, f: false },
       },
       {
         ws: lobby.slot1.ws, peer: lobby.slot1.peer, name: lobby.slot1.peer.name,
+        vehicleId: lobby.slot1.peer.vehicleId || 'rust',
         x: VS_ROAD_W * 0.65, y: VS_ROAD_H - 110, vx: 0,
         hp: VS_MAX_HP, score: 0, kills: 0, fireCd: 0,
         input: { l: false, r: false, f: false },
@@ -901,8 +904,20 @@ function vsCreateMatch(lobby, room) {
   match.players[1].ws._vsSlot = 1;
   vsMatches.set(id, match);
   // Notify both players
-  vsSend(match.players[0].ws, { type: 'vs-countdown', t: VS_COUNTDOWN_SECS, slot: 0, opponent: match.players[1].name });
-  vsSend(match.players[1].ws, { type: 'vs-countdown', t: VS_COUNTDOWN_SECS, slot: 1, opponent: match.players[0].name });
+  vsSend(match.players[0].ws, {
+    type: 'vs-countdown',
+    t: VS_COUNTDOWN_SECS,
+    slot: 0,
+    opponent: match.players[1].name,
+    opponentVehicleId: match.players[1].vehicleId,
+  });
+  vsSend(match.players[1].ws, {
+    type: 'vs-countdown',
+    t: VS_COUNTDOWN_SECS,
+    slot: 1,
+    opponent: match.players[0].name,
+    opponentVehicleId: match.players[0].vehicleId,
+  });
   return match;
 }
 
@@ -1056,7 +1071,8 @@ function vsTickMatch(match, dt) {
     dur: match.duration,
     p: match.players.map(p => ({
       x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx),
-      hp: p.hp, score: p.score, kills: p.kills,
+      hp: p.hp, maxHp: VS_MAX_HP, score: p.score, kills: p.kills,
+      name: p.name, vehicleId: p.vehicleId || 'rust',
     })),
     e: match.enemies.map(e => ({
       id: e.id, x: Math.round(e.x), y: Math.round(e.y),
