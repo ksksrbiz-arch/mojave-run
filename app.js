@@ -57,10 +57,15 @@ const PREFERS_REDUCED_MOTION = (() => {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
   catch (_) { return false; }
 })();
+// Conservative first-run defaults for devices most likely to thermal-throttle:
+// <=2GB RAM or <=4 cores usually indicates entry-level mobile/tablet hardware.
+const LOW_POWER_MEMORY_GB = 2;
+const LOW_POWER_CPU_CORES = 4;
+const LOW_POWER_PARTICLE_MULTIPLIER = 0.85;
 const LOW_POWER_DEVICE = (() => {
   const mem = Number(navigator.deviceMemory || 0);
   const cores = Number(navigator.hardwareConcurrency || 0);
-  return (mem && mem <= 2) || (cores && cores <= 4);
+  return (mem && mem <= LOW_POWER_MEMORY_GB) || (cores && cores <= LOW_POWER_CPU_CORES);
 })();
 
 // ============================================================
@@ -2792,7 +2797,7 @@ const Settings = {
   // screen-shake intensity multiplier 0..1.5
   shake: 1.0,
   // particle density multiplier 0..1.5 (gameplay-cosmetic only)
-  particles: LOW_POWER_DEVICE ? 0.85 : 1.0,
+  particles: LOW_POWER_DEVICE ? LOW_POWER_PARTICLE_MULTIPLIER : 1.0,
   // navigator.vibrate-based haptic feedback on key events
   haptics: true,
   // 1.5x hit areas for menu buttons (accessibility)

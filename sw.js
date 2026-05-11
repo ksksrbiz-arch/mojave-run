@@ -111,6 +111,8 @@ self.addEventListener('fetch', event => {
   if (isNav) {
     event.respondWith(
       caches.match('/').then(cachedShell => {
+        // Start network/preload immediately so cached navigations stay fast
+        // while still refreshing the shell for the next launch.
         const preload = event.preloadResponse ? event.preloadResponse.catch(() => null) : Promise.resolve(null);
         const network = preload.then(preloaded => preloaded || fetch(req))
           .then(res => {
@@ -128,6 +130,8 @@ self.addEventListener('fetch', event => {
           event.waitUntil(network);
           return cachedShell;
         }
+        // First visit has no shell yet: wait briefly for the network, then
+        // fall back to any cache install result or a small offline page.
         return Promise.race([network, timeout(NAVIGATION_TIMEOUT_MS)])
           .then(res => res || caches.match('/').then(r => r || caches.match('/index.html')))
           .then(res => res || offlineShellResponse());
