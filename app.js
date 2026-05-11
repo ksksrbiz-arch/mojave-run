@@ -59,7 +59,8 @@ const PREFERS_REDUCED_MOTION = (() => {
   catch (_) { return false; }
 })();
 // Conservative first-run defaults for devices most likely to thermal-throttle:
-// <=2GB RAM or <=4 cores usually indicates entry-level mobile/tablet hardware.
+// <=2GB RAM is a hard low-memory signal; <=4 cores catches older devices
+// without down-binning modern 6-8 core entry phones too aggressively.
 const LOW_POWER_MEMORY_GB = 2;
 const LOW_POWER_CPU_CORES = 4;
 const LOW_POWER_PARTICLE_MULTIPLIER = 0.85;
@@ -4242,7 +4243,7 @@ window.addEventListener('keydown', e => {
     }
   }
   // Q cycles graphics quality (auto -> low -> medium -> high -> auto) and
-  // persists the choice in resilient local storage. Skipped while typing in the
+  // persists the choice through the safe localStorage wrapper. Skipped while typing in the
   // profile-rename modal so it doesn't hijack the input.
   if (key === 'q' && !isTypingField(document.activeElement)) {
     if (Game.state === 'playing') triggerVehicleAbility();

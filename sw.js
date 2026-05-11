@@ -21,7 +21,7 @@ const MAX_RUNTIME_ENTRIES = 36;
 const PRECACHE = [
   '/',
   '/index.html',
-  // Legacy standalone build linked from the app; keep it offline-capable.
+  // Previous app version kept for backward compatibility; cache for offline play.
   '/v2.html',
   '/app.js',
   '/mp.js',
