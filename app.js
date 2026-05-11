@@ -60,7 +60,7 @@ const PREFERS_REDUCED_MOTION = (() => {
 })();
 // Conservative first-run defaults for devices most likely to thermal-throttle:
 // <=2GB RAM is a hard low-memory signal; <=4 cores catches older devices
-// without down-binning modern 6-8 core entry phones too aggressively.
+// without downbinning modern 6-8 core entry phones too aggressively.
 const LOW_POWER_MEMORY_GB = 2;
 const LOW_POWER_CPU_CORES = 4;
 const LOW_POWER_PARTICLE_MULTIPLIER = 0.85;
