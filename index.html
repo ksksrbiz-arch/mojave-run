@@ -443,6 +443,218 @@
   }
   .up-row .up-tiers .pip.filled{background:var(--gold);border-color:var(--gold)}
 
+  /* ========================================================
+     GARAGE / UPGRADE — visual enhancement layer
+     Adds a richer "garage interior" feel: concrete grid
+     backdrop, marquee tape subtitle, animated selected glow,
+     color-coded stat bars and upgrade pips, larger glossy
+     vehicle preview bays, and richer cosmetic swatches.
+     ======================================================== */
+
+  /* concrete-grid backdrop limited to the garage and upgrade screens */
+  #screen-garage > .inner,
+  #screen-upgrade > .inner{
+    position:relative;
+  }
+  #screen-garage > .inner::before,
+  #screen-upgrade > .inner::before{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
+    background:
+      repeating-linear-gradient(0deg, rgba(245,215,110,.04) 0 1px, transparent 1px 32px),
+      repeating-linear-gradient(90deg, rgba(245,215,110,.04) 0 1px, transparent 1px 32px),
+      radial-gradient(ellipse at 50% 0%, rgba(245,215,110,.07), transparent 60%);
+    opacity:.7;
+  }
+  #screen-garage > .inner > *,
+  #screen-upgrade > .inner > *{position:relative;z-index:1}
+
+  /* GARAGE marquee tape — runs under the profile-bar */
+  .garage-marquee{
+    display:flex;align-items:center;gap:0;
+    height:14px;margin:-6px 0 10px;
+    overflow:hidden;
+    border:1px solid var(--gold-faint);
+    border-radius:3px;
+    background:repeating-linear-gradient(45deg,
+      #f5d76e 0 10px, #1a1208 10px 20px);
+    box-shadow:inset 0 0 8px rgba(0,0,0,.6);
+    position:relative;
+  }
+  .garage-marquee::after{
+    content:attr(data-text);
+    position:absolute;inset:0;
+    display:flex;align-items:center;justify-content:center;
+    font-size:9px;letter-spacing:3px;font-weight:bold;
+    color:#1a1208;
+    background:rgba(245,215,110,.55);
+    text-shadow:0 1px 0 rgba(255,255,255,.25);
+  }
+
+  /* GARAGE TABS — punchier hover/active state */
+  .garage-tabs{margin-bottom:10px}
+  .garage-tab{
+    transition:background .15s,color .15s,border-color .15s,box-shadow .2s,transform .15s;
+  }
+  .garage-tab:hover{
+    border-color:var(--gold);
+    box-shadow:0 0 12px rgba(245,215,110,.25), inset 0 0 8px rgba(245,215,110,.08);
+  }
+  .garage-tab.active{
+    box-shadow:0 0 14px rgba(245,215,110,.45), inset 0 -2px 0 rgba(0,0,0,.3);
+    text-shadow:0 1px 0 rgba(0,0,0,.3);
+  }
+
+  /* VEHICLE TILE — gold pulse on selected, hover lift, master green pulse */
+  .vehicle-tile{
+    background:linear-gradient(180deg, rgba(20,12,6,.65), rgba(0,0,0,.55));
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.35);
+  }
+  .vehicle-tile:hover{
+    transform:translateY(-2px);
+    box-shadow:0 8px 22px rgba(0,0,0,.45), 0 0 14px rgba(245,215,110,.18);
+  }
+  .vehicle-tile.selected{
+    background:linear-gradient(180deg, rgba(245,215,110,.10), rgba(245,215,110,.04));
+    animation:vt-selected-pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes vt-selected-pulse{
+    0%,100%{box-shadow:0 0 0 rgba(245,215,110,0), inset 0 0 0 1px rgba(0,0,0,.35)}
+    50%{box-shadow:0 0 22px rgba(245,215,110,.45), inset 0 0 0 1px rgba(245,215,110,.25)}
+  }
+  .vehicle-tile.master-vehicle.selected{
+    animation:vt-selected-master-pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes vt-selected-master-pulse{
+    0%,100%{box-shadow:0 0 0 rgba(122,255,90,0)}
+    50%{box-shadow:0 0 22px rgba(122,255,90,.5), inset 0 0 0 1px rgba(122,255,90,.3)}
+  }
+  .vehicle-tile .vt-name{
+    text-shadow:0 1px 0 rgba(0,0,0,.5);
+  }
+
+  /* PREVIEW BAY — taller, glossy frame, canvas stretched to fill */
+  .vehicle-tile .vt-preview{
+    height:130px;
+    background:linear-gradient(180deg,#0c0a08 0%, #1a120a 60%, #0a0604 100%);
+    border:1px solid rgba(245,215,110,.18);
+    box-shadow:inset 0 0 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(245,215,110,.15);
+  }
+  .vehicle-tile .vt-preview canvas{
+    position:absolute;inset:0;
+    width:100% !important;height:100% !important;
+    image-rendering:pixelated;
+  }
+  /* glossy diagonal sheen across the preview */
+  .vehicle-tile .vt-preview::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(115deg,
+      rgba(255,255,255,0) 30%,
+      rgba(255,255,255,.05) 48%,
+      rgba(255,255,255,0) 60%);
+  }
+
+  /* UPGRADE preview bay — slightly larger and dramatically lit */
+  #up-preview{
+    height:170px !important;
+    background:linear-gradient(180deg,#0c0a08 0%, #1a120a 60%, #0a0604 100%) !important;
+    border:1px solid rgba(245,215,110,.22);
+    box-shadow:inset 0 0 28px rgba(0,0,0,.6), inset 0 1px 0 rgba(245,215,110,.18);
+  }
+  #up-preview canvas{
+    position:absolute;inset:0;
+    width:100% !important;height:100% !important;
+    image-rendering:pixelated;
+  }
+
+  /* STAT BAR list spacing */
+  .vt-stat-list{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+  .stat-bar .lbl{font-weight:bold}
+  .stat-bar .bar{
+    background:linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,.4));
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.6);
+  }
+  .stat-bar .fill{
+    background:var(--gold);
+    transition:width .35s ease-out;
+    box-shadow:0 0 6px rgba(245,215,110,.45);
+  }
+  /* color-coded stat tracks */
+  .stat-bar.s-speed .fill{background:linear-gradient(90deg,#7ad8ff,#39a8ff);box-shadow:0 0 6px rgba(122,216,255,.55)}
+  .stat-bar.s-speed .lbl,.stat-bar.s-speed .num{color:#a8e6ff}
+  .stat-bar.s-accel .fill{background:linear-gradient(90deg,#ffe26d,#ffa53d);box-shadow:0 0 6px rgba(255,200,90,.55)}
+  .stat-bar.s-accel .lbl,.stat-bar.s-accel .num{color:#ffe9a3}
+  .stat-bar.s-armor .fill{background:linear-gradient(90deg,#9aff7a,#46c43b);box-shadow:0 0 6px rgba(122,255,90,.5)}
+  .stat-bar.s-armor .lbl,.stat-bar.s-armor .num{color:#c4ffb2}
+  .stat-bar.s-fire  .fill{background:linear-gradient(90deg,#ffb56b,#ff6a3d);box-shadow:0 0 6px rgba(255,140,80,.55)}
+  .stat-bar.s-fire  .lbl,.stat-bar.s-fire  .num{color:#ffd5b0}
+  .stat-bar.s-dmg   .fill{background:linear-gradient(90deg,#ff7a7a,#d22a2a);box-shadow:0 0 6px rgba(255,90,90,.55)}
+  .stat-bar.s-dmg   .lbl,.stat-bar.s-dmg   .num{color:#ffc4c4}
+
+  /* UPGRADE TRACK color-coded pips */
+  .up-row{
+    background:linear-gradient(180deg, rgba(20,12,6,.55), rgba(0,0,0,.5));
+  }
+  .up-row .up-tiers .pip{
+    transition:background .2s,box-shadow .2s,border-color .2s;
+  }
+  .up-row.up-engine  .up-tiers .pip.filled{background:linear-gradient(180deg,#ffe26d,#ffa53d);border-color:#ffa53d;box-shadow:0 0 8px rgba(255,200,90,.6)}
+  .up-row.up-plating .up-tiers .pip.filled{background:linear-gradient(180deg,#9aff7a,#46c43b);border-color:#46c43b;box-shadow:0 0 8px rgba(122,255,90,.55)}
+  .up-row.up-weapons .up-tiers .pip.filled{background:linear-gradient(180deg,#ff7a7a,#d22a2a);border-color:#d22a2a;box-shadow:0 0 8px rgba(255,90,90,.55)}
+  .up-row.up-reactor .up-tiers .pip.filled{background:linear-gradient(180deg,#c99cff,#7a39ff);border-color:#7a39ff;box-shadow:0 0 8px rgba(180,120,255,.55)}
+  .up-row.up-max{
+    border-color:rgba(245,215,110,.55);
+    box-shadow:0 0 14px rgba(245,215,110,.18);
+  }
+
+  /* COSMETIC CARDS — taller glossy swatches */
+  .cosmetic-card{
+    background:linear-gradient(180deg, rgba(20,12,6,.55), rgba(0,0,0,.45));
+    transition:transform .15s,border-color .15s,box-shadow .2s;
+  }
+  .cosmetic-card:hover{
+    transform:translateY(-1px);
+    border-color:var(--gold);
+    box-shadow:0 4px 14px rgba(0,0,0,.4), 0 0 12px rgba(245,215,110,.18);
+  }
+  .cosmetic-card.equipped{
+    box-shadow:0 0 14px rgba(245,215,110,.35), inset 0 0 0 1px rgba(245,215,110,.25);
+  }
+  .cosmetic-swatch{
+    height:34px;
+    border:1px solid rgba(245,215,110,.35);
+    background:linear-gradient(180deg, rgba(0,0,0,.5), rgba(0,0,0,.35));
+    box-shadow:inset 0 0 12px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
+    position:relative;overflow:hidden;
+  }
+  .cosmetic-swatch span{
+    box-shadow:inset 0 -8px 12px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  .cosmetic-swatch::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(115deg,
+      rgba(255,255,255,0) 38%,
+      rgba(255,255,255,.18) 50%,
+      rgba(255,255,255,0) 62%);
+    transform:translateX(-100%);
+    animation:cosmetic-sheen 4.8s ease-in-out infinite;
+  }
+  @keyframes cosmetic-sheen{
+    0%,55%,100%{transform:translateX(-100%)}
+    70%{transform:translateX(100%)}
+  }
+
+  /* Mobile breakpoint: shrink preview but keep the bay readable */
+  @media (max-height:600px){
+    .vehicle-tile .vt-preview{height:96px}
+    #up-preview{height:130px !important}
+    .garage-marquee{display:none}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .vehicle-tile.selected,
+    .vehicle-tile.master-vehicle.selected{animation:none}
+    .cosmetic-swatch::after{animation:none}
+  }
+
   /* MODE tile */
   .mode-tile{
     background:rgba(0,0,0,.5);
@@ -1002,6 +1214,7 @@
         <div class="name">GARAGE</div>
         <div class="scrap">SCRAP <b id="garage-scrap">0</b></div>
       </div>
+      <div class="garage-marquee" data-text="◢ MOJAVE MOTOR POOL · KEEP CLEAR · NO IDLING ◣"></div>
       <div class="garage-tabs">
         <button class="btn garage-tab" data-garage-tab="vehicles">RIDES</button>
         <button class="btn garage-tab" data-garage-tab="paint">PAINT</button>
@@ -1022,6 +1235,7 @@
         <div class="name" id="up-vname">VEHICLE</div>
         <div class="scrap">SCRAP <b id="up-scrap">0</b></div>
       </div>
+      <div class="garage-marquee" data-text="◢ UPGRADE BAY · HOT WORK IN PROGRESS · EYE PROTECTION REQUIRED ◣"></div>
       <div id="up-preview" style="height:120px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#3a230f,#1f1610);border-radius:4px;margin-bottom:8px;position:relative;overflow:hidden"></div>
       <div id="up-list" style="display:flex;flex-direction:column;gap:10px"></div>
       <div style="height:8px"></div>
