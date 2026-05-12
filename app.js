@@ -10532,6 +10532,8 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
   const h = Math.round((bay ? 84 : 60) * scale);
   const cy = floorY - h * 0.45;
   const bob = Math.sin(pt * 2.2) * (bay ? 1.4 : 0.9);
+  const activeProfile = Profile.active && Profile.active();
+  const upgrades = getVehicleUpgradeLevelsForRender(v, { upgradeVehicleId: v.id, profile: activeProfile });
 
   if (bay) drawGarageBay(c, cw, ch, floorY, cx, pt, v, opts.label);
 
@@ -10565,7 +10567,7 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
       paintId: cosmetics && cosmetics.equippedPaint,
       detailLevel: 1,
       t: pt,
-      upgrades: getVehicleUpgradeLevelsForRender(v, { upgradeVehicleId: v.id, profile: Profile.active && Profile.active() }),
+      upgrades,
     });
     c.restore();
     // Fade reflection downward so it dissolves into the floor
@@ -10581,7 +10583,7 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
     paintId: cosmetics && cosmetics.equippedPaint,
     detailLevel: 2,
     t: pt,
-    upgrades: getVehicleUpgradeLevelsForRender(v, { upgradeVehicleId: v.id, profile: Profile.active && Profile.active() }),
+    upgrades,
   });
 
   if (bay) drawGarageBayForeground(c, cw, ch, floorY, cx, pt, v);
