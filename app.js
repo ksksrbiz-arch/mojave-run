@@ -2292,6 +2292,64 @@ const ACTIVE_KEY  = 'mojaveRun_activeProfile_v2';
 const LEGACY_BEST = 'mojaveRunBest';
 const UPGRADE_TRACK_DEFAULTS = Object.fromEntries(UPGRADE_TRACKS.map(t => [t.id, 0]));
 
+function normalizeGarageProfileState(p, returnChanged = false) {
+  if (!p || typeof p !== 'object') return returnChanged ? false : p;
+  let changed = false;
+  if (!p.ownedVehicles || typeof p.ownedVehicles !== 'object' || Array.isArray(p.ownedVehicles)) {
+    p.ownedVehicles = { rustbucket: true };
+    changed = true;
+  }
+  if (!p.ownedVehicles.rustbucket) {
+    p.ownedVehicles.rustbucket = true;
+    changed = true;
+  }
+  Object.keys(p.ownedVehicles).forEach(vid => {
+    if (!VEHICLE_BY_ID[vid]) {
+      delete p.ownedVehicles[vid];
+      changed = true;
+    }
+  });
+  if (!p.vehicleUpgrades || typeof p.vehicleUpgrades !== 'object' || Array.isArray(p.vehicleUpgrades)) {
+    p.vehicleUpgrades = {};
+    changed = true;
+  }
+  if (!p.vehicleBranches || typeof p.vehicleBranches !== 'object' || Array.isArray(p.vehicleBranches)) {
+    p.vehicleBranches = {};
+    changed = true;
+  }
+  let firstOwnedVehicle = null;
+  Object.keys(p.ownedVehicles).forEach(vid => {
+    if (!p.ownedVehicles[vid]) return;
+    if (!firstOwnedVehicle && VEHICLE_BY_ID[vid]) firstOwnedVehicle = vid;
+    if (!p.vehicleUpgrades[vid] || typeof p.vehicleUpgrades[vid] !== 'object' || Array.isArray(p.vehicleUpgrades[vid])) {
+      p.vehicleUpgrades[vid] = Object.assign({}, UPGRADE_TRACK_DEFAULTS);
+      changed = true;
+    }
+    for (const tid of Object.keys(UPGRADE_TRACK_DEFAULTS)) {
+      if (typeof p.vehicleUpgrades[vid][tid] !== 'number') {
+        p.vehicleUpgrades[vid][tid] = 0;
+        changed = true;
+      }
+    }
+    if (!(vid in p.vehicleBranches)) {
+      p.vehicleBranches[vid] = null;
+      changed = true;
+    }
+    const branchId = p.vehicleBranches[vid];
+    if (branchId && !getVehicleBranchDef(vid, branchId)) {
+      p.vehicleBranches[vid] = null;
+      changed = true;
+    }
+  });
+  if (!firstOwnedVehicle) firstOwnedVehicle = 'rustbucket';
+  if (!p.activeVehicle || !p.ownedVehicles[p.activeVehicle] || !VEHICLE_BY_ID[p.activeVehicle]) {
+    p.activeVehicle = firstOwnedVehicle;
+    changed = true;
+  }
+  if (normalizeCosmetics(p, true)) changed = true;
+  return returnChanged ? changed : p;
+}
+
 const Profile = {
   _data: null,
   load() {
@@ -2315,32 +2373,7 @@ const Profile = {
           p.bestWinding = 0;
           dirty = true;
         }
-        p.ownedVehicles = p.ownedVehicles || { rustbucket: true };
-        p.vehicleUpgrades = p.vehicleUpgrades || {};
-        p.vehicleBranches = p.vehicleBranches || {};
-        Object.keys(p.ownedVehicles).forEach(vid => {
-          if (!p.ownedVehicles[vid]) return;
-          if (!p.vehicleUpgrades[vid]) {
-            p.vehicleUpgrades[vid] = Object.assign({}, UPGRADE_TRACK_DEFAULTS);
-            dirty = true;
-            return;
-          }
-          for (const tid of Object.keys(UPGRADE_TRACK_DEFAULTS)) {
-            if (typeof p.vehicleUpgrades[vid][tid] !== 'number') {
-              p.vehicleUpgrades[vid][tid] = 0;
-              dirty = true;
-            }
-          }
-          if (!(vid in p.vehicleBranches)) {
-            p.vehicleBranches[vid] = null;
-            dirty = true;
-          }
-          const branchId = p.vehicleBranches[vid];
-          if (branchId && !getVehicleBranchDef(vid, branchId)) {
-            p.vehicleBranches[vid] = null;
-            dirty = true;
-          }
-        });
+        if (normalizeGarageProfileState(p, true)) dirty = true;
         if (!p.campaignCleared) { p.campaignCleared = {}; dirty = true; }
         if (p.activeSidekick === undefined) { p.activeSidekick = null; dirty = true; }
         if (!Array.isArray(p.achievements)) { p.achievements = []; dirty = true; }
@@ -2353,7 +2386,6 @@ const Profile = {
         if (typeof p.bestIronThrone !== 'number') { p.bestIronThrone = 0; dirty = true; }
         if (!Array.isArray(p.ironThroneCleared)) { p.ironThroneCleared = []; dirty = true; }
         if (!('bankedPowerup' in p)) { p.bankedPowerup = null; dirty = true; }
-        if (normalizeCosmetics(p, true)) dirty = true;
         // === PLATFORM FEATURES normalization ===
         if (typeof p.prestigeTokens !== 'number') { p.prestigeTokens = 0; dirty = true; }
         if (!p.weeklyProgress || typeof p.weeklyProgress !== 'object') { p.weeklyProgress = {}; dirty = true; }
@@ -2384,13 +2416,23 @@ const Profile = {
   save() {
     try { safeLocalStorage.setItem(STORAGE_KEY, JSON.stringify(this._data)); } catch (e) {}
   },
-  list() { return this._data.profiles.slice(); },
+  list() {
+    const profiles = this._data.profiles.slice();
+    let dirty = false;
+    profiles.forEach(p => {
+      if (normalizeGarageProfileState(p, true)) dirty = true;
+    });
+    if (dirty) this.save();
+    return profiles;
+  },
   activeId() {
     try { return safeLocalStorage.getItem(ACTIVE_KEY); } catch (e) { return null; }
   },
   active() {
     const id = this.activeId();
-    return this._data.profiles.find(p => p.id === id) || null;
+    const profile = this._data.profiles.find(p => p.id === id) || null;
+    if (profile && normalizeGarageProfileState(profile, true)) this.save();
+    return profile;
   },
   setActive(id) {
     try { safeLocalStorage.setItem(ACTIVE_KEY, id); } catch (e) {}
@@ -14358,7 +14400,10 @@ function cloudRestore() {
           // Merge server profiles into local store
           const merged = Profile._data;
           const existing2 = new Map(merged.profiles.map(pp => [pp.id, pp]));
-          resp.data.profiles.forEach(pp => existing2.set(pp.id, pp));
+          resp.data.profiles.forEach(pp => {
+            normalizeGarageProfileState(pp);
+            existing2.set(pp.id, pp);
+          });
           merged.profiles = Array.from(existing2.values());
           Profile.save();
           safeLocalStorage.setItem(CLOUD_ID_KEY, id);
@@ -16520,7 +16565,10 @@ function cloudSyncMerge(local, remote) {
   // Conflict strategy: per-profile last-write-wins based on timestamps.
   // If remote schema is newer, accept remote wholesale. If older, keep local.
   if (!remote) return local;
-  if ((remote.schemaVersion || 0) > (local.schemaVersion || 0)) return remote;
+  if ((remote.schemaVersion || 0) > (local.schemaVersion || 0)) {
+    (remote.profiles || []).forEach(rp => normalizeGarageProfileState(rp));
+    return remote;
+  }
 
   const merged = Object.assign({}, local);
   merged.profiles = merged.profiles || [];
@@ -16528,6 +16576,7 @@ function cloudSyncMerge(local, remote) {
 
   // Merge remote profiles — prefer whichever has more runs or higher scrap (heuristic for "more progressed")
   (remote.profiles || []).forEach(rp => {
+    normalizeGarageProfileState(rp);
     const lp = localMap.get(rp.id);
     if (!lp) {
       localMap.set(rp.id, rp);
