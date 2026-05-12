@@ -10778,8 +10778,9 @@ const UI = {
   showGarage(tab) {
     const p = Profile.active(); if (!p) return;
     normalizeCosmetics(p);
-    if (tab) this._garageTab = tab;
-    if (!this._garageTab) this._garageTab = 'vehicles';
+    const validTabs = new Set(['vehicles', 'paint', 'trail', 'horn']);
+    this._garageTab = tab || 'vehicles';
+    if (!validTabs.has(this._garageTab)) this._garageTab = 'vehicles';
     document.getElementById('garage-scrap').textContent = p.scrap;
     document.querySelectorAll('[data-garage-tab]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.garageTab === this._garageTab);
