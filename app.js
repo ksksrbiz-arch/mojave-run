@@ -2317,8 +2317,10 @@ function normalizeGarageProfileState(p, returnChanged = false) {
     p.vehicleBranches = {};
     changed = true;
   }
+  let firstOwnedVehicle = null;
   Object.keys(p.ownedVehicles).forEach(vid => {
     if (!p.ownedVehicles[vid]) return;
+    if (!firstOwnedVehicle && VEHICLE_BY_ID[vid]) firstOwnedVehicle = vid;
     if (!p.vehicleUpgrades[vid] || typeof p.vehicleUpgrades[vid] !== 'object' || Array.isArray(p.vehicleUpgrades[vid])) {
       p.vehicleUpgrades[vid] = Object.assign({}, UPGRADE_TRACK_DEFAULTS);
       changed = true;
@@ -2339,7 +2341,7 @@ function normalizeGarageProfileState(p, returnChanged = false) {
       changed = true;
     }
   });
-  const firstOwnedVehicle = Object.keys(p.ownedVehicles).find(vid => p.ownedVehicles[vid] && VEHICLE_BY_ID[vid]) || 'rustbucket';
+  if (!firstOwnedVehicle) firstOwnedVehicle = 'rustbucket';
   if (!p.activeVehicle || !p.ownedVehicles[p.activeVehicle] || !VEHICLE_BY_ID[p.activeVehicle]) {
     p.activeVehicle = firstOwnedVehicle;
     changed = true;
