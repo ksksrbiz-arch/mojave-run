@@ -10503,42 +10503,244 @@ function render() {
 
 // ============================================================
 // VEHICLE PREVIEW (used in garage/upgrade)
+// Renders a small "garage bay" diorama: lit floor with scan stripes,
+// corrugated back wall with floodlights, an overhead spotlight cone,
+// a slow turntable, the vehicle (with active paint/trail cosmetics),
+// a mirrored floor reflection, and drifting dust/spark motes.
+// `opts` (optional): { size:{w,h}, bay:boolean (default true if size given), label:string }
+// Default size 80x90 keeps prior callers visually identical.
 // ============================================================
-function renderVehiclePreview(canvas, vehicleId, cosmetics = null) {
+function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
   const v = VEHICLE_BY_ID[vehicleId];
   if (!v) return;
   const c = canvas.getContext('2d');
-  const cw = canvas.width = 80;
-  const ch = canvas.height = 90;
+  const size = opts.size || { w: 80, h: 90 };
+  const cw = canvas.width = size.w;
+  const ch = canvas.height = size.h;
+  const bay = opts.bay !== undefined ? !!opts.bay : (size.w > 80 || size.h > 90);
   c.imageSmoothingEnabled = false;
   c.clearRect(0, 0, cw, ch);
-  const cx = cw * 0.5, cy = ch * 0.53;
-  const w = 38, h = 60;
   const pt = (Game.animT || Game.t || 0) + (v.id.length * 0.31);
   const prev = ctx;
   ctx = c;
-  const bob = Math.sin(pt * 2.2) * 0.9;
+
+  const cx = cw * 0.5;
+  const floorY = bay ? Math.floor(ch * 0.78) : Math.floor(ch * 0.83);
+  // scale vehicle to bay size
+  const scale = bay ? Math.min(cw / 200, ch / 130) : 1;
+  const w = Math.round((bay ? 56 : 38) * scale);
+  const h = Math.round((bay ? 84 : 60) * scale);
+  const cy = floorY - h * 0.45;
+  const bob = Math.sin(pt * 2.2) * (bay ? 1.4 : 0.9);
+  const activeProfile = Profile.active && Profile.active();
+  const upgrades = getVehicleUpgradeLevelsForRender(v, { upgradeVehicleId: v.id, profile: activeProfile });
+
+  if (bay) drawGarageBay(c, cw, ch, floorY, cx, pt, v, opts.label);
+
+  // Trail puff under the vehicle (cosmetic preview)
   const trailId = cosmetics && cosmetics.equippedTrail;
   if (trailId) {
     const trail = getTrailDef(trailId);
     const colors = trail.colors || ['rgba(120,90,60,0.5)'];
-    for (let i = 0; i < 6; i++) {
+    const baseY = cy + h / 2 + 4;
+    const puffs = bay ? 9 : 6;
+    for (let i = 0; i < puffs; i++) {
       c.fillStyle = colors[i % colors.length];
-      c.globalAlpha = 0.2 + (i / 6) * 0.28;
+      c.globalAlpha = (0.2 + (i / puffs) * 0.28) * (bay ? 0.85 : 1);
       c.beginPath();
-      c.arc(cx + (i % 2 ? 8 : -8), cy + h/2 + 4 + i * 3.5, Math.max(1.7, (trail.size || 5) - i * 0.35), 0, Math.PI * 2);
+      c.arc(cx + (i % 2 ? 8 : -8) * scale, baseY + i * (3.5 * scale),
+        Math.max(1.7, ((trail.size || 5) - i * 0.35) * scale), 0, Math.PI * 2);
       c.fill();
     }
     c.globalAlpha = 1;
   }
-  drawVehicle(cx, cy + bob, v, Math.sin(pt * 1.7) * 38, w, h, {
+
+  // Mirrored floor reflection of the vehicle
+  if (bay) {
+    c.save();
+    c.globalAlpha = 0.32;
+    c.translate(cx, floorY * 2 - (cy + bob));
+    c.scale(1, -1);
+    c.translate(-cx, -(cy + bob));
+    drawVehicle(cx, cy + bob, v, 0, w, h, {
+      noCosmetic: !cosmetics,
+      paintId: cosmetics && cosmetics.equippedPaint,
+      detailLevel: 1,
+      t: pt,
+      upgrades,
+    });
+    c.restore();
+    // Fade reflection downward so it dissolves into the floor
+    const grd = c.createLinearGradient(0, floorY, 0, ch);
+    grd.addColorStop(0, 'rgba(20,12,6,0)');
+    grd.addColorStop(1, 'rgba(20,12,6,0.85)');
+    c.fillStyle = grd;
+    c.fillRect(0, floorY, cw, ch - floorY);
+  }
+
+  drawVehicle(cx, cy + bob, v, Math.sin(pt * 1.7) * (bay ? 22 : 38), w, h, {
     noCosmetic: !cosmetics,
     paintId: cosmetics && cosmetics.equippedPaint,
     detailLevel: 2,
     t: pt,
-    upgrades: getVehicleUpgradeLevelsForRender(v, { upgradeVehicleId: v.id, profile: Profile.active && Profile.active() }),
+    upgrades,
   });
+
+  if (bay) drawGarageBayForeground(c, cw, ch, floorY, cx, pt, v);
   ctx = prev;
+}
+
+// Draw the garage bay backdrop: walls, floor, spotlight, signage.
+function drawGarageBay(c, cw, ch, floorY, cx, pt, vehicle, label) {
+  // Back wall — vertical corrugated panels with subtle gradient lighting
+  const wallG = c.createLinearGradient(0, 0, 0, floorY);
+  wallG.addColorStop(0, '#0c0a08');
+  wallG.addColorStop(0.55, '#1c130a');
+  wallG.addColorStop(1, '#2a1c0e');
+  c.fillStyle = wallG;
+  c.fillRect(0, 0, cw, floorY);
+  // Corrugated panel ribs
+  c.strokeStyle = 'rgba(0,0,0,0.42)';
+  c.lineWidth = 1;
+  const ribStep = Math.max(6, Math.round(cw / 22));
+  for (let x = ribStep; x < cw; x += ribStep) {
+    c.beginPath(); c.moveTo(x + 0.5, 0); c.lineTo(x + 0.5, floorY); c.stroke();
+    c.strokeStyle = 'rgba(245,215,110,0.05)';
+    c.beginPath(); c.moveTo(x + 1.5, 0); c.lineTo(x + 1.5, floorY); c.stroke();
+    c.strokeStyle = 'rgba(0,0,0,0.42)';
+  }
+  // Hanging floodlights along the top
+  const lights = Math.max(2, Math.floor(cw / 60));
+  for (let i = 0; i < lights; i++) {
+    const lx = Math.round((i + 0.5) * (cw / lights));
+    c.fillStyle = '#1a120a';
+    c.fillRect(lx - 5, 0, 10, 4);
+    c.fillStyle = '#0c0a08';
+    c.fillRect(lx - 4, 4, 8, 3);
+    c.fillStyle = 'rgba(255,225,150,0.85)';
+    c.fillRect(lx - 3, 6, 6, 2);
+    // soft glow
+    const g = c.createRadialGradient(lx, 7, 1, lx, 7, 14);
+    g.addColorStop(0, 'rgba(255,225,150,0.35)');
+    g.addColorStop(1, 'rgba(255,225,150,0)');
+    c.fillStyle = g;
+    c.fillRect(lx - 14, 0, 28, 18);
+  }
+  // Top sign / placard with vehicle name and BAY tag
+  const signH = Math.max(12, Math.round(ch * 0.13));
+  const signY = Math.max(10, Math.round(ch * 0.16));
+  c.fillStyle = 'rgba(0,0,0,0.55)';
+  c.fillRect(cx - cw * 0.42, signY, cw * 0.84, signH);
+  c.strokeStyle = 'rgba(245,215,110,0.55)';
+  c.strokeRect(cx - cw * 0.42 + 0.5, signY + 0.5, cw * 0.84, signH);
+  c.fillStyle = '#f5d76e';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  const nameSize = Math.max(7, Math.round(signH * 0.55));
+  c.font = 'bold ' + nameSize + 'px monospace';
+  const text = (label || vehicle.name || '').toUpperCase();
+  c.fillText(text, cx, signY + signH * 0.5);
+  // Small "BAY xx" tag on the right of the sign
+  c.fillStyle = 'rgba(245,215,110,0.7)';
+  const tagSize = Math.max(5, Math.round(signH * 0.32));
+  c.font = tagSize + 'px monospace';
+  const tagN = ((vehicle.id || 'a').charCodeAt(0) % 9) + 1;
+  c.fillText('BAY ' + (tagN < 10 ? '0' + tagN : tagN), cx + cw * 0.36, signY + signH + tagSize * 0.9);
+  c.textAlign = 'start';
+  c.textBaseline = 'alphabetic';
+
+  // Floor — dark concrete with horizontal scan stripes and a checkered apron
+  c.fillStyle = '#0e0906';
+  c.fillRect(0, floorY, cw, ch - floorY);
+  // floor light gradient (spotlight wash)
+  const floorWash = c.createRadialGradient(cx, floorY + 2, 4, cx, floorY + 2, cw * 0.6);
+  floorWash.addColorStop(0, 'rgba(255,225,150,0.30)');
+  floorWash.addColorStop(0.6, 'rgba(255,180,90,0.06)');
+  floorWash.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = floorWash;
+  c.fillRect(0, floorY, cw, ch - floorY);
+  // Scan stripes (perspective hint)
+  c.strokeStyle = 'rgba(245,215,110,0.10)';
+  for (let i = 1; i <= 3; i++) {
+    const yy = floorY + i * Math.max(2, Math.round((ch - floorY) / 4));
+    c.beginPath(); c.moveTo(0, yy + 0.5); c.lineTo(cw, yy + 0.5); c.stroke();
+  }
+  // Checker apron strip (warning tape) just above the floor line
+  const tapeH = 3;
+  const tapeY = floorY - tapeH;
+  const cellW = 6;
+  for (let x = 0; x < cw; x += cellW) {
+    c.fillStyle = ((x / cellW) | 0) % 2 ? '#f5d76e' : '#1a1208';
+    c.fillRect(x, tapeY, cellW, tapeH);
+  }
+
+  // Overhead spotlight cone onto the vehicle
+  const cone = c.createLinearGradient(cx, 6, cx, floorY);
+  cone.addColorStop(0, 'rgba(255,235,170,0.22)');
+  cone.addColorStop(1, 'rgba(255,200,120,0)');
+  c.fillStyle = cone;
+  c.beginPath();
+  c.moveTo(cx - cw * 0.07, 6);
+  c.lineTo(cx + cw * 0.07, 6);
+  c.lineTo(cx + cw * 0.34, floorY);
+  c.lineTo(cx - cw * 0.34, floorY);
+  c.closePath();
+  c.fill();
+
+  // Slow turntable disk under the vehicle
+  c.save();
+  c.translate(cx, floorY - 1);
+  c.scale(1, 0.32);
+  c.rotate(pt * 0.4);
+  const rOuter = Math.min(cw * 0.34, 70);
+  const ringG = c.createRadialGradient(0, 0, 4, 0, 0, rOuter);
+  ringG.addColorStop(0, 'rgba(245,215,110,0.18)');
+  ringG.addColorStop(0.9, 'rgba(245,215,110,0.05)');
+  ringG.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = ringG;
+  c.beginPath(); c.arc(0, 0, rOuter, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(245,215,110,0.45)';
+  c.lineWidth = 1;
+  c.beginPath(); c.arc(0, 0, rOuter * 0.78, 0, Math.PI * 2); c.stroke();
+  // turntable spoke ticks
+  c.strokeStyle = 'rgba(245,215,110,0.35)';
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    c.beginPath();
+    c.moveTo(Math.cos(a) * rOuter * 0.62, Math.sin(a) * rOuter * 0.62);
+    c.lineTo(Math.cos(a) * rOuter * 0.78, Math.sin(a) * rOuter * 0.78);
+    c.stroke();
+  }
+  c.restore();
+}
+
+// Foreground particles drawn after the vehicle: drifting dust motes & sparks.
+function drawGarageBayForeground(c, cw, ch, floorY, cx, pt) {
+  // Drifting dust motes
+  for (let i = 0; i < 14; i++) {
+    const seed = i * 13.37;
+    const x = ((Math.sin(seed) * 0.5 + 0.5) * cw + pt * (8 + (i % 5) * 3)) % cw;
+    const y = ((Math.cos(seed * 1.7) * 0.5 + 0.5) * floorY + pt * 6 + i * 4) % floorY;
+    const a = 0.18 + 0.18 * (Math.sin(pt * 2 + seed) * 0.5 + 0.5);
+    c.fillStyle = 'rgba(255,225,170,' + a.toFixed(2) + ')';
+    c.fillRect(Math.floor(x), Math.floor(y), 1, 1);
+  }
+  // Occasional welder spark falling near the rear corner
+  const sparkPhase = (pt * 0.5) % 4;
+  if (sparkPhase < 1.4) {
+    const sx = cx + Math.cos(pt * 0.7) * cw * 0.32;
+    const sy = 10 + sparkPhase * (floorY - 10);
+    c.fillStyle = 'rgba(255,210,120,0.85)';
+    c.fillRect(Math.floor(sx), Math.floor(sy), 1, 2);
+    c.fillStyle = 'rgba(255,160,60,0.55)';
+    c.fillRect(Math.floor(sx), Math.floor(sy + 2), 1, 2);
+  }
+  // Bottom vignette to blend with the dark page background
+  const vg = c.createLinearGradient(0, ch - 8, 0, ch);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  c.fillStyle = vg;
+  c.fillRect(0, ch - 8, cw, 8);
 }
 
 // ============================================================
@@ -10840,19 +11042,21 @@ const UI = {
         </div>
         <div class="vt-preview"><canvas></canvas></div>
         <div class="vt-desc">${v.desc}</div>
-        <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px">
-          <div class="stat-bar"><div class="lbl">SPEED</div><div class="bar"><div class="fill" style="width:${speedN}%"></div></div><div class="num">${Math.round(stats.maxV)}</div></div>
-          <div class="stat-bar"><div class="lbl">ACCEL</div><div class="bar"><div class="fill" style="width:${accelN}%"></div></div><div class="num">${Math.round(stats.accel/100)}</div></div>
-          <div class="stat-bar"><div class="lbl">ARMOR</div><div class="bar"><div class="fill" style="width:${armorN}%"></div></div><div class="num">${Math.round(stats.maxHp)}</div></div>
-          <div class="stat-bar"><div class="lbl">FIRE</div><div class="bar"><div class="fill" style="width:${fireN}%"></div></div><div class="num">${(1/stats.fireRate).toFixed(1)}</div></div>
-          <div class="stat-bar"><div class="lbl">DAMAGE</div><div class="bar"><div class="fill" style="width:${dmgN}%"></div></div><div class="num">${stats.dmg}×${stats.guns}</div></div>
+        <div class="vt-stat-list">
+          <div class="stat-bar s-speed"><div class="lbl">SPEED</div><div class="bar"><div class="fill" style="width:${speedN}%"></div></div><div class="num">${Math.round(stats.maxV)}</div></div>
+          <div class="stat-bar s-accel"><div class="lbl">ACCEL</div><div class="bar"><div class="fill" style="width:${accelN}%"></div></div><div class="num">${Math.round(stats.accel/100)}</div></div>
+          <div class="stat-bar s-armor"><div class="lbl">ARMOR</div><div class="bar"><div class="fill" style="width:${armorN}%"></div></div><div class="num">${Math.round(stats.maxHp)}</div></div>
+          <div class="stat-bar s-fire"><div class="lbl">FIRE</div><div class="bar"><div class="fill" style="width:${fireN}%"></div></div><div class="num">${(1/stats.fireRate).toFixed(1)}</div></div>
+          <div class="stat-bar s-dmg"><div class="lbl">DAMAGE</div><div class="bar"><div class="fill" style="width:${dmgN}%"></div></div><div class="num">${stats.dmg}×${stats.guns}</div></div>
         </div>
         ${buyBtn}
       `;
       list.appendChild(tile);
-      // render preview
+      // render preview using a richer "garage bay" diorama
       const previewCosmetics = selected ? p.cosmetics : null;
-      renderVehiclePreview(tile.querySelector('canvas'), v.id, previewCosmetics);
+      renderVehiclePreview(tile.querySelector('canvas'), v.id, previewCosmetics, {
+        size: { w: 220, h: 130 }, bay: true, label: v.name,
+      });
     });
     this.show('garage');
   },
@@ -10904,7 +11108,9 @@ const UI = {
     preview.innerHTML = '';
     const c = document.createElement('canvas');
     preview.appendChild(c);
-    renderVehiclePreview(c, vehicleId);
+    renderVehiclePreview(c, vehicleId, p.cosmetics, {
+      size: { w: 280, h: 160 }, bay: true, label: v.name + ' — UPGRADE BAY',
+    });
     // upgrade rows
     const list = document.getElementById('up-list');
     list.innerHTML = '';
@@ -10913,7 +11119,7 @@ const UI = {
       const max = track.tiers.length;
       const nextCost = cur < max ? track.tiers[cur] : null;
       const row = document.createElement('div');
-      row.className = 'up-row';
+      row.className = 'up-row up-' + track.id + (cur >= max ? ' up-max' : '');
       let pips = '';
       for (let i = 0; i < max; i++) pips += `<div class="pip${i < cur ? ' filled' : ''}"></div>`;
       row.innerHTML = `
