@@ -309,6 +309,7 @@ const COSMETICS = {
 };
 const COSMETIC_CATEGORIES = ['paint', 'trail', 'horn'];
 const COSMETIC_LABELS = { paint:'PAINTJOB', trail:'EXHAUST TRAIL', horn:'SPAWN HORN' };
+const GARAGE_TABS = new Set(['vehicles', 'paint', 'trail', 'horn']);
 const DEFAULT_PAINT_COLOR = { body:'#a86a2e', hood:'#8a4f1f', cab:'#3a2410', windshield:'#a8d8e8', glow:'#ffe07a' };
 const COSMETIC_BY_ID = Object.fromEntries(COSMETIC_CATEGORIES.flatMap(cat => COSMETICS[cat].map(c => [c.id, Object.assign({ category: cat }, c)])));
 const COSMETIC_ALIASES = { 'paint-stock': 'paint-factory' };
@@ -10778,8 +10779,8 @@ const UI = {
   showGarage(tab) {
     const p = Profile.active(); if (!p) return;
     normalizeCosmetics(p);
-    if (tab) this._garageTab = tab;
-    if (!this._garageTab) this._garageTab = 'vehicles';
+    this._garageTab = tab || 'vehicles';
+    if (!GARAGE_TABS.has(this._garageTab)) this._garageTab = 'vehicles';
     document.getElementById('garage-scrap').textContent = p.scrap;
     document.querySelectorAll('[data-garage-tab]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.garageTab === this._garageTab);
