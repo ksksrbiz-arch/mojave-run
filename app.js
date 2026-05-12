@@ -3091,7 +3091,7 @@ function getGameCanvasContext(canvas) {
   }
   return null;
 }
-const ctx = getGameCanvasContext(cvs);
+let ctx = getGameCanvasContext(cvs);
 if (!ctx) {
   const msg = document.createElement('div');
   msg.textContent = 'MOJAVE RUN needs a browser with HTML5 canvas support.';
