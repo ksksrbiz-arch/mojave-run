@@ -2950,11 +2950,17 @@ const BrowserPerfHelper = {
     const olderCpu = !!(cores && cores <= 2);
     const modestCpu = !!(cores && cores <= 4);
     let id = 'full';
-    if (saveData || lowRam || olderCpu) id = 'lean';
+    // Non-mobile devices with a modest CPU (≤4 cores) AND ≤4 GB RAM (e.g. entry-level
+    // Chromebooks) are classified as 'lean' rather than 'balanced'.  Without this, the
+    // adaptive render-scale governor starts at its floor (renderScale already penalised
+    // by LOW_POWER_DEVICE) and has zero headroom to shed pixels under frame pressure.
+    if (saveData || lowRam || olderCpu || (!IS_MOBILE && modestCpu && mem && mem <= 4)) id = 'lean';
     else if (IS_MOBILE || modestCpu || (mem && mem <= 4)) id = 'balanced';
     const profiles = {
       lean: { id:'lean', label:'LEAN', minScale: IS_MOBILE ? 0.62 : 0.72, startScale: IS_MOBILE ? 0.78 : 0.85, startQuality:0.35, visualCap:0.7, recoverMs:11 },
-      balanced: { id:'balanced', label:'BALANCED', minScale: IS_MOBILE ? 0.7 : 0.85, startScale: IS_MOBILE ? 0.9 : 1, startQuality:0.75, visualCap:0.9, recoverMs:12.5 },
+      // minScale lowered from 0.85 → 0.72 on desktop so the adaptive scale governor
+      // retains headroom to reduce pixel density on balanced-tier devices under load.
+      balanced: { id:'balanced', label:'BALANCED', minScale: IS_MOBILE ? 0.7 : 0.72, startScale: IS_MOBILE ? 0.9 : 1, startQuality:0.75, visualCap:0.9, recoverMs:12.5 },
       full: { id:'full', label:'FULL', minScale: IS_MOBILE ? 0.7 : 0.85, startScale:1, startQuality:1, visualCap:1, recoverMs:13 },
     };
     this._profile = profiles[id];
@@ -12768,11 +12774,14 @@ function frame(now) {
   }
   // Auto-governor only nudges quality when the user is on 'auto'. Manual
   // presets pin quality so the player gets a predictable look.
-  if (PerfMon.mode === 'auto' && now - PerfMon.lastAdjustAt > 1000) {
+  // Check interval lowered to 800 ms and drop step raised to 0.20 so that
+  // devices under sustained frame pressure (e.g. low-end Chromebooks) shed
+  // quality quickly instead of stuttering for several seconds.
+  if (PerfMon.mode === 'auto' && now - PerfMon.lastAdjustAt > 800) {
     PerfMon.lastAdjustAt = now;
     // 22ms ≈ 45fps floor. Above it we shed quality; well below it we recover.
     if (PerfMon.ewmaMs > 22 && PerfMon.quality > 0) {
-      PerfMon.quality = Math.max(0, PerfMon.quality - 0.15);
+      PerfMon.quality = Math.max(0, PerfMon.quality - 0.20);
       applyQualityCaps();
     } else if (PerfMon.ewmaMs < 14 && PerfMon.quality < 1) {
       PerfMon.quality = Math.min(1, PerfMon.quality + 0.1);
