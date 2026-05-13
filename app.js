@@ -2631,7 +2631,7 @@ const Profile = {
   effectiveStats(vehicleId) {
     const v = VEHICLE_BY_ID[vehicleId]; if (!v) return null;
     const p = this.active();
-    const ups = (p && p.vehicleUpgrades && p.vehicleUpgrades[vehicleId]) || {engine:0,plating:0,weapons:0};
+    const ups = (p && p.vehicleUpgrades && p.vehicleUpgrades[vehicleId]) || { ...UPGRADE_TRACK_DEFAULTS };
     const branchId = p && p.vehicleBranches ? p.vehicleBranches[vehicleId] : null;
     const branch = getVehicleBranchDef(vehicleId, branchId);
     const st = Object.assign({}, v.base);
@@ -10572,6 +10572,7 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
   const pt = (Game.animT || Game.t || 0) + (v.id.length * 0.31);
   const prev = ctx;
   ctx = c;
+  try {
 
   const cx = cw * 0.5;
   const floorY = bay ? Math.floor(ch * 0.78) : Math.floor(ch * 0.83);
@@ -10636,7 +10637,9 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
   });
 
   if (bay) drawGarageBayForeground(c, cw, ch, floorY, cx, pt, v);
-  ctx = prev;
+  } finally {
+    ctx = prev;
+  }
 }
 
 // Draw the garage bay backdrop: walls, floor, spotlight, signage.
@@ -11058,7 +11061,7 @@ const UI = {
     VEHICLES.forEach(v => {
       const owned = !!p.ownedVehicles[v.id];
       const selected = p.activeVehicle === v.id;
-      const stats = owned ? Profile.effectiveStats(v.id) : v.base;
+      const stats = (owned ? Profile.effectiveStats(v.id) : null) || v.base;
       const tile = document.createElement('div');
       tile.className = 'vehicle-tile' + (selected ? ' selected' : '') + (!owned ? ' locked' : '') + (v.master ? ' master-vehicle' : '');
 
@@ -11071,16 +11074,21 @@ const UI = {
       const dmgN   = norm(stats.dmg * stats.guns, statMax.dmgGuns);
 
       const masteryLocked = !!v.masteryUnlock && !owned;
+      const apexLocked = !!v.apexVehicle && !canUseVehicle(v, p);
       const costLabel = owned
         ? (selected ? 'EQUIPPED' : 'OWNED')
-        : (v.masteryUnlock ? '👑 FULL MASTERY UNLOCK' : 'COST <b>' + v.cost + '</b> SCRAP');
+        : (v.masteryUnlock ? '👑 FULL MASTERY UNLOCK'
+          : v.apexVehicle ? '★ PRESTIGE ' + (v.prestigeUnlock || APEX_VEHICLE_MIN_PRESTIGE) + '+ REQUIRED'
+          : 'COST <b>' + v.cost + '</b> SCRAP');
       const buyBtn = owned
         ? (selected
             ? '<button class="btn primary" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE ▲</button>'
             : '<div class="btn-row"><button class="btn" data-vact="select" data-vid="'+v.id+'">EQUIP</button><button class="btn" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE</button></div>')
         : (v.masteryUnlock
             ? '<button class="btn primary" disabled>LOCKED — ACHIEVE FULL MASTERY</button>'
-            : '<button class="btn primary" data-vact="buy" data-vid="'+v.id+'" '+(p.scrap < v.cost ? 'disabled' : '')+'>UNLOCK · '+v.cost+' SCRAP</button>');
+            : (apexLocked
+                ? '<button class="btn primary" disabled>LOCKED — PRESTIGE ' + (v.prestigeUnlock || APEX_VEHICLE_MIN_PRESTIGE) + '+ REQUIRED</button>'
+                : '<button class="btn primary" data-vact="buy" data-vid="'+v.id+'" '+(p.scrap < v.cost ? 'disabled' : '')+'>UNLOCK · '+v.cost+' SCRAP</button>'));
 
       tile.innerHTML = `
         <div class="vt-head">
@@ -11103,9 +11111,13 @@ const UI = {
       list.appendChild(tile);
       // render preview using a richer "garage bay" diorama
       const previewCosmetics = selected ? p.cosmetics : null;
-      renderVehiclePreview(tile.querySelector('canvas'), v.id, previewCosmetics, {
-        size: { w: 220, h: 130 }, bay: true, label: v.name,
-      });
+      try {
+        renderVehiclePreview(tile.querySelector('canvas'), v.id, previewCosmetics, {
+          size: { w: 220, h: 130 }, bay: true, label: v.name,
+        });
+      } catch (err) {
+        console.error('[garage preview]', v.id, err);
+      }
     });
     this.show('garage');
   },
