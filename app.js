@@ -4234,6 +4234,7 @@ const SCREEN_ESCAPE_ACTION = {
   scoreboard: 'back-scoreboard',
   results: 'back-menu',
   sidekick: 'back-menu',
+  supporter: 'back-menu',
 };
 
 function isTypingField(el) {
@@ -11728,6 +11729,15 @@ const UI = {
           <button class="btn set-q" data-act="platform-editor" style="flex:1">🛠 EDITOR</button>
         </div>
       </div>
+      <h2>ABOUT</h2>
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">MOJAVE RUN</div><div class="set-sub">A WASTELAND RACING ROGUELITE · PLAYS IN ANY MODERN BROWSER</div></div></div>
+      </div>
+      <div class="set-row">
+        <div class="set-head"><div><div class="set-name">PRIVACY POLICY</div><div class="set-sub">HOW LOCAL SAVE DATA AND OPTIONAL MULTIPLAYER ARE HANDLED</div></div>
+        <a class="btn set-toggle" href="privacy-policy.html" target="_blank" rel="noopener" style="font-size:10px;text-decoration:none">OPEN ◢</a></div>
+      </div>
+      <h2>DEVELOPER</h2>
       <div class="set-row">
         <div class="set-head"><div><div class="set-name">BUILD FOR ANDROID / IOS</div><div class="set-sub">INSTALL CAPACITOR · RUN npx cap add android · npx cap sync · npx cap open android</div></div></div>
       </div>
@@ -11848,6 +11858,12 @@ const UI = {
       case 'menu-settings':
         UI._settingsFrom = 'menu';
         UI.showSettings();
+        break;
+      case 'menu-supporter':
+        // Cosmetic-only placeholder — no purchase flow, no external link.
+        // Real monetization (if/when it ships) will live behind an official
+        // storefront with a published refund/privacy policy.
+        UI.show('supporter');
         break;
       case 'pause-resume':
         if (Game.state === 'playing') Game.paused = false;
