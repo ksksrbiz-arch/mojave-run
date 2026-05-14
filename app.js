@@ -817,6 +817,13 @@ const MODES = [
   { id: 'extraction',  name: 'EXTRACTION',      desc: 'Escort a convoy through zombie and raider waves. Keep the rig alive until the evac marker.' },
   { id: 'custom',      name: 'CUSTOM RUN',      desc: 'Play a share-code level from the in-browser editor.' },
   { id: 'versus',      name: 'VERSUS',          desc: 'Authoritative 1v1 — server-simulated shared road. First to top score or last driver standing wins.' },
+  // === Phase 1 — true 2.5D top-down arena ===
+  // Free up/down/left/right movement in a bounded world. Camera follows the
+  // player with a velocity-based look-ahead. Homing enemies hunt across the
+  // arena. All other modes keep the legacy forward-scroll pipeline; arena
+  // is an isolated branch so replays, multiplayer, and existing tuning
+  // remain untouched.
+  { id: 'arena',       name: 'ARENA 2.5D',      desc: 'NEW — Top-down free roam. Drive in all 4 directions across an open wasteland. Hunt down homing raiders. Endless survival.' },
 ];
 
 // Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
@@ -3245,10 +3252,17 @@ function resize() {
   ctx.imageSmoothingQuality = 'high';
   rebuildGradients();
   if (Game.player) {
-    const py = Game.player.y || (H - 110);
-    const { x0, x1 } = roadBounds(py);
-    Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
-    Game.player.y = H - 110;
+    if (Game.mode === 'arena' && Game.world) {
+      // Arena player is free-roaming; clamp to world bounds (resize-safe).
+      const pw = Game.player.w, ph = Game.player.h;
+      Game.player.x = clamp(Game.player.x, pw/2, Game.world.w - pw/2);
+      Game.player.y = clamp(Game.player.y, ph/2, Game.world.h - ph/2);
+    } else {
+      const py = Game.player.y || (H - 110);
+      const { x0, x1 } = roadBounds(py);
+      Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
+      Game.player.y = H - 110;
+    }
   }
 }
 function queueResize(delay = 0) {
@@ -4215,7 +4229,7 @@ function rollPowerup() {
 // INPUT
 // ============================================================
 const keys = Object.create(null);
-const input = { left:false, right:false, fire:false, touchTargetX: null, touchFire: false, special:false };
+const input = { left:false, right:false, up:false, down:false, fire:false, touchTargetX: null, touchFire: false, special:false };
 const activePointers = new Map();
 const SCREEN_ESCAPE_ACTION = {
   profiles: 'back-title',
@@ -4376,6 +4390,9 @@ cvs.addEventListener('pointerleave', onPointerEnd);
 function readKbd() {
   input.left  = !!(keys['arrowleft']  || keys['a']);
   input.right = !!(keys['arrowright'] || keys['d']);
+  // up/down used only by 2.5D arena mode; harmless to read in every mode
+  input.up    = !!(keys['arrowup']    || keys['w']);
+  input.down  = !!(keys['arrowdown']  || keys['s']);
   input.fire  = !!(keys[' '] || keys['z'] || keys['x']) || input.touchFire;
   GamepadInput.poll();
 }
@@ -4552,6 +4569,16 @@ const Game = {
   spinout: null,   // { t, dur, rot, rotV, kickDir } | null
   // power-up banked from a previous run to activate at game start
   _pendingBankedPowerup: null,
+  // === Phase 1 — 2.5D top-down arena state (only used when mode === 'arena') ===
+  // world: rectangular bounds in world coordinates (0..w × 0..h).
+  // camera: top-left world coord shown at the top-left of the screen.
+  // arenaSpawnT: countdown until next homing-enemy spawn.
+  // arenaKills: kill count this run (used for arena difficulty scaling).
+  // All four are null/0 outside arena mode.
+  world: null,
+  camera: null,
+  arenaSpawnT: 0,
+  arenaKills: 0,
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -4851,6 +4878,9 @@ function startRun(mode, level) {
   if (Game.weaponSpecState && Game.weaponSpecState.drones) spawnDroneSwarm(Game.weaponSpecState.drones);
   Game.player = {
     x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
+    // Arena-mode fields. Harmless in legacy modes (they never read vy/facing).
+    vy: 0,
+    facing: -Math.PI / 2,  // -π/2 = up. Matches the legacy "vehicle points up" art.
   };
   if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
     SplitScreen.attachRun(profile, v, Game.vehicleStats);
@@ -4890,6 +4920,14 @@ function startRun(mode, level) {
   Game.dustDevils.length = 0;
   Game.lightning = 0;
   Game.muzzleT = 0;
+  // Reset arena state outside arena mode so a previous arena run's world
+  // doesn't linger; arena mode itself re-initializes these in beginPlaying.
+  if (mode !== 'arena') {
+    Game.world = null;
+    Game.camera = null;
+    Game.arenaSpawnT = 0;
+    Game.arenaKills = 0;
+  }
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
   // seed parallax peaks across the horizon
   for (let i = 0; i < 6; i++) {
@@ -4925,10 +4963,33 @@ function startRun(mode, level) {
 
 function beginPlaying() {
   Game.state = 'playing';
-  const spawnBounds = roadBounds(H - 110);
-  Game.player.x = (spawnBounds.x0 + spawnBounds.x1) * 0.5;
-  Game.player.y = H - 110;
-  Game.player.vx = 0;
+  if (Game.mode === 'arena') {
+    // ---- 2.5D top-down arena ----
+    // World is a bounded rectangle the player can freely roam. The camera
+    // is centered on the player and offset by velocity look-ahead so the
+    // direction-of-travel always has room on screen.
+    const worldW = 4096;
+    const worldH = 4096;
+    Game.world = { w: worldW, h: worldH };
+    Game.camera = { x: worldW / 2 - W / 2, y: worldH / 2 - H / 2 };
+    Game.player.x = worldW / 2;
+    Game.player.y = worldH / 2;
+    Game.player.vx = 0;
+    Game.player.vy = 0;
+    Game.player.facing = -Math.PI / 2;
+    Game.arenaSpawnT = 1.2;
+    Game.arenaKills = 0;
+    // Speed is unused for scrolling in arena, but other systems still read
+    // it (e.g. cinematic, audio mix). Keep it modest so they don't think
+    // we're in a chase.
+    Game.speed = 0;
+    Game.targetSpeed = 0;
+  } else {
+    const spawnBounds = roadBounds(H - 110);
+    Game.player.x = (spawnBounds.x0 + spawnBounds.x1) * 0.5;
+    Game.player.y = H - 110;
+    Game.player.vx = 0;
+  }
   pauseBtn.classList.add('show');
   const horn = COSMETIC_BY_ID[Game.cosmetics && Game.cosmetics.equippedHorn];
   if (horn && horn.sfx && SFX[horn.sfx]) {
@@ -4939,6 +5000,7 @@ function beginPlaying() {
     announceEvent('WASTELAND RUN: ' + Game.runMutators.map(m => m.name).join(' · '), '#ff80ff');
   }
   if (Game.mode === 'extraction') announceEvent('ESCORT CONVOY TO EXTRACTION', '#7af07a');
+  if (Game.mode === 'arena') announceEvent('ARENA 2.5D — WASD / ARROWS TO ROAM', '#7af0ff');
   // Spawn boss right away in boss levels
   if (Game.mode === 'ironthrone') {
     spawnIronThroneBoss(Game.ironThroneStage);
@@ -5860,6 +5922,13 @@ function fireBossPattern(b) {
 function updateLoading(dt) {
   // animate background scrolling and player driving onto the road
   Game.loadingT += dt;
+  // Arena mode: skip the road drive-in entirely. Just hold for a short beat
+  // so the loading overlay reads, then drop straight into play. Arena has
+  // no road and the player should not be off-screen during entry.
+  if (Game.mode === 'arena') {
+    if (Game.loadingT >= Math.min(0.6, Game.loadingDur)) beginPlaying();
+    return;
+  }
   Game.bgScroll += Game.speed * dt * 0.3;
   Game.laneOffset = (Game.laneOffset + Game.speed * dt) % 60;
   // ease the player from offscreen up to position
@@ -6095,8 +6164,17 @@ function update(dt) {
   Game.t += dt;
   if (Game.state !== 'playing' || Game.paused) return;
   if (Game.hintTime > 0) Game.hintTime -= dt;
-  if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.hitFlash > 0) Game.hitFlash -= dt;
+  // === Phase 1 — 2.5D top-down arena ===
+  // Runs an entirely separate simulation: free movement, world camera,
+  // homing enemies, world-space bullets. The legacy scroll pipeline below
+  // is bypassed so its assumptions (player.y == H-110, road bounds, scroll
+  // speed, scroll-based distance scoring, etc.) don't fight the new mode.
+  if (Game.mode === 'arena') {
+    updateArena(dt);
+    return;
+  }
+  if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.storyBeatT > 0) Game.storyBeatT -= dt;
   if (Game.eventBanner) {
     Game.eventBanner.t -= dt;
@@ -9787,6 +9865,8 @@ function drawHUD() {
     subL = 'CONVOY HP ' + Math.max(0, Math.round((Game.extraction || {}).hp || 0));
   } else if (Game.mode === 'custom' && Game.levelData) {
     subL = 'CUSTOM · ' + Game.levelData.name;
+  } else if (Game.mode === 'arena') {
+    subL = 'ARENA · KILLS ' + (Game.arenaKills || 0);
   }
   ctx.fillText(subL, 50, hudH * 0.72);
 
@@ -10438,6 +10518,9 @@ function drawDeathOverlay() {
 function render() {
   if (Game.state === 'playing' || Game.state === 'gameover' || Game.state === 'victory'
       || Game.state === 'loading' || Game.state === 'dying' || Game.state === 'replay') {
+    // Arena rendering uses a camera-translated world layer. The HUD/post-FX
+    // remain in screen space (drawn inside renderArena after restoring).
+    if (Game.mode === 'arena' && Game.world) { renderArena(); return; }
     ctx.save();
     if (Game.shake > 0 && !Game.paused) {
       // Smoothed shake: interpolate offsets toward a randomly-picked target so
@@ -16280,8 +16363,13 @@ const GamepadInput = {
     const gp = Array.from(pads || []).find(Boolean);
     if (!gp || Game.state !== 'playing') return;
     const ax = readGamepadAxis(gp, 0);
+    const ay = readGamepadAxis(gp, 1);
     input.left = input.left || ax < 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT] && gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT].pressed);
     input.right = input.right || ax > 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT] && gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT].pressed);
+    // Up/down used only by arena mode; reading unconditionally is harmless
+    // because legacy modes never inspect input.up/input.down.
+    input.up = input.up || ay < 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_UP] && gp.buttons[GAMEPAD_BUTTON_DPAD_UP].pressed);
+    input.down = input.down || ay > 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_DOWN] && gp.buttons[GAMEPAD_BUTTON_DPAD_DOWN].pressed);
     input.fire = input.fire || isGamepadActionPressed(gp, 'fire');
     const specialPressed = isGamepadActionPressed(gp, 'special');
     if (specialPressed && !this._specialHeld) triggerVehicleAbility();
@@ -17497,6 +17585,520 @@ boot = function() {
 
 // ============================================================
 // === END PHASE 2: CONSOLE PLATFORM ===
+// ============================================================
+
+// ============================================================
+// === PHASE 1 — TRUE 2.5D TOP-DOWN ARENA MODE ===
+// Self-contained: only active when Game.mode === 'arena'. Provides:
+//   • 4-directional player movement (WASD / arrows / left stick / dpad)
+//   • velocity-aligned facing so the chassis rotates to face travel
+//   • bounded rectangular world with tiled ground + edge fog
+//   • smoothed camera follow with velocity look-ahead
+//   • homing-bike enemy that steers toward the player in world space
+//   • world-space bullets fired in the direction the vehicle is facing
+//   • all legacy modes untouched — replays/multiplayer/protocols unchanged
+// ============================================================
+
+// Player tuning (independent from legacy stats so arena can be tuned without
+// affecting classic/winding feel).
+const ARENA_PLAYER_DRAG     = 2.8;   // exponential decay per second when no input
+const ARENA_MAX_SPEED_MUL   = 0.85;  // multiplier on vehicleStats.maxV
+const ARENA_ACCEL_MUL       = 1.15;  // multiplier on vehicleStats.accel
+const ARENA_FACING_TURN_RATE = 9.0;  // rad/s — how fast the chassis aligns to velocity
+const ARENA_CAMERA_LERP     = 6.0;   // higher = snappier follow
+const ARENA_CAMERA_LOOKAHEAD = 0.42; // fraction of velocity used as look-ahead
+const ARENA_BULLET_SPEED    = 820;
+const ARENA_ENEMY_SPAWN_MIN = 0.55;
+const ARENA_ENEMY_SPAWN_MAX = 1.4;
+const ARENA_ENEMY_MAX_LIVE  = 14;
+
+function arenaCameraTargetX() {
+  const p = Game.player;
+  return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
+}
+function arenaCameraTargetY() {
+  const p = Game.player;
+  return p.y + p.vy * ARENA_CAMERA_LOOKAHEAD - H * 0.5;
+}
+
+function updateArena(dt) {
+  const p = Game.player;
+  const cam = Game.camera;
+  const world = Game.world;
+  if (!p || !cam || !world) return;
+
+  // ---- power-ups & basic timers (subset that's safe in arena) ----
+  updatePowerups(dt);
+  applyMagnet(dt);
+  Game.shake = Math.max(0, Game.shake - dt * 2.4);
+  Game.flash = Math.max(0, Game.flash - dt * 3);
+  if (Game.muzzleT > 0) Game.muzzleT -= dt;
+
+  readKbd();
+
+  // ---- player movement (4-directional) ----
+  const stats = Game.vehicleStats || { accel: 1100, maxV: 420 };
+  const accel = stats.accel * ARENA_ACCEL_MUL;
+  const maxV  = stats.maxV  * ARENA_MAX_SPEED_MUL;
+  let ax = 0, ay = 0;
+  if (input.left)  ax -= 1;
+  if (input.right) ax += 1;
+  if (input.up)    ay -= 1;
+  if (input.down)  ay += 1;
+  // Touch: drag toward target. Treat horizontal touch as forward intent —
+  // legacy touch only tracks x. Vertical touch movement is unsupported in
+  // phase 1; players on touch can still steer left/right and fire.
+  if (ax === 0 && input.touchTargetX !== null) {
+    const tx = clamp(input.touchTargetX, 0, W) + cam.x;
+    const dx = tx - p.x;
+    ax = clamp(dx * 0.01, -1, 1);
+  }
+  // normalize diagonal so 8-way input doesn't out-accelerate cardinal input
+  const aMag = Math.hypot(ax, ay);
+  if (aMag > 1) { ax /= aMag; ay /= aMag; }
+  if (ax !== 0) p.vx += ax * accel * dt;
+  if (ay !== 0) p.vy += ay * accel * dt;
+  // drag on the unforced axes (and gentle drag overall so the car settles)
+  if (ax === 0) p.vx -= p.vx * Math.min(1, ARENA_PLAYER_DRAG * dt);
+  if (ay === 0) p.vy -= p.vy * Math.min(1, ARENA_PLAYER_DRAG * dt);
+  // clamp total speed
+  const spd = Math.hypot(p.vx, p.vy);
+  if (spd > maxV) {
+    const k = maxV / spd;
+    p.vx *= k; p.vy *= k;
+  }
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+  // world bounds — bounce gently off the wall so it reads as solid
+  const halfW = p.w / 2, halfH = p.h / 2;
+  if (p.x < halfW)               { p.x = halfW;               p.vx = Math.abs(p.vx) * 0.35; }
+  if (p.x > world.w - halfW)     { p.x = world.w - halfW;     p.vx = -Math.abs(p.vx) * 0.35; }
+  if (p.y < halfH)               { p.y = halfH;               p.vy = Math.abs(p.vy) * 0.35; }
+  if (p.y > world.h - halfH)     { p.y = world.h - halfH;     p.vy = -Math.abs(p.vy) * 0.35; }
+
+  // ---- facing: smoothly align chassis to velocity vector ----
+  const moveSpeed = Math.hypot(p.vx, p.vy);
+  if (moveSpeed > 18) {
+    const desired = Math.atan2(p.vy, p.vx);
+    let dA = desired - p.facing;
+    while (dA >  Math.PI) dA -= 2 * Math.PI;
+    while (dA < -Math.PI) dA += 2 * Math.PI;
+    const maxTurn = ARENA_FACING_TURN_RATE * dt;
+    p.facing += clamp(dA, -maxTurn, maxTurn);
+  }
+
+  // HUD-friendly stats: distance = total path driven, speed used by FX/audio
+  Game.distance += moveSpeed * dt;
+  Game.speed = moveSpeed;
+
+  // ---- camera follow with velocity look-ahead ----
+  const targetCX = arenaCameraTargetX();
+  const targetCY = arenaCameraTargetY();
+  const k = Math.min(1, ARENA_CAMERA_LERP * dt);
+  cam.x += (targetCX - cam.x) * k;
+  cam.y += (targetCY - cam.y) * k;
+  // keep camera inside the world so we never look at empty void
+  cam.x = clamp(cam.x, 0, Math.max(0, world.w - W));
+  cam.y = clamp(cam.y, 0, Math.max(0, world.h - H));
+
+  // ---- exhaust trail in direction opposite of facing ----
+  if (moveSpeed > 60 && Math.random() < 0.65) {
+    const bx = p.x - Math.cos(p.facing) * (p.h * 0.4);
+    const by = p.y - Math.sin(p.facing) * (p.h * 0.4);
+    emitExhaustTrail(bx, by, 1);
+  }
+
+  // ---- fire ----
+  Game.fireCooldown -= dt;
+  const wantsFire = input.fire || Settings.autoFire;
+  if (wantsFire && Game.fireCooldown <= 0) {
+    fireArenaGuns();
+    const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
+    const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
+    Game.fireCooldown = (stats.fireRate || 0.18) * rapidMul * overdriveMul;
+  }
+
+  // ---- player bullets ----
+  for (let i = Game.bullets.length - 1; i >= 0; i--) {
+    const b = Game.bullets[i];
+    // homing: same logic as legacy mode
+    if (b.homing && Game.enemies.length > 0) {
+      let tx = null, ty = null, bestDist = Infinity;
+      for (const e of Game.enemies) {
+        const d = Math.hypot(e.x - b.x, e.y - b.y);
+        if (d < bestDist) { bestDist = d; tx = e.x; ty = e.y; }
+      }
+      if (tx !== null) {
+        const bspd = Math.hypot(b.vx || 0, b.vy || 0);
+        if (bspd > 1) {
+          const desiredAngle = Math.atan2(ty - b.y, tx - b.x);
+          const currentAngle = Math.atan2(b.vy || 0, b.vx || 0);
+          let dA = desiredAngle - currentAngle;
+          while (dA >  Math.PI) dA -= 2 * Math.PI;
+          while (dA < -Math.PI) dA += 2 * Math.PI;
+          const maxTurn = 3.5 * dt;
+          const newAngle = currentAngle + clamp(dA, -maxTurn, maxTurn);
+          b.vx = Math.cos(newAngle) * bspd;
+          b.vy = Math.sin(newAngle) * bspd;
+        }
+      }
+    }
+    b.x += (b.vx || 0) * dt;
+    b.y += (b.vy || 0) * dt;
+    b.life = (b.life || 1.4) - dt;
+    if (b.life <= 0 || b.x < -40 || b.y < -40 || b.x > world.w + 40 || b.y > world.h + 40) {
+      Game.bullets.splice(i, 1);
+    }
+  }
+
+  // ---- enemy spawning ----
+  Game.arenaSpawnT -= dt;
+  if (Game.arenaSpawnT <= 0 && Game.enemies.length < ARENA_ENEMY_MAX_LIVE) {
+    spawnArenaEnemy();
+    const diff = 1 + Game.arenaKills * 0.02;
+    Game.arenaSpawnT = rand(ARENA_ENEMY_SPAWN_MIN, ARENA_ENEMY_SPAWN_MAX) / diff;
+  }
+
+  // ---- enemy update + collisions ----
+  for (let i = Game.enemies.length - 1; i >= 0; i--) {
+    const e = Game.enemies[i];
+    if (e.spawnAnimT > 0) e.spawnAnimT = Math.max(0, e.spawnAnimT - dt);
+    if (e.hitAnimT > 0) e.hitAnimT = Math.max(0, e.hitAnimT - dt);
+    // Steer toward player at limited turn rate, accelerate up to maxV.
+    const dxp = p.x - e.x, dyp = p.y - e.y;
+    const distp = Math.max(1, Math.hypot(dxp, dyp));
+    const desired = Math.atan2(dyp, dxp);
+    const curAng = e.arenaAng !== undefined ? e.arenaAng : desired;
+    let dA = desired - curAng;
+    while (dA >  Math.PI) dA -= 2 * Math.PI;
+    while (dA < -Math.PI) dA += 2 * Math.PI;
+    const turn = clamp(dA, -e.arenaTurn * dt, e.arenaTurn * dt);
+    e.arenaAng = curAng + turn;
+    const targetVx = Math.cos(e.arenaAng) * e.arenaMaxV;
+    const targetVy = Math.sin(e.arenaAng) * e.arenaMaxV;
+    const kAccel = Math.min(1, e.arenaAccel * dt / e.arenaMaxV);
+    e.vx = (e.vx || 0) + (targetVx - (e.vx || 0)) * kAccel;
+    e.vy = (e.vy || 0) + (targetVy - (e.vy || 0)) * kAccel;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    // clamp to world (enemies cannot escape the arena either)
+    e.x = clamp(e.x, e.w/2, world.w - e.w/2);
+    e.y = clamp(e.y, e.h/2, world.h - e.h/2);
+
+    // bullet-vs-enemy
+    for (let j = Game.bullets.length - 1; j >= 0; j--) {
+      const b = Game.bullets[j];
+      if (b.owner !== 'p') continue;
+      if (aabb(e, b)) {
+        e.hp -= b.dmg || 1;
+        e.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
+        if (!b.pierce) Game.bullets.splice(j, 1);
+        emit(b.x, b.y, 4, { color:'#ffd86b', speed:200, life:0.25, size:3, spread: Math.PI * 2 });
+        if (e.hp <= 0) {
+          SFX.explode();
+          emit(e.x, e.y, 18, { color:'#ff8a3d', speed:280, life:0.55, size:4, spread: Math.PI * 2 });
+          shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', 60);
+          applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+          Game.arenaKills += 1;
+          Game.enemies.splice(i, 1);
+          break;
+        }
+      }
+    }
+    if (i >= Game.enemies.length || Game.enemies[i] !== e) continue;
+
+    // contact damage to player
+    if (aabb(e, p)) {
+      damagePlayer(e.contact || 14);
+      // knockback the enemy off the player so we don't multi-hit per frame
+      const nx = (e.x - p.x) / distp;
+      const ny = (e.y - p.y) / distp;
+      e.x += nx * 18; e.y += ny * 18;
+      e.vx = nx * e.arenaMaxV * 0.6;
+      e.vy = ny * e.arenaMaxV * 0.6;
+      Game.shake = Math.max(Game.shake, 0.5);
+    }
+  }
+
+  // ---- decay popups & particles & shockwaves (reuse legacy decay) ----
+  for (let i = Game.particles.length - 1; i >= 0; i--) {
+    const pr = Game.particles[i];
+    pr.x += pr.vx * dt;
+    pr.y += pr.vy * dt;
+    pr.vx *= 0.96; pr.vy *= 0.96;
+    if (pr.gravity) pr.vy += pr.gravity * dt;
+    pr.life -= dt;
+    if (pr.life <= 0) Game.particles.splice(i, 1);
+  }
+  for (let i = Game.shockwaves.length - 1; i >= 0; i--) {
+    const s = Game.shockwaves[i];
+    s.life -= dt;
+    s.r += (s.maxR - s.r) * Math.min(1, 6 * dt);
+    if (s.life <= 0) Game.shockwaves.splice(i, 1);
+  }
+  for (let i = Game.popups.length - 1; i >= 0; i--) {
+    const u = Game.popups[i];
+    u.y += u.vy * dt;
+    u.life -= dt;
+    if (u.life <= 0) Game.popups.splice(i, 1);
+  }
+}
+
+function fireArenaGuns() {
+  const p = Game.player;
+  const stats = Game.vehicleStats || { dmg: 14 };
+  const overdriveMul = isPowerupActive('overdrive') ? 1.2 : 1;
+  const triple = isPowerupActive('triple');
+  const fa = p.facing;
+  const cs = Math.cos(fa), sn = Math.sin(fa);
+  const sp = ARENA_BULLET_SPEED;
+  // muzzle origin at the front of the vehicle (its "nose" in the facing dir)
+  const noseDist = p.h * 0.5 + 6;
+  const nx = p.x + cs * noseDist;
+  const ny = p.y + sn * noseDist;
+  const mk = (vxBoost, vyBoost, w, h, dmgScale) => {
+    const vx = cs * sp + vxBoost;
+    const vy = sn * sp + vyBoost;
+    Game.bullets.push({
+      owner: 'p',
+      x: nx, y: ny, w, h,
+      vx, vy,
+      dmg: (stats.dmg || 14) * overdriveMul * (dmgScale || 1),
+      homing: isPowerupActive('homing') || false,
+      hitIds: [],
+      life: 1.6,
+    });
+  };
+  Game.muzzleT = 0.08;
+  mk(0, 0, 5, 14, 1);
+  if (triple) {
+    // side shots perpendicular to facing
+    const px = -sn, py = cs;
+    mk(px * 180, py * 180, 4, 12, 0.7);
+    mk(-px * 180, -py * 180, 4, 12, 0.7);
+  }
+  SFX.shoot();
+  emit(nx, ny, 3, { color: (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#ffe07a',
+                    speed: 140, life: 0.2, size: 2, spread: Math.PI / 3 });
+}
+
+function spawnArenaEnemy() {
+  const world = Game.world;
+  const p = Game.player;
+  if (!world || !p) return;
+  // Spawn at a point on a circle outside the visible camera radius so enemies
+  // come from offscreen, then clamp to world bounds.
+  const camR = Math.hypot(W, H) * 0.5 + 80;
+  const ang = Math.random() * Math.PI * 2;
+  let sx = p.x + Math.cos(ang) * camR;
+  let sy = p.y + Math.sin(ang) * camR;
+  sx = clamp(sx, 32, world.w - 32);
+  sy = clamp(sy, 32, world.h - 32);
+  const diff = 1 + Game.arenaKills * 0.015;
+  Game.enemies.push({
+    kind: 'bike',
+    x: sx, y: sy,
+    w: 28, h: 40,
+    vx: 0, vy: 0,
+    hp: Math.ceil(3 * diff),
+    contact: 14,
+    fireT: 999,             // arena bikes don't shoot (phase 1)
+    spawnAnimT: 0.35,
+    hitAnimT: 0,
+    storyAnimT: 0,
+    // legacy fields drawEnemy expects so it doesn't NaN
+    baseX: sx, wave: 0, waveSpeed: 0, waveAmp: 0,
+    // arena AI fields
+    arenaAng: Math.atan2(p.y - sy, p.x - sx),
+    arenaMaxV: 200 + Math.min(180, Game.arenaKills * 3),
+    arenaAccel: 480,
+    arenaTurn: 2.4,
+  });
+}
+
+function renderArena() {
+  const p = Game.player;
+  const cam = Game.camera;
+  const world = Game.world;
+  if (!p || !cam || !world) return;
+
+  // --- backdrop: deep gradient sky/horizon (screen space) ---
+  const t = activeBiomeTheme ? activeBiomeTheme() : null;
+  const skyTop = (t && (Game.isNight ? t.skyNightTop : t.skyDayTop)) || '#2a1a14';
+  const skyBot = (t && (Game.isNight ? t.skyNightBottom : t.skyDayBottom)) || '#1a1008';
+  const gsky = ctx.createLinearGradient(0, 0, 0, H);
+  gsky.addColorStop(0, skyTop);
+  gsky.addColorStop(1, skyBot);
+  ctx.fillStyle = gsky;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  // screen-shake (mirrors legacy render() prelude — keep it consistent so
+  // damage feedback still reads)
+  if (Game.shake > 0 && !Game.paused) {
+    const amp = Game.shake * 14 * Settings.shake;
+    const nowT = Game.t || 0;
+    if (nowT >= Game.shakeRetargetT) {
+      Game.shakeTX = (Math.random() - 0.5) * 2;
+      Game.shakeTY = (Math.random() - 0.5) * 2;
+      Game.shakeRetargetT = nowT + 0.05;
+    }
+    const sk = 0.35;
+    Game.shakeOX += (Game.shakeTX - Game.shakeOX) * sk;
+    Game.shakeOY += (Game.shakeTY - Game.shakeOY) * sk;
+    ctx.translate(Game.shakeOX * amp, Game.shakeOY * amp);
+  } else {
+    Game.shakeOX *= 0.7; Game.shakeOY *= 0.7;
+  }
+
+  // --- world layer: translate by camera ---
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  // ground: tiled cells across the visible portion of the world
+  const tileSize = 128;
+  const groundBase = (t && (Game.isNight ? t.shoulderNight : t.shoulderDay)) || '#3a261a';
+  // dim the line color so the grid reads as subtle texture, not road striping
+  const groundLine = Game.isNight ? 'rgba(255,220,160,0.05)' : 'rgba(255,220,160,0.08)';
+  // fill an inset rectangle that covers the visible camera region (slightly
+  // padded so tile grid doesn't shimmer at edges)
+  const vx0 = Math.max(0, cam.x - 8);
+  const vy0 = Math.max(0, cam.y - 8);
+  const vx1 = Math.min(world.w, cam.x + W + 8);
+  const vy1 = Math.min(world.h, cam.y + H + 8);
+  ctx.fillStyle = groundBase;
+  ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+  // subtle scrolling grid for spatial reference (snap to camera so it scrolls
+  // believably). Cheap fills only — no gradients.
+  ctx.fillStyle = groundLine;
+  const gx0 = Math.floor(vx0 / tileSize) * tileSize;
+  const gy0 = Math.floor(vy0 / tileSize) * tileSize;
+  for (let gx = gx0; gx <= vx1; gx += tileSize) {
+    ctx.fillRect(gx, vy0, 1, vy1 - vy0);
+  }
+  for (let gy = gy0; gy <= vy1; gy += tileSize) {
+    ctx.fillRect(vx0, gy, vx1 - vx0, 1);
+  }
+
+  // World boundary fence — clear visual cue you've hit the edge.
+  ctx.strokeStyle = 'rgba(255,180,80,0.7)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, world.w, world.h);
+
+  // particles / shockwaves / pickups / enemies / bullets — reuse legacy
+  // primitives now that ctx is in world coordinates.
+  for (const pk of Game.pickups) drawPickup(pk);
+  drawEnemyThreatHalos();
+  for (const e of Game.enemies) drawEnemy(e);
+  drawBullets();
+  drawShockwaves();
+  drawParticles();
+
+  // player vehicle — rotates to face travel direction using the existing
+  // `forcedRot` opt (drawVehicle already supports it).
+  // The legacy art points "up" (toward -y), so subtract π/2 to convert
+  // a math-angle (0 = +x) into the chassis-rotation expected by drawVehicle.
+  if (Game.state === 'dying') {
+    drawWreck();
+  } else if (Game.state !== 'gameover') {
+    drawPlayerGroundShadow();
+    drawVehicle(p.x, p.y, Game.vehicle, Math.hypot(p.vx, p.vy), 42, 64, {
+      forcedRot: p.facing + Math.PI / 2,
+      damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
+    });
+    if (Game.hitFlash > 0) {
+      ctx.save();
+      ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
+      ctx.fillStyle = '#fff3b0';
+      ctx.fillRect(p.x - p.w/2 - 2, p.y - p.h/2 - 2, p.w + 4, p.h + 4);
+      ctx.restore();
+    }
+    drawShield();
+    if (Game.muzzleT > 0) {
+      const a = clamp(Game.muzzleT / 0.08, 0, 1);
+      const cs = Math.cos(p.facing), sn = Math.sin(p.facing);
+      const nx = p.x + cs * (p.h * 0.5 + 6);
+      const ny = p.y + sn * (p.h * 0.5 + 6);
+      ctx.save();
+      ctx.globalAlpha = a * 0.7;
+      ctx.fillStyle = (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#fff3b0';
+      ctx.beginPath();
+      ctx.arc(nx, ny, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // popups: drawn in world coords too so they sit above the kill
+  drawPopups();
+
+  ctx.restore(); // end world translate
+
+  // screen-space red damage flash
+  if (Game.flash > 0) {
+    ctx.fillStyle = `rgba(255,80,80,${Game.flash * 0.4})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.restore(); // end shake save
+
+  // vignette
+  ctx.fillStyle = VIGNETTE_PLAY;
+  ctx.fillRect(0, 0, W, H);
+
+  // HUD + overlays — screen space
+  if (Game.state === 'playing') {
+    drawHUD();
+    drawPowerupStrip();
+    drawComboMeter();
+    drawArenaMinimap();
+  }
+  if (Game.state === 'playing' && Game.paused) drawPause();
+  if (Game.state === 'loading') drawLoadingOverlay();
+  if (Game.state === 'dying')   drawDeathOverlay();
+}
+
+// Compact minimap showing the world, player, and enemies. Drawn in the
+// top-right corner; cheap (no gradients) so it works at low quality.
+function drawArenaMinimap() {
+  const world = Game.world;
+  const p = Game.player;
+  if (!world || !p) return;
+  const padX = 14;
+  const padY = 84; // sit below the HUD strip
+  const size = Math.min(120, W * 0.22);
+  const x0 = W - size - padX;
+  const y0 = padY;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x0 - 2, y0 - 2, size + 4, size + 4);
+  ctx.fillStyle = 'rgba(60,40,28,0.85)';
+  ctx.fillRect(x0, y0, size, size);
+  ctx.strokeStyle = 'rgba(255,210,140,0.6)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, size - 1, size - 1);
+  const sx = size / world.w;
+  const sy = size / world.h;
+  // enemies
+  ctx.fillStyle = '#ff6a4a';
+  for (const e of Game.enemies) {
+    ctx.fillRect(x0 + e.x * sx - 1.5, y0 + e.y * sy - 1.5, 3, 3);
+  }
+  // player
+  ctx.fillStyle = '#7af0ff';
+  ctx.fillRect(x0 + p.x * sx - 2, y0 + p.y * sy - 2, 4, 4);
+  // facing tick
+  ctx.strokeStyle = '#7af0ff';
+  ctx.beginPath();
+  ctx.moveTo(x0 + p.x * sx, y0 + p.y * sy);
+  ctx.lineTo(x0 + p.x * sx + Math.cos(p.facing) * 6, y0 + p.y * sy + Math.sin(p.facing) * 6);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ============================================================
+// === END PHASE 1 ARENA MODE ===
 // ============================================================
 
 boot();
