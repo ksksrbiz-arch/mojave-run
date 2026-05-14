@@ -9381,7 +9381,9 @@ function drawBullets() {
   for (const b of Game.bullets) {
     if (b.big) {
       ctx.fillStyle = 'rgba(255,180,80,0.3)';
-      ctx.beginPath(); ctx.ellipse(b.x, b.y, b.w * 1.1, b.h * 1.1, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y, b.w * 1.1, b.h * 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.fillStyle = b.homing ? '#ffaaff' : '#fff3b0';
     pathRoundRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, b.w / 2);
