@@ -4594,6 +4594,9 @@ const Game = {
   arenaBossPending: false,  // set when next spawn should be the boss
   arenaMines: [],           // active proximity mines in world
   arenaMineT: 0,            // countdown to next mine spawn
+  // Phase 6 — combo system
+  arenaCombo: 0,            // current combo counter (kills without taking damage)
+  arenaWaveTookDamage: false, // flag: player took damage this wave
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -5023,6 +5026,9 @@ function beginPlaying() {
     Game.arenaBossPending = false;
     Game.arenaMines = [];
     Game.arenaMineT = rand(ARENA_MINE_INTERVAL_MIN, ARENA_MINE_INTERVAL_MAX);
+    // Phase 6 — combo system
+    Game.arenaCombo = 0;
+    Game.arenaWaveTookDamage = false;
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -5130,6 +5136,13 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   if (Game.mode === 'daily') bonusScrap += reason === 'victory' ? DAILY_VICTORY_SCRAP_BONUS : DAILY_SCRAP_BONUS;
   Game.scrapBonusEarned = bonusScrap;
   Game.scrapEarned = baseScrap + bonus + bonusScrap;
+  // Phase 6 — arena combo multiplier on scrap earned
+  if (Game.mode === 'arena' && Game.arenaCombo > 0) {
+    const comboMul = ARENA_COMBO_MULTIPLIER_MIN + (ARENA_COMBO_MULTIPLIER_MAX - ARENA_COMBO_MULTIPLIER_MIN) * 
+                     Math.min(Game.arenaCombo / (ARENA_COMBO_KILLS_PER_TIER * 5), 1);
+    Game.scrapEarned = Math.floor(Game.scrapEarned * comboMul);
+    Game._arenaComboMultiplier = comboMul.toFixed(2) + 'x';
+  }
   // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
   if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
   Profile.earn(Game.scrapEarned);
@@ -7138,6 +7151,11 @@ function damagePlayer(amt) {
   Game.bountyStreak = 0;
   Game.bountyMul = 1;
   Game.comboT = 0;
+  // Phase 6 — reset arena combo on damage
+  if (Game.mode === 'arena') {
+    Game.arenaCombo = 0;
+    Game.arenaWaveTookDamage = true;
+  }
   if (Game.health <= 0) {
     Game.health = 0;
     triggerPlayerDeath();
@@ -10603,6 +10621,12 @@ function drawDeathOverlay() {
       const best = pr ? (pr.bestArenaWave || 0) : 0;
       ctx.fillStyle = '#ffd86b';
       ctx.fillText('WAVE ' + wv + ' · BEST ' + Math.max(best, wv), W/2, H * 0.59);
+      // Phase 6 — show combo & multiplier earned
+      const comboNum = Game.arenaCombo || 0;
+      const comboMul = Game._arenaComboMultiplier || '1.00x';
+      ctx.font = `bold ${W < 500 ? 11 : 13}px "Courier New", monospace`;
+      ctx.fillStyle = comboNum > 20 ? '#ff6f9f' : comboNum > 10 ? '#ffb36a' : '#d2ff6f';
+      ctx.fillText('COMBO ' + comboNum + ' · ' + comboMul + ' SCRAP', W/2, H * 0.65);
     }
   }
   ctx.restore();
@@ -17752,6 +17776,14 @@ const ARENA_MINE_BLAST_RADIUS  = 110;
 const ARENA_MINE_PLAYER_DMG    = 22;
 const ARENA_MINE_ENEMY_DMG     = 6;
 
+// Phase 6 — combo system & multipliers
+const ARENA_COMBO_RESET_ON_DAMAGE = true;  // reset combo if player takes damage
+const ARENA_COMBO_MULTIPLIER_MIN  = 1.0;   // base scrap multiplier (0 combo)
+const ARENA_COMBO_MULTIPLIER_MAX  = 5.0;   // max scrap multiplier (high combo)
+const ARENA_COMBO_KILLS_PER_TIER  = 5;     // kills needed per multiplier tier
+const ARENA_COMBO_WAVE_CLEAR_BONUS = 8;    // combo points for clearing wave with no damage
+const ARENA_COMBO_MAX             = 50;    // hard cap on combo counter
+
 function arenaCameraTargetX() {
   const p = Game.player;
   return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
@@ -17940,6 +17972,12 @@ function updateArena(dt) {
       const waveBonus = 200 + Game.arenaWave * 100;
       Game.score += waveBonus;
       addPopup('WAVE ' + Game.arenaWave + ' CLEAR +' + waveBonus, p.x, p.y - 30, '#d2ff6f', 15);
+      // Phase 6 — wave clear combo bonus (if no damage taken)
+      if (!Game.arenaWaveTookDamage) {
+        Game.arenaCombo = Math.min(Game.arenaCombo + ARENA_COMBO_WAVE_CLEAR_BONUS, ARENA_COMBO_MAX);
+        addPopup('PERFECT WAVE +' + ARENA_COMBO_WAVE_CLEAR_BONUS + ' COMBO', p.x, p.y - 50, '#ff6f9f', 13);
+      }
+      Game.arenaWaveTookDamage = false;
       SFX.victory();
     }
   }
@@ -18036,6 +18074,8 @@ function updateArena(dt) {
             arenaEnemyDrop(e.x, e.y);
           }
           Game.arenaKills += 1;
+          // Phase 6 — increment combo on kill
+          Game.arenaCombo = Math.min(Game.arenaCombo + 1, ARENA_COMBO_MAX);
           Game.enemies.splice(i, 1);
           break;
         }
@@ -18140,6 +18180,8 @@ function updateArena(dt) {
               applyKill(en.x, en.y, ENEMY_SCORE[en.kind] || 200);
               arenaEnemyDrop(en.x, en.y);
               Game.arenaKills += 1;
+              // Phase 6 — increment combo on mine kill
+              Game.arenaCombo = Math.min(Game.arenaCombo + 1, ARENA_COMBO_MAX);
               Game.enemies.splice(ei, 1);
             }
           }
@@ -18550,6 +18592,8 @@ function renderArena() {
     drawHUD();
     drawPowerupStrip();
     drawComboMeter();
+    // Phase 6 — arena combo display
+    if (Game.mode === 'arena') drawArenaCombo();
     drawArenaMinimap();
   }
   if (Game.state === 'playing' && Game.paused) drawPause();
@@ -18559,6 +18603,53 @@ function renderArena() {
 
 // Compact minimap showing the world, player, and enemies. Drawn in the
 // top-right corner; cheap (no gradients) so it works at low quality.
+function drawArenaCombo() {
+  const x = 12, y = 50;
+  const comboNum = Game.arenaCombo || 0;
+  const comboMul = ARENA_COMBO_MULTIPLIER_MIN + (ARENA_COMBO_MULTIPLIER_MAX - ARENA_COMBO_MULTIPLIER_MIN) * 
+                   Math.min(comboNum / (ARENA_COMBO_KILLS_PER_TIER * 5), 1);
+  const nextTier = Math.ceil((comboNum + 1) / ARENA_COMBO_KILLS_PER_TIER) * ARENA_COMBO_KILLS_PER_TIER;
+  
+  // Phase 6 — combo display with multiplier bar
+  ctx.save();
+  ctx.font = 'bold 14px "Courier New", monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  
+  // title
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('COMBO', x, y);
+  
+  // counter + multiplier
+  ctx.font = 'bold 22px "Courier New", monospace';
+  const textColor = comboNum > 20 ? '#ff6f9f' : comboNum > 10 ? '#ffb36a' : '#d2ff6f';
+  ctx.fillStyle = textColor;
+  ctx.fillText(comboNum.toString(), x, y + 16);
+  
+  // multiplier on the right
+  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.fillStyle = comboMul >= 3 ? '#ff4040' : comboMul >= 2 ? '#ffb36a' : '#d2ff6f';
+  ctx.fillText(comboMul.toFixed(2) + 'x', x + 50, y + 22);
+  
+  // progress bar to next tier
+  const barW = 100, barH = 8;
+  const progress = (comboNum % ARENA_COMBO_KILLS_PER_TIER) / ARENA_COMBO_KILLS_PER_TIER;
+  ctx.fillStyle = 'rgba(60,40,30,0.6)';
+  ctx.fillRect(x, y + 42, barW, barH);
+  ctx.fillStyle = '#ffb36a';
+  ctx.fillRect(x, y + 42, barW * progress, barH);
+  ctx.strokeStyle = '#8a5a3a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y + 42, barW, barH);
+  
+  // progress text
+  ctx.font = '9px "Courier New", monospace';
+  ctx.fillStyle = '#ffb36a';
+  ctx.textAlign = 'center';
+  ctx.fillText((comboNum % ARENA_COMBO_KILLS_PER_TIER) + '/' + ARENA_COMBO_KILLS_PER_TIER, x + barW/2, y + 53);
+  
+  ctx.restore();
+}
+
 function drawArenaMinimap() {
   const world = Game.world;
   const p = Game.player;
