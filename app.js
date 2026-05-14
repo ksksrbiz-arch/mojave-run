@@ -2415,6 +2415,8 @@ const Profile = {
         if (!('lastLoginDate' in p)) { p.lastLoginDate = null; dirty = true; }
         if (typeof p.loginStreak !== 'number') { p.loginStreak = 0; dirty = true; }
         if (!Array.isArray(p.milestonesClaimed)) { p.milestonesClaimed = []; dirty = true; }
+        // Phase 5 — arena best wave tracking
+        if (typeof p.bestArenaWave !== 'number') { p.bestArenaWave = 0; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2502,6 +2504,7 @@ const Profile = {
       lastLoginDate: null,         // ISO date string (YYYY-MM-DD) of last login for streak tracking
       loginStreak: 0,              // consecutive daily login count
       milestonesClaimed: [],       // run-count milestones already rewarded (e.g. [10, 25, 50])
+      bestArenaWave: 0,            // Phase 5: highest arena wave reached
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -2688,6 +2691,8 @@ const Profile = {
       p.gauntletCleared.sort((a,b)=>a-b);
     }
     if (result.mode === 'ironthrone' && result.score > (p.bestIronThrone || 0)) p.bestIronThrone = result.score;
+    // Phase 5 — arena best wave
+    if (result.mode === 'arena' && (result.arenaWave || 0) > (p.bestArenaWave || 0)) p.bestArenaWave = result.arenaWave;
     if (result.mode === 'ironthrone' && result.victory && result.ironThroneStage) {
       if (!p.ironThroneCleared) p.ironThroneCleared = [];
       if (!p.ironThroneCleared.includes(result.ironThroneStage)) {
@@ -4585,6 +4590,10 @@ const Game = {
   arenaWaveRemain: 0,   // enemies still to spawn this wave
   arenaWaveBreak: 0,    // countdown between waves
   arenaDecor: [],       // scattered ground decor objects
+  // Phase 5 — boss waves & mines
+  arenaBossPending: false,  // set when next spawn should be the boss
+  arenaMines: [],           // active proximity mines in world
+  arenaMineT: 0,            // countdown to next mine spawn
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -4938,6 +4947,9 @@ function startRun(mode, level) {
     Game.arenaWaveRemain = 0;
     Game.arenaWaveBreak = 0;
     Game.arenaDecor = [];
+    Game.arenaBossPending = false;
+    Game.arenaMines = [];
+    Game.arenaMineT = 0;
   }
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
   // seed parallax peaks across the horizon
@@ -5007,6 +5019,10 @@ function beginPlaying() {
         shade: rand(0.6, 1.0),
       });
     }
+    // Phase 5 — boss/mine state
+    Game.arenaBossPending = false;
+    Game.arenaMines = [];
+    Game.arenaMineT = rand(ARENA_MINE_INTERVAL_MIN, ARENA_MINE_INTERVAL_MAX);
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -5140,6 +5156,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     died: reason === 'death',
     // iron throne: stage number that was just cleared (incremented on boss death)
     ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
+    // Phase 5 — arena wave reached (max wave number entered)
+    arenaWave: Game.mode === 'arena' ? (Game.arenaWave || 0) : 0,
   };
   Profile.recordRunResult(runResult);
   // === STRATEGY v3.1: detect new personal best after recording ===
@@ -10578,6 +10596,14 @@ function drawDeathOverlay() {
     ctx.globalAlpha = ta * 0.8;
     ctx.fillStyle = '#ffb36a';
     ctx.fillText('RUN ENDED', W/2, H * 0.53);
+    // Phase 5 — arena death: show wave reached and personal best
+    if (Game.mode === 'arena') {
+      const wv = Game.arenaWave || 0;
+      const pr = Profile.active && Profile.active();
+      const best = pr ? (pr.bestArenaWave || 0) : 0;
+      ctx.fillStyle = '#ffd86b';
+      ctx.fillText('WAVE ' + wv + ' · BEST ' + Math.max(best, wv), W/2, H * 0.59);
+    }
   }
   ctx.restore();
   // Debris particles on early death frames
@@ -17713,6 +17739,19 @@ const ARENA_TANK_FIRE_RATE     = 2.2;   // seconds between tank shots
 const ARENA_ENEMY_BULLET_SPEED = 320;
 const ARENA_DECOR_COUNT        = 40;    // scattered rocks/ruins in world
 
+// Phase 5 — boss waves & proximity mines
+const ARENA_BOSS_WAVE_EVERY    = 5;     // every Nth wave is a boss wave
+const ARENA_BOSS_HP_MUL        = 5;     // boss HP relative to base tank
+const ARENA_BOSS_SIZE_MUL      = 1.6;   // boss visual/hitbox scale
+const ARENA_MINE_INTERVAL_MIN  = 6;     // seconds between mine spawns
+const ARENA_MINE_INTERVAL_MAX  = 12;
+const ARENA_MINE_MAX_LIVE      = 5;
+const ARENA_MINE_ARM_RANGE     = 70;    // proximity that arms the mine
+const ARENA_MINE_FUSE          = 0.55;  // seconds from arm to detonation
+const ARENA_MINE_BLAST_RADIUS  = 110;
+const ARENA_MINE_PLAYER_DMG    = 22;
+const ARENA_MINE_ENEMY_DMG     = 6;
+
 function arenaCameraTargetX() {
   const p = Game.player;
   return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
@@ -17868,12 +17907,23 @@ function updateArena(dt) {
     if (Game.arenaWaveBreak <= 0) {
       // start next wave
       Game.arenaWave += 1;
+      // Phase 5 — boss wave every Nth wave: fewer mooks + 1 elite boss
+      const isBoss = (Game.arenaWave % ARENA_BOSS_WAVE_EVERY) === 0;
       Game.arenaWaveRemain = Math.min(
         ARENA_WAVE_BASE_COUNT + (Game.arenaWave - 1) * ARENA_WAVE_GROWTH,
         ARENA_WAVE_MAX_ENEMIES
       );
-      announceEvent('WAVE ' + Game.arenaWave, '#ffd86b');
-      SFX.boss();
+      if (isBoss) {
+        // reduce mooks, queue boss as next spawn
+        Game.arenaWaveRemain = Math.max(2, Math.floor(Game.arenaWaveRemain * 0.5));
+        Game.arenaBossPending = true;
+        announceEvent('⚠ BOSS WAVE ' + Game.arenaWave + ' ⚠', '#ff4040');
+        SFX.boss();
+        Game.shake = Math.max(Game.shake, 0.6);
+      } else {
+        announceEvent('WAVE ' + Game.arenaWave, '#ffd86b');
+        SFX.boss();
+      }
     }
   } else {
     Game.arenaSpawnT -= dt;
@@ -17963,11 +18013,28 @@ function updateArena(dt) {
         if (!b.pierce) Game.bullets.splice(j, 1);
         emit(b.x, b.y, 4, { color:'#ffd86b', speed:200, life:0.25, size:3, spread: Math.PI * 2 });
         if (e.hp <= 0) {
-          SFX.explode();
-          emit(e.x, e.y, 18, { color:'#ff8a3d', speed:280, life:0.55, size:4, spread: Math.PI * 2 });
-          shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', 60);
-          applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
-          arenaEnemyDrop(e.x, e.y);
+          // Phase 5 — boss death: bigger fx + guaranteed powerup
+          if (e.arenaBoss) {
+            SFX.bigBoom();
+            emit(e.x, e.y, 40, { color:'#ff4040', speed:380, life:0.8, size:5, spread: Math.PI * 2 });
+            emit(e.x, e.y, 24, { color:'#ffd86b', speed:280, life:0.6, size:4, spread: Math.PI * 2 });
+            shockwave(e.x, e.y, 'rgba(255,80,80,0.6)', 140);
+            shockwave(e.x, e.y, 'rgba(255,200,80,0.4)', 200);
+            Game.shake = Math.max(Game.shake, 0.9);
+            applyKill(e.x, e.y, (ENEMY_SCORE[e.kind] || 200) * 5);
+            // guaranteed powerup drop
+            Game.pickups.push({ kind:'powerup', power:rollPowerup(), x:e.x, y:e.y, w:26, h:26, t:0 });
+            // bonus scrap pile
+            Game.pickups.push({ kind:'scrap', x:e.x+30, y:e.y, w:22, h:22, t:0 });
+            Game.pickups.push({ kind:'scrap', x:e.x-30, y:e.y, w:22, h:22, t:0 });
+            addPopup('BOSS DOWN', e.x, e.y - 30, '#ff4040', 16);
+          } else {
+            SFX.explode();
+            emit(e.x, e.y, 18, { color:'#ff8a3d', speed:280, life:0.55, size:4, spread: Math.PI * 2 });
+            shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', 60);
+            applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+            arenaEnemyDrop(e.x, e.y);
+          }
           Game.arenaKills += 1;
           Game.enemies.splice(i, 1);
           break;
@@ -18008,6 +18075,77 @@ function updateArena(dt) {
         emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2, spread: Math.PI * 2 });
       }
       Game.enemyBullets.splice(i, 1);
+    }
+  }
+
+  // ---- Phase 5: proximity mines (hazards) ----
+  Game.arenaMineT -= dt;
+  if (Game.arenaMineT <= 0 && Game.arenaMines.length < ARENA_MINE_MAX_LIVE) {
+    // spawn at a random world position, but not too close to the player
+    let mx = 0, my = 0, attempts = 0;
+    do {
+      mx = rand(60, world.w - 60);
+      my = rand(60, world.h - 60);
+      attempts += 1;
+    } while (Math.hypot(mx - p.x, my - p.y) < 240 && attempts < 8);
+    Game.arenaMines.push({
+      x: mx, y: my, w: 20, h: 20,
+      t: 0,           // total age (for idle pulse)
+      armed: false,   // proximity-triggered
+      fuse: 0,        // countdown when armed
+    });
+    Game.arenaMineT = rand(ARENA_MINE_INTERVAL_MIN, ARENA_MINE_INTERVAL_MAX);
+  }
+  for (let i = Game.arenaMines.length - 1; i >= 0; i--) {
+    const m = Game.arenaMines[i];
+    m.t += dt;
+    if (!m.armed) {
+      // arm when player or any enemy is within proximity
+      const dpx = Math.hypot(p.x - m.x, p.y - m.y);
+      let trigger = dpx < ARENA_MINE_ARM_RANGE;
+      if (!trigger) {
+        for (const e of Game.enemies) {
+          if (Math.hypot(e.x - m.x, e.y - m.y) < ARENA_MINE_ARM_RANGE) { trigger = true; break; }
+        }
+      }
+      if (trigger) {
+        m.armed = true;
+        m.fuse = ARENA_MINE_FUSE;
+        SFX.click();
+      }
+    } else {
+      m.fuse -= dt;
+      if (m.fuse <= 0) {
+        // detonate: splash damage to player + enemies, big visual
+        SFX.bigBoom();
+        emit(m.x, m.y, 28, { color:'#ff8a3d', speed:340, life:0.7, size:4, spread: Math.PI * 2 });
+        emit(m.x, m.y, 16, { color:'#ffd86b', speed:240, life:0.5, size:3, spread: Math.PI * 2 });
+        shockwave(m.x, m.y, 'rgba(255,140,60,0.55)', ARENA_MINE_BLAST_RADIUS * 1.4);
+        Game.shake = Math.max(Game.shake, 0.55);
+        // player splash
+        if (Math.hypot(p.x - m.x, p.y - m.y) < ARENA_MINE_BLAST_RADIUS) {
+          if (isPowerupActive('shield')) {
+            shockwave(p.x, p.y, 'rgba(122,170,255,0.55)', 70);
+          } else {
+            damagePlayer(ARENA_MINE_PLAYER_DMG);
+          }
+        }
+        // enemy splash (kill or wound)
+        for (let ei = Game.enemies.length - 1; ei >= 0; ei--) {
+          const en = Game.enemies[ei];
+          if (Math.hypot(en.x - m.x, en.y - m.y) < ARENA_MINE_BLAST_RADIUS) {
+            en.hp -= ARENA_MINE_ENEMY_DMG;
+            en.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
+            if (en.hp <= 0) {
+              applyKill(en.x, en.y, ENEMY_SCORE[en.kind] || 200);
+              arenaEnemyDrop(en.x, en.y);
+              Game.arenaKills += 1;
+              Game.enemies.splice(ei, 1);
+            }
+          }
+        }
+        Game.arenaMines.splice(i, 1);
+      }
     }
   }
 
@@ -18136,7 +18274,16 @@ function spawnArenaEnemy() {
   const kills = Game.arenaKills || 0;
   const roll = Math.random();
   let kind, w, h, hp, contact, maxV, accel, turnR;
-  if (kills >= 25 && roll < 0.10) {
+  // Phase 5 — boss override: when arenaBossPending, this spawn is an elite tank
+  const isBoss = Game.arenaBossPending === true;
+  if (isBoss) {
+    Game.arenaBossPending = false;
+    kind = 'tank';
+    w = Math.round(42 * ARENA_BOSS_SIZE_MUL);
+    h = Math.round(56 * ARENA_BOSS_SIZE_MUL);
+    hp = Math.ceil(10 * diff * ARENA_BOSS_HP_MUL);
+    contact = 36; maxV = 150; accel = 360; turnR = 1.2;
+  } else if (kills >= 25 && roll < 0.10) {
     kind = 'tank';  w = 42; h = 56; hp = Math.ceil(10 * diff);
     contact = 24; maxV = 140 + Math.min(80, kills * 1.5); accel = 320; turnR = 1.4;
   } else if (kills >= 15 && roll < 0.22) {
@@ -18157,6 +18304,9 @@ function spawnArenaEnemy() {
   if (kind === 'mortar') fireT = ARENA_MORTAR_FIRE_RATE * (0.5 + Math.random());
   if (kind === 'tank')   fireT = ARENA_TANK_FIRE_RATE * (0.5 + Math.random());
 
+  // Phase 5 — boss fires faster
+  if (isBoss) fireT = ARENA_TANK_FIRE_RATE * 0.5;
+
   Game.enemies.push({
     kind,
     x: sx, y: sy,
@@ -18175,6 +18325,8 @@ function spawnArenaEnemy() {
     arenaMaxV: maxV,
     arenaAccel: accel,
     arenaTurn: turnR,
+    // Phase 5 — boss tag (drives drop bonus + render emphasis)
+    arenaBoss: isBoss,
   });
 }
 
@@ -18306,6 +18458,31 @@ function renderArena() {
   // particles / shockwaves / pickups / enemies / bullets — reuse legacy
   // primitives now that ctx is in world coordinates.
   for (const pk of Game.pickups) drawPickup(pk);
+  // Phase 5 — proximity mines (drawn in world space, before enemies)
+  if (Game.arenaMines && Game.arenaMines.length) {
+    for (const m of Game.arenaMines) {
+      const idlePulse = 0.6 + 0.4 * Math.sin(m.t * 4);
+      const armedPulse = 0.5 + 0.5 * Math.sin(m.t * 28);
+      const pulse = m.armed ? armedPulse : idlePulse;
+      // outer warning ring
+      ctx.save();
+      ctx.globalAlpha = m.armed ? 0.55 : 0.25;
+      ctx.strokeStyle = m.armed ? '#ff4040' : '#ff8a3d';
+      ctx.lineWidth = m.armed ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.armed ? (16 + pulse * 18) : 20, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      // body
+      ctx.fillStyle = '#2a1a14';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3a2418';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 7, 0, Math.PI * 2); ctx.fill();
+      // blinking LED
+      ctx.fillStyle = m.armed ? `rgba(255,80,80,${0.5 + pulse * 0.5})` : `rgba(255,180,80,${0.4 + pulse * 0.4})`;
+      ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
   drawEnemyThreatHalos();
   for (const e of Game.enemies) drawEnemy(e);
   drawBullets();
@@ -18410,6 +18587,13 @@ function drawArenaMinimap() {
   ctx.fillStyle = '#f5d76e';
   for (const pk of Game.pickups) {
     ctx.fillRect(x0 + pk.x * sx - 1, y0 + pk.y * sy - 1, 2, 2);
+  }
+  // Phase 5 — mines on minimap (red when armed, orange when idle)
+  if (Game.arenaMines && Game.arenaMines.length) {
+    for (const m of Game.arenaMines) {
+      ctx.fillStyle = m.armed ? '#ff4040' : '#ff8a3d';
+      ctx.fillRect(x0 + m.x * sx - 1, y0 + m.y * sy - 1, 2, 2);
+    }
   }
   // player
   ctx.fillStyle = '#7af0ff';
