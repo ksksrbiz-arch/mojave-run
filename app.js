@@ -4580,6 +4580,11 @@ const Game = {
   arenaSpawnT: 0,
   arenaKills: 0,
   arenaPickupT: 0,
+  // Phase 4 — wave system
+  arenaWave: 0,
+  arenaWaveRemain: 0,   // enemies still to spawn this wave
+  arenaWaveBreak: 0,    // countdown between waves
+  arenaDecor: [],       // scattered ground decor objects
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -4929,6 +4934,10 @@ function startRun(mode, level) {
     Game.arenaSpawnT = 0;
     Game.arenaKills = 0;
     Game.arenaPickupT = 0;
+    Game.arenaWave = 0;
+    Game.arenaWaveRemain = 0;
+    Game.arenaWaveBreak = 0;
+    Game.arenaDecor = [];
   }
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
   // seed parallax peaks across the horizon
@@ -4982,6 +4991,22 @@ function beginPlaying() {
     Game.arenaSpawnT = 1.2;
     Game.arenaKills = 0;
     Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
+    // Phase 4 — wave system init
+    Game.arenaWave = 1;
+    Game.arenaWaveRemain = ARENA_WAVE_BASE_COUNT;
+    Game.arenaWaveBreak = 0;
+    // Phase 4 — scatter ground decor
+    Game.arenaDecor = [];
+    for (let di = 0; di < ARENA_DECOR_COUNT; di++) {
+      Game.arenaDecor.push({
+        x: rand(60, worldW - 60),
+        y: rand(60, worldH - 60),
+        kind: Math.random() < 0.35 ? 'ruin' : 'rock',
+        size: rand(8, 22),
+        rot: rand(0, Math.PI * 2),
+        shade: rand(0.6, 1.0),
+      });
+    }
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -5003,7 +5028,7 @@ function beginPlaying() {
     announceEvent('WASTELAND RUN: ' + Game.runMutators.map(m => m.name).join(' · '), '#ff80ff');
   }
   if (Game.mode === 'extraction') announceEvent('ESCORT CONVOY TO EXTRACTION', '#7af07a');
-  if (Game.mode === 'arena') announceEvent('ARENA 2.5D — WASD / ARROWS TO ROAM', '#7af0ff');
+  if (Game.mode === 'arena') announceEvent('WAVE 1 — ARENA 2.5D', '#7af0ff');
   // Spawn boss right away in boss levels
   if (Game.mode === 'ironthrone') {
     spawnIronThroneBoss(Game.ironThroneStage);
@@ -9922,7 +9947,7 @@ function drawHUD() {
   } else if (Game.mode === 'custom' && Game.levelData) {
     subL = 'CUSTOM · ' + Game.levelData.name;
   } else if (Game.mode === 'arena') {
-    subL = 'ARENA · KILLS ' + (Game.arenaKills || 0);
+    subL = 'WAVE ' + (Game.arenaWave || 1) + ' · KILLS ' + (Game.arenaKills || 0);
   }
   ctx.fillText(subL, 50, hudH * 0.72);
 
@@ -17674,6 +17699,18 @@ const ARENA_DROP_CHANCE_SCRAP   = 0.55;
 const ARENA_DROP_CHANCE_POWERUP = 0.12;
 const ARENA_DROP_CHANCE_REPAIR  = 0.18;
 
+// Phase 4 — wave system & enemy shooting
+const ARENA_WAVE_BREAK_DUR     = 2.5;   // seconds between waves
+const ARENA_WAVE_BASE_COUNT    = 5;     // enemies in wave 1
+const ARENA_WAVE_GROWTH        = 2;     // extra enemies per wave
+const ARENA_WAVE_MAX_ENEMIES   = 24;    // hard cap on concurrent enemies
+const ARENA_ENEMY_FIRE_RANGE   = 380;   // px — enemies only shoot within this
+const ARENA_DRONE_FIRE_RATE    = 1.8;   // seconds between drone shots
+const ARENA_MORTAR_FIRE_RATE   = 3.0;   // seconds between mortar lobs
+const ARENA_TANK_FIRE_RATE     = 2.2;   // seconds between tank shots
+const ARENA_ENEMY_BULLET_SPEED = 320;
+const ARENA_DECOR_COUNT        = 40;    // scattered rocks/ruins in world
+
 function arenaCameraTargetX() {
   const p = Game.player;
   return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
@@ -17823,12 +17860,36 @@ function updateArena(dt) {
     }
   }
 
-  // ---- enemy spawning ----
-  Game.arenaSpawnT -= dt;
-  if (Game.arenaSpawnT <= 0 && Game.enemies.length < ARENA_ENEMY_MAX_LIVE) {
-    spawnArenaEnemy();
-    const diff = 1 + Game.arenaKills * 0.02;
-    Game.arenaSpawnT = rand(ARENA_ENEMY_SPAWN_MIN, ARENA_ENEMY_SPAWN_MAX) / diff;
+  // ---- Phase 4: wave-based enemy spawning ----
+  if (Game.arenaWaveBreak > 0) {
+    Game.arenaWaveBreak -= dt;
+    if (Game.arenaWaveBreak <= 0) {
+      // start next wave
+      Game.arenaWave += 1;
+      Game.arenaWaveRemain = Math.min(
+        ARENA_WAVE_BASE_COUNT + (Game.arenaWave - 1) * ARENA_WAVE_GROWTH,
+        ARENA_WAVE_MAX_ENEMIES
+      );
+      announceEvent('WAVE ' + Game.arenaWave, '#ffd86b');
+      SFX.boss();
+    }
+  } else {
+    Game.arenaSpawnT -= dt;
+    if (Game.arenaSpawnT <= 0 && Game.arenaWaveRemain > 0 && Game.enemies.length < ARENA_WAVE_MAX_ENEMIES) {
+      spawnArenaEnemy();
+      Game.arenaWaveRemain -= 1;
+      const diff = 1 + Game.arenaKills * 0.02;
+      Game.arenaSpawnT = rand(ARENA_ENEMY_SPAWN_MIN, ARENA_ENEMY_SPAWN_MAX) / diff;
+    }
+    // wave cleared — start break
+    if (Game.arenaWaveRemain <= 0 && Game.enemies.length === 0) {
+      Game.arenaWaveBreak = ARENA_WAVE_BREAK_DUR;
+      // bonus for clearing wave
+      const waveBonus = 200 + Game.arenaWave * 100;
+      Game.score += waveBonus;
+      addPopup('WAVE ' + Game.arenaWave + ' CLEAR +' + waveBonus, p.x, p.y - 30, '#d2ff6f', 15);
+      SFX.victory();
+    }
   }
 
   // ---- enemy update + collisions ----
@@ -17856,6 +17917,39 @@ function updateArena(dt) {
     // clamp to world (enemies cannot escape the arena either)
     e.x = clamp(e.x, e.w/2, world.w - e.w/2);
     e.y = clamp(e.y, e.h/2, world.h - e.h/2);
+
+    // Phase 4 — enemy shooting (drones, mortars, tanks fire at player)
+    if (e.fireT !== undefined && e.fireT !== 999 && e.spawnAnimT <= 0) {
+      e.fireT -= dt;
+      if (e.fireT <= 0 && distp < ARENA_ENEMY_FIRE_RANGE) {
+        const ang = Math.atan2(dyp, dxp);
+        const sp = ARENA_ENEMY_BULLET_SPEED;
+        if (e.kind === 'drone') {
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 5, h: 5,
+            vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+            dmg: 8, big: false, src: e,
+          });
+          e.fireT = ARENA_DRONE_FIRE_RATE;
+        } else if (e.kind === 'mortar') {
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 7, h: 7,
+            vx: Math.cos(ang) * sp * 0.6, vy: Math.sin(ang) * sp * 0.6,
+            dmg: 14, big: true, src: e,
+          });
+          SFX.mortar();
+          e.fireT = ARENA_MORTAR_FIRE_RATE;
+        } else if (e.kind === 'tank') {
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 8, h: 8,
+            vx: Math.cos(ang) * sp * 1.1, vy: Math.sin(ang) * sp * 1.1,
+            dmg: 18, big: true, src: e,
+          });
+          SFX.bigShot();
+          e.fireT = ARENA_TANK_FIRE_RATE;
+        }
+      }
+    }
 
     // bullet-vs-enemy
     for (let j = Game.bullets.length - 1; j >= 0; j--) {
@@ -17890,6 +17984,28 @@ function updateArena(dt) {
       e.vx = nx * e.arenaMaxV * 0.6;
       e.vy = ny * e.arenaMaxV * 0.6;
       Game.shake = Math.max(Game.shake, 0.5);
+    }
+  }
+
+  // ---- Phase 4: enemy bullet update & player collision ----
+  for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
+    const b = Game.enemyBullets[i];
+    b.x += (b.vx || 0) * dt;
+    b.y += (b.vy || 0) * dt;
+    // out-of-world cull
+    if (b.x < -40 || b.y < -40 || b.x > world.w + 40 || b.y > world.h + 40) {
+      Game.enemyBullets.splice(i, 1);
+      continue;
+    }
+    if (aabb(b, p)) {
+      if (isPowerupActive('shield')) {
+        emit(b.x, b.y, 8, { color:'#7aaaff', speed:220, life:0.4, size:3, spread: Math.PI * 2 });
+        shockwave(p.x, p.y, 'rgba(122,170,255,0.4)', 50);
+      } else {
+        damagePlayer(b.dmg || 8);
+        emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2, spread: Math.PI * 2 });
+      }
+      Game.enemyBullets.splice(i, 1);
     }
   }
 
@@ -18032,6 +18148,13 @@ function spawnArenaEnemy() {
     contact = 14; maxV = 200 + Math.min(180, kills * 3); accel = 480; turnR = 2.4;
   }
 
+  // Phase 4 — set fireT so shooting enemies will fire in updateArena.
+  // Bikes are ram-only (fireT stays 999).
+  let fireT = 999;
+  if (kind === 'drone')  fireT = ARENA_DRONE_FIRE_RATE * (0.5 + Math.random());
+  if (kind === 'mortar') fireT = ARENA_MORTAR_FIRE_RATE * (0.5 + Math.random());
+  if (kind === 'tank')   fireT = ARENA_TANK_FIRE_RATE * (0.5 + Math.random());
+
   Game.enemies.push({
     kind,
     x: sx, y: sy,
@@ -18039,7 +18162,7 @@ function spawnArenaEnemy() {
     vx: 0, vy: 0,
     hp, maxHp: hp,
     contact,
-    fireT: 999,             // arena enemies don't shoot (phase 3 — future)
+    fireT,
     spawnAnimT: 0.35,
     hitAnimT: 0,
     storyAnimT: 0,
@@ -18154,6 +18277,30 @@ function renderArena() {
   ctx.lineWidth = 4;
   ctx.strokeRect(0, 0, world.w, world.h);
 
+  // Phase 4 — scattered ground decor (rocks & ruins). Only draw visible ones.
+  if (Game.arenaDecor && Game.arenaDecor.length) {
+    for (const d of Game.arenaDecor) {
+      if (d.x < cam.x - 30 || d.x > cam.x + W + 30 ||
+          d.y < cam.y - 30 || d.y > cam.y + H + 30) continue;
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot);
+      const s = d.size;
+      const shade = Math.round(d.shade * 60 + 30);
+      if (d.kind === 'ruin') {
+        ctx.fillStyle = `rgb(${shade},${shade - 8},${shade - 16})`;
+        ctx.fillRect(-s * 0.6, -s * 0.3, s * 1.2, s * 0.6);
+        ctx.fillRect(-s * 0.2, -s * 0.6, s * 0.4, s * 1.2);
+      } else {
+        ctx.fillStyle = `rgb(${shade + 10},${shade},${shade - 10})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 0.55, s * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   // particles / shockwaves / pickups / enemies / bullets — reuse legacy
   // primitives now that ctx is in world coordinates.
   for (const pk of Game.pickups) drawPickup(pk);
@@ -18256,6 +18403,11 @@ function drawArenaMinimap() {
   ctx.fillStyle = '#ff6a4a';
   for (const e of Game.enemies) {
     ctx.fillRect(x0 + e.x * sx - 1.5, y0 + e.y * sy - 1.5, 3, 3);
+  }
+  // pickups on minimap
+  ctx.fillStyle = '#f5d76e';
+  for (const pk of Game.pickups) {
+    ctx.fillRect(x0 + pk.x * sx - 1, y0 + pk.y * sy - 1, 2, 2);
   }
   // player
   ctx.fillStyle = '#7af0ff';
