@@ -4234,7 +4234,7 @@ function rollPowerup() {
 // INPUT
 // ============================================================
 const keys = Object.create(null);
-const input = { left:false, right:false, up:false, down:false, fire:false, touchTargetX: null, touchFire: false, special:false };
+const input = { left:false, right:false, up:false, down:false, fire:false, touchTargetX: null, touchTargetY: null, touchFire: false, special:false };
 const activePointers = new Map();
 const SCREEN_ESCAPE_ACTION = {
   profiles: 'back-title',
@@ -4267,7 +4267,8 @@ window.addEventListener('keydown', e => {
   const key = e.key.toLowerCase();
   keys[key] = true;
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(key)) e.preventDefault();
-  if (key === 'arrowleft' || key === 'arrowright' || key === 'a' || key === 'd' || key === ' ' || key === 'z' || key === 'x') {
+  if (key === 'arrowleft' || key === 'arrowright' || key === 'arrowup' || key === 'arrowdown' ||
+      key === 'a' || key === 'd' || key === 'w' || key === 's' || key === ' ' || key === 'z' || key === 'x') {
     setControlHintMode('keyboard');
   }
   ensureAudio();
@@ -4335,12 +4336,12 @@ function onPointerDown(e) {
   setControlHintMode('touch');
   e.preventDefault();
   try { cvs.setPointerCapture(e.pointerId); } catch(_){}
-  activePointers.set(e.pointerId, e.clientX);
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   syncTouchInput();
 }
 function onPointerMove(e) {
   if (activePointers.has(e.pointerId)) {
-    activePointers.set(e.pointerId, e.clientX);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     syncTouchInput();
   }
 }
@@ -4351,10 +4352,13 @@ function onPointerEnd(e) {
 function syncTouchInput() {
   if (activePointers.size === 0) {
     input.touchTargetX = null;
+    input.touchTargetY = null;
     input.touchFire = false;
   } else {
-    const xs = [...activePointers.values()];
-    input.touchTargetX = xs[xs.length - 1];
+    const pts = [...activePointers.values()];
+    const p = pts[pts.length - 1];
+    input.touchTargetX = p.x;
+    input.touchTargetY = p.y;
     input.touchFire = true;
   }
 }
@@ -10023,6 +10027,13 @@ function drawHUD() {
   } else if (Game.mode === 'custom' && Game.levelData) {
     const L = Game.levelData;
     mainR = L.obj === 'score' ? `${Math.floor(Game.score)}/${L.target}` : L.obj === 'kills' ? `${Game.kills}/${L.target}` : L.obj === 'distance' ? `${Math.floor(Game.distance)}/${L.target}M` : Math.max(0, L.target - Game.t).toFixed(1) + 'S';
+  } else if (Game.mode === 'arena') {
+    if ((Game.arenaWaveBreak || 0) > 0) {
+      mainR = 'NEXT ' + Math.max(0, Game.arenaWaveBreak).toFixed(1) + 'S';
+    } else {
+      const remain = Math.max(0, (Game.arenaWaveRemain || 0) + (Game.enemies ? Game.enemies.length : 0));
+      mainR = 'LEFT ' + remain;
+    }
   }
   ctx.fillText(mainR, W - 50, hudH * 0.32);
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
@@ -17394,7 +17405,7 @@ const SplitScreen = (() => {
     for (let i = 0; i < playerCount; i++) {
       _players.push({
         index: i,
-        input: { left: false, right: false, fire: false, touchTargetX: null, touchFire: false, special: false },
+        input: { left: false, right: false, fire: false, touchTargetX: null, touchTargetY: null, touchFire: false, special: false },
         score: 0,
         kills: 0,
         distance: 0,
@@ -17817,13 +17828,18 @@ function updateArena(dt) {
   if (input.right) ax += 1;
   if (input.up)    ay -= 1;
   if (input.down)  ay += 1;
-  // Touch: drag toward target. Treat horizontal touch as forward intent —
-  // legacy touch only tracks x. Vertical touch movement is unsupported in
-  // phase 1; players on touch can still steer left/right and fire.
+  // Touch: drag toward the finger in arena world-space. Legacy modes still
+  // only consume touchTargetX, so this adds full 2-axis arena control without
+  // changing classic horizontal steering.
   if (ax === 0 && input.touchTargetX !== null) {
     const tx = clamp(input.touchTargetX, 0, W) + cam.x;
     const dx = tx - p.x;
     ax = clamp(dx * 0.01, -1, 1);
+  }
+  if (ay === 0 && input.touchTargetY !== null) {
+    const ty = clamp(input.touchTargetY, 0, H) + cam.y;
+    const dy = ty - p.y;
+    ay = clamp(dy * 0.01, -1, 1);
   }
   // normalize diagonal so 8-way input doesn't out-accelerate cardinal input
   const aMag = Math.hypot(ax, ay);
@@ -18298,18 +18314,58 @@ function fireArenaGuns() {
                     speed: 140, life: 0.2, size: 2, spread: Math.PI / 3 });
 }
 
+function arenaSpawnPoint() {
+  const world = Game.world;
+  const p = Game.player;
+  const cam = Game.camera;
+  const margin = 48;
+  const offscreenPad = 110;
+  const safeR = 260;
+  if (!world || !p || !cam) return { x: margin, y: margin };
+
+  const visiblePad = 24;
+  const inPaddedView = (x, y) =>
+    x >= cam.x - visiblePad && x <= cam.x + W + visiblePad &&
+    y >= cam.y - visiblePad && y <= cam.y + H + visiblePad;
+
+  for (let attempt = 0; attempt < 18; attempt++) {
+    const side = Math.floor(Math.random() * 4);
+    let x, y;
+    if (side === 0) { // top
+      x = rand(cam.x - offscreenPad, cam.x + W + offscreenPad);
+      y = cam.y - offscreenPad;
+    } else if (side === 1) { // right
+      x = cam.x + W + offscreenPad;
+      y = rand(cam.y - offscreenPad, cam.y + H + offscreenPad);
+    } else if (side === 2) { // bottom
+      x = rand(cam.x - offscreenPad, cam.x + W + offscreenPad);
+      y = cam.y + H + offscreenPad;
+    } else { // left
+      x = cam.x - offscreenPad;
+      y = rand(cam.y - offscreenPad, cam.y + H + offscreenPad);
+    }
+    x = clamp(x, margin, world.w - margin);
+    y = clamp(y, margin, world.h - margin);
+    if (!inPaddedView(x, y) && Math.hypot(x - p.x, y - p.y) >= safeR) return { x, y };
+  }
+
+  const camR = Math.hypot(W, H) * 0.5 + 140;
+  const ang = Math.random() * Math.PI * 2;
+  return {
+    x: clamp(p.x + Math.cos(ang) * camR, margin, world.w - margin),
+    y: clamp(p.y + Math.sin(ang) * camR, margin, world.h - margin),
+  };
+}
+
 function spawnArenaEnemy() {
   const world = Game.world;
   const p = Game.player;
   if (!world || !p) return;
-  // Spawn at a point on a circle outside the visible camera radius so enemies
-  // come from offscreen, then clamp to world bounds.
-  const camR = Math.hypot(W, H) * 0.5 + 80;
-  const ang = Math.random() * Math.PI * 2;
-  let sx = p.x + Math.cos(ang) * camR;
-  let sy = p.y + Math.sin(ang) * camR;
-  sx = clamp(sx, 32, world.w - 32);
-  sy = clamp(sy, 32, world.h - 32);
+  // Prefer spawn points just beyond the camera edge so enemies enter from
+  // readable directions instead of popping in after world-bound clamping.
+  const sp = arenaSpawnPoint();
+  const sx = sp.x;
+  const sy = sp.y;
   const diff = 1 + Game.arenaKills * 0.015;
 
   // Phase 3 — pick enemy type. Heavier types unlock as kills accumulate.
@@ -18506,6 +18562,23 @@ function renderArena() {
       const idlePulse = 0.6 + 0.4 * Math.sin(m.t * 4);
       const armedPulse = 0.5 + 0.5 * Math.sin(m.t * 28);
       const pulse = m.armed ? armedPulse : idlePulse;
+      // proximity / blast-radius telegraphs so mine behavior is readable
+      // before detonation.
+      ctx.save();
+      ctx.globalAlpha = m.armed ? 0.22 : 0.12;
+      ctx.strokeStyle = m.armed ? '#ff4040' : '#ff8a3d';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, ARENA_MINE_ARM_RANGE, 0, Math.PI * 2);
+      ctx.stroke();
+      if (m.armed) {
+        ctx.globalAlpha = 0.34 + pulse * 0.18;
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, ARENA_MINE_BLAST_RADIUS, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
       // outer warning ring
       ctx.save();
       ctx.globalAlpha = m.armed ? 0.55 : 0.25;
@@ -18592,6 +18665,7 @@ function renderArena() {
     drawHUD();
     drawPowerupStrip();
     drawComboMeter();
+    drawArenaBossBar();
     // Phase 6 — arena combo display
     if (Game.mode === 'arena') drawArenaCombo();
     drawArenaMinimap();
@@ -18599,6 +18673,37 @@ function renderArena() {
   if (Game.state === 'playing' && Game.paused) drawPause();
   if (Game.state === 'loading') drawLoadingOverlay();
   if (Game.state === 'dying')   drawDeathOverlay();
+}
+
+function drawArenaBossBar() {
+  if (Game.mode !== 'arena' || !Game.enemies || !Game.enemies.length) return;
+  const boss = Game.enemies.find(e => e.arenaBoss);
+  if (!boss) return;
+  const hudH = W < 500 ? 48 : 56;
+  const bbW = Math.min(300, W * 0.58);
+  const bbH = 12;
+  const bbX = (W - bbW) / 2;
+  const bbY = hudH + 8;
+  const pct = clamp((boss.hp || 0) / Math.max(1, boss.maxHp || 1), 0, 1);
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 8);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.68)';
+  ctx.fillRect(bbX - 4, bbY - 4, bbW + 8, bbH + 20);
+  ctx.fillStyle = '#1a0707';
+  ctx.fillRect(bbX, bbY, bbW, bbH);
+  ctx.fillStyle = `rgba(255,64,64,${0.18 + pulse * 0.16})`;
+  ctx.fillRect(bbX - 3, bbY - 3, bbW + 6, bbH + 6);
+  ctx.fillStyle = '#ff4040';
+  ctx.fillRect(bbX, bbY, bbW * pct, bbH);
+  ctx.strokeStyle = '#ffb36a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bbX, bbY, bbW, bbH);
+  ctx.fillStyle = '#ffb36a';
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('ARENA BOSS', W / 2, bbY + bbH + 4);
+  ctx.restore();
 }
 
 // Compact minimap showing the world, player, and enemies. Drawn in the
@@ -18669,10 +18774,17 @@ function drawArenaMinimap() {
   ctx.strokeRect(x0 + 0.5, y0 + 0.5, size - 1, size - 1);
   const sx = size / world.w;
   const sy = size / world.h;
+  // current camera viewport for orientation in the large arena.
+  if (Game.camera) {
+    ctx.strokeStyle = 'rgba(122,240,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 + Game.camera.x * sx, y0 + Game.camera.y * sy, W * sx, H * sy);
+  }
   // enemies
-  ctx.fillStyle = '#ff6a4a';
   for (const e of Game.enemies) {
-    ctx.fillRect(x0 + e.x * sx - 1.5, y0 + e.y * sy - 1.5, 3, 3);
+    ctx.fillStyle = e.arenaBoss ? '#ff4040' : (e.kind === 'drone' ? '#ff9fff' : '#ff6a4a');
+    const dot = e.arenaBoss ? 5 : 3;
+    ctx.fillRect(x0 + e.x * sx - dot/2, y0 + e.y * sy - dot/2, dot, dot);
   }
   // pickups on minimap
   ctx.fillStyle = '#f5d76e';
