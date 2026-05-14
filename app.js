@@ -4579,6 +4579,7 @@ const Game = {
   camera: null,
   arenaSpawnT: 0,
   arenaKills: 0,
+  arenaPickupT: 0,
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -4927,6 +4928,7 @@ function startRun(mode, level) {
     Game.camera = null;
     Game.arenaSpawnT = 0;
     Game.arenaKills = 0;
+    Game.arenaPickupT = 0;
   }
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
   // seed parallax peaks across the horizon
@@ -4979,6 +4981,7 @@ function beginPlaying() {
     Game.player.facing = -Math.PI / 2;
     Game.arenaSpawnT = 1.2;
     Game.arenaKills = 0;
+    Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -8896,6 +8899,14 @@ function storyPulseWave(t, rate = STORY_RING_PULSE_RATE) {
   return 0.5 + 0.5 * Math.sin((t || 0) * rate);
 }
 
+// Phase 3 helper: when rendering inside the arena camera, attach
+// topDown + forcedRot so enemy vehicles get the same pseudo-3D
+// presentation as the player chassis.
+function arenaEnemyTopDownOpts(e) {
+  if (Game.mode !== 'arena' || e.arenaAng === undefined) return {};
+  return { topDown: true, forcedRot: e.arenaAng + Math.PI / 2 };
+}
+
 function drawEnemy(e) {
   const anim = enemyAnimState(e);
   if (e.kind === 'bike')   { drawBike(e);   return; }
@@ -8908,7 +8919,7 @@ function drawEnemy(e) {
     color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
     base: { maxHp: e.maxHp || 2, maxV: Math.abs(e.vy || 120) * 4 },
   };
-  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, {
+  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
@@ -8916,7 +8927,7 @@ function drawEnemy(e) {
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = 'rgba(20,8,8,0.75)';
@@ -8982,7 +8993,7 @@ function drawBike(e) {
     color: { body:'#5b1111', hood:'#3a0b0b', cab:'#1a0909', windshield:'#ff6464', glow:'#ff5050' },
     base: { maxHp: e.maxHp || 1, maxV: Math.abs(e.vy || 60) * 6 },
   };
-  drawVehicle(e.x, e.y, rv, e.vx || 0, Math.max(22, e.w + 8), Math.max(34, e.h + 6), {
+  drawVehicle(e.x, e.y, rv, e.vx || 0, Math.max(22, e.w + 8), Math.max(34, e.h + 6), Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
@@ -8990,7 +9001,7 @@ function drawBike(e) {
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = '#1a0f08';
@@ -9035,14 +9046,14 @@ function drawMortar(e) {
     color: { body:'#563116', hood:'#3e2512', cab:'#23150a', windshield:'#ffb36a', glow:'#ff9c4a' },
     base: { maxHp: e.maxHp || 3, maxV: 100 },
   };
-  drawVehicle(e.x, e.y, rv, 0, Math.max(30, e.w + 8), Math.max(34, e.h + 10), {
+  drawVehicle(e.x, e.y, rv, 0, Math.max(30, e.w + 8), Math.max(34, e.h + 10), Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = '#22140b';
@@ -9146,6 +9157,11 @@ function drawZombie(e) {
 function drawDrone(e) {
   ctx.save();
   ctx.translate(e.x, e.y);
+  // In arena mode, rotate the whole drone to face its movement direction
+  // (same convention as player: arenaAng points right, art points up).
+  if (Game.mode === 'arena' && e.arenaAng !== undefined) {
+    ctx.rotate(e.arenaAng + Math.PI / 2);
+  }
   const tilt = clamp(e.vx / 160, -1, 1) * 0.3 + Math.sin((Game.t || 0) * 8 + e.x * 0.03) * 0.04;
   ctx.rotate(tilt);
   const pulse = 0.6 + 0.4 * Math.sin((Game.t || 0) * 9);
@@ -9193,14 +9209,14 @@ function drawTank(e) {
     color: { body:'#384016', hood:'#252c12', cab:'#1a2010', windshield:'#9bd66d', glow:'#d2ff6f' },
     base: { maxHp: e.maxHp || 6, maxV: Math.abs(e.vy || 60) * 4 },
   };
-  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, {
+  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   if (e.fireT < 0.4) {
@@ -17651,6 +17667,12 @@ const ARENA_BULLET_SPEED    = 820;
 const ARENA_ENEMY_SPAWN_MIN = 0.55;
 const ARENA_ENEMY_SPAWN_MAX = 1.4;
 const ARENA_ENEMY_MAX_LIVE  = 14;
+const ARENA_PICKUP_INTERVAL_MIN = 2.8;
+const ARENA_PICKUP_INTERVAL_MAX = 5.5;
+const ARENA_PICKUP_MAX_LIVE = 8;
+const ARENA_DROP_CHANCE_SCRAP   = 0.55;
+const ARENA_DROP_CHANCE_POWERUP = 0.12;
+const ARENA_DROP_CHANCE_REPAIR  = 0.18;
 
 function arenaCameraTargetX() {
   const p = Game.player;
@@ -17849,6 +17871,7 @@ function updateArena(dt) {
           emit(e.x, e.y, 18, { color:'#ff8a3d', speed:280, life:0.55, size:4, spread: Math.PI * 2 });
           shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', 60);
           applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+          arenaEnemyDrop(e.x, e.y);
           Game.arenaKills += 1;
           Game.enemies.splice(i, 1);
           break;
@@ -17867,6 +17890,52 @@ function updateArena(dt) {
       e.vx = nx * e.arenaMaxV * 0.6;
       e.vy = ny * e.arenaMaxV * 0.6;
       Game.shake = Math.max(Game.shake, 0.5);
+    }
+  }
+
+  // ---- Phase 3: arena pickup spawning ----
+  if (Game.arenaPickupT === undefined) Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
+  Game.arenaPickupT -= dt;
+  if (Game.arenaPickupT <= 0) {
+    spawnArenaPickup();
+    Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
+  }
+
+  // ---- Phase 3: arena pickup update & collection ----
+  for (let i = Game.pickups.length - 1; i >= 0; i--) {
+    const pk = Game.pickups[i];
+    pk.t += dt;
+    // no vertical scroll in arena — pickups stay put
+    // magnet pull toward player
+    const dxPk = p.x - pk.x, dyPk = p.y - pk.y;
+    const distPk = Math.hypot(dxPk, dyPk);
+    const magnetR = 90 + (isPowerupActive('magnet') ? 120 : 0);
+    if (distPk < magnetR && distPk > 1) {
+      const pull = 280 * dt / distPk;
+      pk.x += dxPk * pull;
+      pk.y += dyPk * pull;
+    }
+    if (aabb(pk, p)) {
+      if (pk.kind === 'scrap') {
+        const x2 = isPowerupActive('x2') ? 2 : 1;
+        const salvageMul = isPowerupActive('salvage') ? 1.5 : 1;
+        const score = Math.round(75 * x2 * Game.pickupScoreMul * salvageMul);
+        Game.score += score;
+        emit(pk.x, pk.y, 12, { color:'#f5d76e', speed:220, life:0.5, size:3, spread: Math.PI * 2 });
+        addPopup((x2 > 1 ? 'x2 ' : '') + '+' + score, pk.x, pk.y - 12, '#f5d76e', 13);
+        SFX.scrap();
+        Haptics.scrap();
+      } else if (pk.kind === 'repair') {
+        Game.health = Math.min(Game.maxHealth, Game.health + Game.maxHealth * 0.3);
+        emit(pk.x, pk.y, 14, { color:'#7af07a', speed:220, life:0.5, size:3, spread: Math.PI * 2 });
+        addPopup('+HULL', pk.x, pk.y - 12, '#7af07a', 13);
+        SFX.pickup();
+        Haptics.pickup();
+      } else if (pk.kind === 'powerup') {
+        activatePowerup(pk.power, pk);
+        Haptics.pickup();
+      }
+      Game.pickups.splice(i, 1);
     }
   }
 
@@ -17945,14 +18014,33 @@ function spawnArenaEnemy() {
   sx = clamp(sx, 32, world.w - 32);
   sy = clamp(sy, 32, world.h - 32);
   const diff = 1 + Game.arenaKills * 0.015;
+
+  // Phase 3 — pick enemy type. Heavier types unlock as kills accumulate.
+  const kills = Game.arenaKills || 0;
+  const roll = Math.random();
+  let kind, w, h, hp, contact, maxV, accel, turnR;
+  if (kills >= 25 && roll < 0.10) {
+    kind = 'tank';  w = 42; h = 56; hp = Math.ceil(10 * diff);
+    contact = 24; maxV = 140 + Math.min(80, kills * 1.5); accel = 320; turnR = 1.4;
+  } else if (kills >= 15 && roll < 0.22) {
+    kind = 'mortar'; w = 34; h = 44; hp = Math.ceil(6 * diff);
+    contact = 18; maxV = 160 + Math.min(100, kills * 2); accel = 360; turnR = 1.8;
+  } else if (kills >= 8 && roll < 0.38) {
+    kind = 'drone';  w = 26; h = 30; hp = Math.ceil(2 * diff);
+    contact = 10; maxV = 260 + Math.min(200, kills * 3); accel = 600; turnR = 3.2;
+  } else {
+    kind = 'bike';   w = 28; h = 40; hp = Math.ceil(3 * diff);
+    contact = 14; maxV = 200 + Math.min(180, kills * 3); accel = 480; turnR = 2.4;
+  }
+
   Game.enemies.push({
-    kind: 'bike',
+    kind,
     x: sx, y: sy,
-    w: 28, h: 40,
+    w, h,
     vx: 0, vy: 0,
-    hp: Math.ceil(3 * diff),
-    contact: 14,
-    fireT: 999,             // arena bikes don't shoot (phase 1)
+    hp, maxHp: hp,
+    contact,
+    fireT: 999,             // arena enemies don't shoot (phase 3 — future)
     spawnAnimT: 0.35,
     hitAnimT: 0,
     storyAnimT: 0,
@@ -17960,10 +18048,42 @@ function spawnArenaEnemy() {
     baseX: sx, wave: 0, waveSpeed: 0, waveAmp: 0,
     // arena AI fields
     arenaAng: Math.atan2(p.y - sy, p.x - sx),
-    arenaMaxV: 200 + Math.min(180, Game.arenaKills * 3),
-    arenaAccel: 480,
-    arenaTurn: 2.4,
+    arenaMaxV: maxV,
+    arenaAccel: accel,
+    arenaTurn: turnR,
   });
+}
+
+// Phase 3 — periodically place pickups at random world positions.
+function spawnArenaPickup() {
+  const world = Game.world;
+  const p = Game.player;
+  if (!world || !p) return;
+  if (Game.pickups.length >= ARENA_PICKUP_MAX_LIVE) return;
+  // random position inside the world (with margin so pickups aren't at edges)
+  const margin = 80;
+  const px = rand(margin, world.w - margin);
+  const py = rand(margin, world.h - margin);
+  const r = Math.random();
+  let kind, power;
+  if (r < 0.12) { kind = 'powerup'; power = rollPowerup(); }
+  else if (r < 0.30) { kind = 'repair'; }
+  else { kind = 'scrap'; }
+  const pk = { kind, x: px, y: py, w: kind === 'powerup' ? 26 : 22, h: kind === 'powerup' ? 26 : 22, t: 0 };
+  if (power) pk.power = power;
+  Game.pickups.push(pk);
+}
+
+// Phase 3 — drop scrap/powerup at enemy death position in arena.
+function arenaEnemyDrop(ex, ey) {
+  const r = Math.random();
+  if (r < ARENA_DROP_CHANCE_POWERUP) {
+    Game.pickups.push({ kind: 'powerup', power: rollPowerup(), x: ex, y: ey, w: 26, h: 26, t: 0 });
+  } else if (r < ARENA_DROP_CHANCE_POWERUP + ARENA_DROP_CHANCE_REPAIR) {
+    Game.pickups.push({ kind: 'repair', x: ex, y: ey, w: 22, h: 22, t: 0 });
+  } else if (r < ARENA_DROP_CHANCE_POWERUP + ARENA_DROP_CHANCE_REPAIR + ARENA_DROP_CHANCE_SCRAP) {
+    Game.pickups.push({ kind: 'scrap', x: ex, y: ey, w: 22, h: 22, t: 0 });
+  }
 }
 
 function renderArena() {
