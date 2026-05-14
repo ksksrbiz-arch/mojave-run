@@ -817,6 +817,13 @@ const MODES = [
   { id: 'extraction',  name: 'EXTRACTION',      desc: 'Escort a convoy through zombie and raider waves. Keep the rig alive until the evac marker.' },
   { id: 'custom',      name: 'CUSTOM RUN',      desc: 'Play a share-code level from the in-browser editor.' },
   { id: 'versus',      name: 'VERSUS',          desc: 'Authoritative 1v1 — server-simulated shared road. First to top score or last driver standing wins.' },
+  // === Phase 1 — true 2.5D top-down arena ===
+  // Free up/down/left/right movement in a bounded world. Camera follows the
+  // player with a velocity-based look-ahead. Homing enemies hunt across the
+  // arena. All other modes keep the legacy forward-scroll pipeline; arena
+  // is an isolated branch so replays, multiplayer, and existing tuning
+  // remain untouched.
+  { id: 'arena',       name: 'ARENA 2.5D',      desc: 'NEW — Top-down free roam. Drive in all 4 directions across an open wasteland. Hunt down homing raiders. Endless survival.' },
 ];
 
 // Zombie Wasteland enemy definitions. Base mode remains untouched; these are used only by mode === 'zombie'.
@@ -2408,6 +2415,10 @@ const Profile = {
         if (!('lastLoginDate' in p)) { p.lastLoginDate = null; dirty = true; }
         if (typeof p.loginStreak !== 'number') { p.loginStreak = 0; dirty = true; }
         if (!Array.isArray(p.milestonesClaimed)) { p.milestonesClaimed = []; dirty = true; }
+        // Phase 5 — arena best wave tracking
+        if (typeof p.bestArenaWave !== 'number') { p.bestArenaWave = 0; dirty = true; }
+        // Batch v3 — arena leaderboard (top runs)
+        if (!Array.isArray(p.arenaLeaderboard)) { p.arenaLeaderboard = []; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2495,6 +2506,8 @@ const Profile = {
       lastLoginDate: null,         // ISO date string (YYYY-MM-DD) of last login for streak tracking
       loginStreak: 0,              // consecutive daily login count
       milestonesClaimed: [],       // run-count milestones already rewarded (e.g. [10, 25, 50])
+      bestArenaWave: 0,            // Phase 5: highest arena wave reached
+      arenaLeaderboard: [],        // Batch v3: top runs [{wave,score,kills,when}]
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -2681,6 +2694,22 @@ const Profile = {
       p.gauntletCleared.sort((a,b)=>a-b);
     }
     if (result.mode === 'ironthrone' && result.score > (p.bestIronThrone || 0)) p.bestIronThrone = result.score;
+    // Phase 5 — arena best wave
+    if (result.mode === 'arena' && (result.arenaWave || 0) > (p.bestArenaWave || 0)) p.bestArenaWave = result.arenaWave;
+    // Batch v3 — arena leaderboard insert (top ARENA_LEADERBOARD_MAX rows by score)
+    if (result.mode === 'arena') {
+      if (!Array.isArray(p.arenaLeaderboard)) p.arenaLeaderboard = [];
+      p.arenaLeaderboard.push({
+        wave:  result.arenaWave  || 0,
+        score: result.score      || 0,
+        kills: result.arenaKills || 0,
+        when:  Date.now(),
+      });
+      p.arenaLeaderboard.sort((a, b) => (b.score || 0) - (a.score || 0));
+      if (p.arenaLeaderboard.length > ARENA_LEADERBOARD_MAX) {
+        p.arenaLeaderboard.length = ARENA_LEADERBOARD_MAX;
+      }
+    }
     if (result.mode === 'ironthrone' && result.victory && result.ironThroneStage) {
       if (!p.ironThroneCleared) p.ironThroneCleared = [];
       if (!p.ironThroneCleared.includes(result.ironThroneStage)) {
@@ -3241,13 +3270,21 @@ function resize() {
   cvs.width  = Math.floor(W * DPR);
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   rebuildGradients();
   if (Game.player) {
-    const py = Game.player.y || (H - 110);
-    const { x0, x1 } = roadBounds(py);
-    Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
-    Game.player.y = H - 110;
+    if (Game.mode === 'arena' && Game.world) {
+      // Arena player is free-roaming; clamp to world bounds (resize-safe).
+      const pw = Game.player.w, ph = Game.player.h;
+      Game.player.x = clamp(Game.player.x, pw/2, Game.world.w - pw/2);
+      Game.player.y = clamp(Game.player.y, ph/2, Game.world.h - ph/2);
+    } else {
+      const py = Game.player.y || (H - 110);
+      const { x0, x1 } = roadBounds(py);
+      Game.player.x = clamp(Game.player.x, x0 + Game.player.w/2 + 4, x1 - Game.player.w/2 - 4);
+      Game.player.y = H - 110;
+    }
   }
 }
 function queueResize(delay = 0) {
@@ -4082,11 +4119,15 @@ function updatePowerups(dt) {
 
 // Magnet: pull pickups toward player when active
 function applyMagnet(dt) {
-  const hasMagnetEffect = isPowerupActive('magnet') || !!(Game.branchState && Game.branchState.pickupRadius > 0);
+  const inArena = (Game.mode === 'arena');
+  const arenaMul = inArena ? (Game.arenaMagnetMul || 1) : 1;
+  const hasMagnetEffect = isPowerupActive('magnet') || !!(Game.branchState && Game.branchState.pickupRadius > 0)
+    || (inArena && arenaMul > 1); // arena magnet perk extends pull even without powerup
   if (!hasMagnetEffect) return;
   const p = Game.player;
   const bonus = (Game.branchState && Game.branchState.pickupRadius) || 0;
-  const range = (240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0)) * (Game.magnetRangeMul || 1);
+  const baseR = (isPowerupActive('magnet') || (Game.branchState && Game.branchState.pickupRadius > 0)) ? 240 : 120;
+  const range = (baseR + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0)) * (Game.magnetRangeMul || 1) * arenaMul;
   for (const pk of Game.pickups) {
     const dx = p.x - pk.x, dy = p.y - pk.y;
     const d = Math.hypot(dx, dy);
@@ -4214,7 +4255,7 @@ function rollPowerup() {
 // INPUT
 // ============================================================
 const keys = Object.create(null);
-const input = { left:false, right:false, fire:false, touchTargetX: null, touchFire: false, special:false };
+const input = { left:false, right:false, up:false, down:false, fire:false, touchTargetX: null, touchTargetY: null, touchFire: false, special:false };
 const activePointers = new Map();
 const SCREEN_ESCAPE_ACTION = {
   profiles: 'back-title',
@@ -4247,10 +4288,41 @@ window.addEventListener('keydown', e => {
   const key = e.key.toLowerCase();
   keys[key] = true;
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(key)) e.preventDefault();
-  if (key === 'arrowleft' || key === 'arrowright' || key === 'a' || key === 'd' || key === ' ' || key === 'z' || key === 'x') {
+  if (key === 'arrowleft' || key === 'arrowright' || key === 'arrowup' || key === 'arrowdown' ||
+      key === 'a' || key === 'd' || key === 'w' || key === 's' || key === ' ' || key === 'z' || key === 'x') {
     setControlHintMode('keyboard');
   }
   ensureAudio();
+  // Batch v4 — first-run tutorial dismisses on any key press while it's up.
+  if (Game.mode === 'arena' && (Game.arenaTutorialT || 0) > 0) {
+    arenaMarkTutorialSeen();
+    // don't return — let the key still trigger gameplay actions
+  }
+  if (Game.mode === 'arena' && Game.state === 'playing' && Game.arenaPerkChoosing) {
+    if (key === '1' || key === '2' || key === '3') {
+      const idx = parseInt(key, 10) - 1;
+      if (idx >= 0 && idx < (Game.arenaPerkChoices || []).length) {
+        arenaApplyPerkByIndex(idx);
+        e.preventDefault();
+        return;
+      }
+    }
+    if (key === 'arrowleft' || key === 'a') {
+      Game.arenaPerkSelectedIdx = Math.max(0, (Game.arenaPerkSelectedIdx || 0) - 1);
+      e.preventDefault();
+      return;
+    }
+    if (key === 'arrowright' || key === 'd') {
+      Game.arenaPerkSelectedIdx = Math.min((Game.arenaPerkChoices.length - 1), (Game.arenaPerkSelectedIdx || 0) + 1);
+      e.preventDefault();
+      return;
+    }
+    if (key === 'enter' || key === ' ') {
+      arenaApplyPerkByIndex(Game.arenaPerkSelectedIdx || 0);
+      e.preventDefault();
+      return;
+    }
+  }
   // Versus end: any key returns to menu
   if (Game.state === 'versus-end' && Versus.endData) {
     Versus.active = false;
@@ -4262,6 +4334,19 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (key === 'f') toggleFullscreen();
+  // Batch v4 — arena E key: deploy turret. L on death overlay: toggle leaderboard.
+  // H on title: toggle hardcore arena mode.
+  if (key === 'e' && Game.mode === 'arena' && Game.state === 'playing' && !Game.paused && !Game.arenaPerkChoosing) {
+    arenaTryDeployTurret();
+  }
+  if (key === 'l' && Game.state === 'dying' && Game.mode === 'arena') {
+    Game.arenaShowLeaderboard = !Game.arenaShowLeaderboard;
+  }
+  if (key === 'h' && Game.state === 'title' && Game.mode === 'arena') {
+    Game.arenaHardcore = !Game.arenaHardcore;
+    addPopup(Game.arenaHardcore ? 'HARDCORE: ON' : 'HARDCORE: OFF', W / 2, H * 0.85, Game.arenaHardcore ? '#ff4040' : '#d2ff6f', 14);
+    SFX.click && SFX.click();
+  }
   if (key === 'p' && Game.state === 'playing') togglePause();
   if (key === 'escape') {
     const modal = document.getElementById('modal');
@@ -4315,12 +4400,12 @@ function onPointerDown(e) {
   setControlHintMode('touch');
   e.preventDefault();
   try { cvs.setPointerCapture(e.pointerId); } catch(_){}
-  activePointers.set(e.pointerId, e.clientX);
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   syncTouchInput();
 }
 function onPointerMove(e) {
   if (activePointers.has(e.pointerId)) {
-    activePointers.set(e.pointerId, e.clientX);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     syncTouchInput();
   }
 }
@@ -4331,10 +4416,13 @@ function onPointerEnd(e) {
 function syncTouchInput() {
   if (activePointers.size === 0) {
     input.touchTargetX = null;
+    input.touchTargetY = null;
     input.touchFire = false;
   } else {
-    const xs = [...activePointers.values()];
-    input.touchTargetX = xs[xs.length - 1];
+    const pts = [...activePointers.values()];
+    const p = pts[pts.length - 1];
+    input.touchTargetX = p.x;
+    input.touchTargetY = p.y;
     input.touchFire = true;
   }
 }
@@ -4375,6 +4463,9 @@ cvs.addEventListener('pointerleave', onPointerEnd);
 function readKbd() {
   input.left  = !!(keys['arrowleft']  || keys['a']);
   input.right = !!(keys['arrowright'] || keys['d']);
+  // up/down used only by 2.5D arena mode; harmless to read in every mode
+  input.up    = !!(keys['arrowup']    || keys['w']);
+  input.down  = !!(keys['arrowdown']  || keys['s']);
   input.fire  = !!(keys[' '] || keys['z'] || keys['x']) || input.touchFire;
   GamepadInput.poll();
 }
@@ -4551,6 +4642,77 @@ const Game = {
   spinout: null,   // { t, dur, rot, rotV, kickDir } | null
   // power-up banked from a previous run to activate at game start
   _pendingBankedPowerup: null,
+  // === Phase 1 — 2.5D top-down arena state (only used when mode === 'arena') ===
+  // world: rectangular bounds in world coordinates (0..w × 0..h).
+  // camera: top-left world coord shown at the top-left of the screen.
+  // arenaSpawnT: countdown until next homing-enemy spawn.
+  // arenaKills: kill count this run (used for arena difficulty scaling).
+  // All four are null/0 outside arena mode.
+  world: null,
+  camera: null,
+  arenaSpawnT: 0,
+  arenaKills: 0,
+  arenaPickupT: 0,
+  // Phase 4 — wave system
+  arenaWave: 0,
+  arenaWaveRemain: 0,   // enemies still to spawn this wave
+  arenaWaveBreak: 0,    // countdown between waves
+  arenaDecor: [],       // scattered ground decor objects
+  // Phase 5 — boss waves & mines
+  arenaBossPending: false,  // set when next spawn should be the boss
+  arenaMines: [],           // active proximity mines in world
+  arenaMineT: 0,            // countdown to next mine spawn
+  // Phase 6 — combo system
+  arenaCombo: 0,            // current combo counter (kills without taking damage)
+  arenaWaveTookDamage: false, // flag: player took damage this wave
+  // === Phase 1-5 refinement pass v2 ===
+  // Dash ability (Phase 1): short burst of speed + i-frames in facing dir.
+  arenaDashCD: 0,           // seconds until dash is ready again
+  arenaDashT: 0,            // seconds of active dash motion remaining
+  arenaInvulnT: 0,          // seconds of invulnerability remaining
+  arenaDashGhosts: [],      // {x,y,facing,life} for dash motion trail
+  // Skid trails (Phase 2): tire scuff marks rendered in world space.
+  arenaSkidTrails: [],
+  // Spawn markers (Phase 3/4): pre-spawn telegraphs so spawns are readable.
+  arenaSpawnMarkers: [],    // {x,y,t,life,kind,...spawnFields}
+  // Barrels (Phase 4): explosive props that chain-react.
+  arenaBarrels: [],
+  // Boss state (Phase 5): track phase transition + charge windups.
+  arenaBossPhase: 0,        // 0 = normal, 1 = enraged (<50% HP)
+  arenaBossChargeT: 0,      // seconds remaining on boss charged-shot windup
+  // Wave intro overlay (Phase 4): banner countdown after a new wave starts.
+  arenaWaveIntroT: 0,
+  arenaWaveIntroLabel: '',
+  arenaWaveIntroAccent: '#ffd86b',
+  // === Batch v3 — content & atmosphere state ===
+  arenaTarPatches: [],         // [{x,y,r,t}] terrain hazards (filled at run start)
+  arenaSupplies: [],           // [{x,y,phase:'descend'|'landed',t,life,heading}]
+  arenaSupplyT: 0,             // seconds until next supply-drop attempt
+  arenaDayT: 0,                // 0..ARENA_DAY_LENGTH cycle clock
+  arenaLightningT: 0,          // seconds until next lightning strike (when night)
+  arenaLightningFlash: 0,      // remaining flash overlay time
+  arenaPerks: [],              // applied perk ids this run (allows duplicates)
+  arenaPerkChoosing: false,    // true while perk-select modal is up between waves
+  arenaPerkChoices: [],        // [perkDef, perkDef, perkDef] current options
+  arenaPerkSelectedIdx: 0,     // keyboard cursor for perk-select
+  // Stat-mod buckets applied by perks (consumed by gameplay code).
+  arenaFireRateMul: 1,         // <1 means faster firing
+  arenaDmgMul: 1,              // bullet damage multiplier
+  arenaCritChance: 0,          // 0..1 chance any bullet deals 2x damage
+  arenaSpeedMul: 1,            // top-speed multiplier
+  arenaMagnetMul: 1,           // magnet radius multiplier
+  arenaDashCDMul: 1,           // dash cooldown multiplier (<1 = faster)
+  arenaDmgTakenMul: 1,         // multiplier on incoming damage (<1 = tougher)
+  // === Batch v4 — turrets, hardcore, elites, tutorial ===
+  arenaTurrets: [],            // [{x,y,life,fireT,kills,placedAt}] deployable auto-turrets
+  arenaTurretCdT: 0,           // cooldown before another turret can be placed
+  arenaHardcore: false,        // when true, disables perk-select but doubles scrap
+  arenaTutorialT: 0,           // remaining seconds for tutorial overlay (first arena run)
+  arenaTutorialSeen: false,    // whether the tutorial has been shown this session
+  arenaShowLeaderboard: false, // true when leaderboard overlay is up on death screen
+  arenaDangerPulseT: 0,        // increasing while HP critical (drives edge pulse)
+  arenaHeartbeatT: 0,          // throttle for low-HP heartbeat SFX
+  arenaEliteMinionsPending: 0, // queued elite minions to spawn alongside the next boss
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -4850,6 +5012,9 @@ function startRun(mode, level) {
   if (Game.weaponSpecState && Game.weaponSpecState.drones) spawnDroneSwarm(Game.weaponSpecState.drones);
   Game.player = {
     x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
+    // Arena-mode fields. Harmless in legacy modes (they never read vy/facing).
+    vy: 0,
+    facing: -Math.PI / 2,  // -π/2 = up. Matches the legacy "vehicle points up" art.
   };
   if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
     SplitScreen.attachRun(profile, v, Game.vehicleStats);
@@ -4889,6 +5054,22 @@ function startRun(mode, level) {
   Game.dustDevils.length = 0;
   Game.lightning = 0;
   Game.muzzleT = 0;
+  // Reset arena state outside arena mode so a previous arena run's world
+  // doesn't linger; arena mode itself re-initializes these in beginPlaying.
+  if (mode !== 'arena') {
+    Game.world = null;
+    Game.camera = null;
+    Game.arenaSpawnT = 0;
+    Game.arenaKills = 0;
+    Game.arenaPickupT = 0;
+    Game.arenaWave = 0;
+    Game.arenaWaveRemain = 0;
+    Game.arenaWaveBreak = 0;
+    Game.arenaDecor = [];
+    Game.arenaBossPending = false;
+    Game.arenaMines = [];
+    Game.arenaMineT = 0;
+  }
   for (let i = 0; i < 30; i++) Game.decor.push(makeDecor(Math.random() * H));
   // seed parallax peaks across the horizon
   for (let i = 0; i < 6; i++) {
@@ -4924,10 +5105,148 @@ function startRun(mode, level) {
 
 function beginPlaying() {
   Game.state = 'playing';
-  const spawnBounds = roadBounds(H - 110);
-  Game.player.x = (spawnBounds.x0 + spawnBounds.x1) * 0.5;
-  Game.player.y = H - 110;
-  Game.player.vx = 0;
+  if (Game.mode === 'arena') {
+    // ---- 2.5D top-down arena ----
+    // World is a bounded rectangle the player can freely roam. The camera
+    // is centered on the player and offset by velocity look-ahead so the
+    // direction-of-travel always has room on screen.
+    const worldW = 4096;
+    const worldH = 4096;
+    Game.world = { w: worldW, h: worldH };
+    Game.camera = { x: worldW / 2 - W / 2, y: worldH / 2 - H / 2 };
+    Game.player.x = worldW / 2;
+    Game.player.y = worldH / 2;
+    Game.player.vx = 0;
+    Game.player.vy = 0;
+    Game.player.facing = -Math.PI / 2;
+    Game.arenaSpawnT = 1.2;
+    Game.arenaKills = 0;
+    Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
+    // Phase 4 — wave system init
+    Game.arenaWave = 1;
+    Game.arenaWaveRemain = ARENA_WAVE_BASE_COUNT;
+    Game.arenaWaveBreak = 0;
+    // Phase 4 — scatter ground decor
+    Game.arenaDecor = [];
+    for (let di = 0; di < ARENA_DECOR_COUNT; di++) {
+      Game.arenaDecor.push({
+        x: rand(60, worldW - 60),
+        y: rand(60, worldH - 60),
+        kind: Math.random() < 0.35 ? 'ruin' : 'rock',
+        size: rand(8, 22),
+        rot: rand(0, Math.PI * 2),
+        shade: rand(0.6, 1.0),
+      });
+    }
+    // Phase 5 — boss/mine state
+    Game.arenaBossPending = false;
+    Game.arenaMines = [];
+    Game.arenaMineT = rand(ARENA_MINE_INTERVAL_MIN, ARENA_MINE_INTERVAL_MAX);
+    // Phase 6 — combo system
+    Game.arenaCombo = 0;
+    Game.arenaWaveTookDamage = false;
+    // === Refinement pass v2 — Phase 1-5 init ===
+    Game.arenaDashCD = 0;
+    Game.arenaDashT = 0;
+    Game.arenaInvulnT = 0;
+    Game.arenaDashGhosts = [];
+    Game.arenaSkidTrails = [];
+    Game.arenaSpawnMarkers = [];
+    Game.arenaBarrels = [];
+    for (let bi = 0; bi < ARENA_BARREL_COUNT; bi++) {
+      // place barrels away from spawn so the first wave isn't a minefield
+      let bx = 0, by = 0, attempts = 0;
+      do {
+        bx = rand(120, worldW - 120);
+        by = rand(120, worldH - 120);
+        attempts += 1;
+      } while (Math.hypot(bx - Game.player.x, by - Game.player.y) < 360 && attempts < 8);
+      Game.arenaBarrels.push({
+        x: bx, y: by, w: 22, h: 22,
+        hp: ARENA_BARREL_HP,
+        t: rand(0, Math.PI * 2),       // idle bob phase
+        burnT: 0,                       // burning fuse before explosion
+        dead: false,
+      });
+    }
+    Game.arenaBossPhase = 0;
+    Game.arenaBossChargeT = 0;
+    Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
+    Game.arenaWaveIntroLabel = 'WAVE 1';
+    Game.arenaWaveIntroAccent = '#ffd86b';
+    // === Batch v3 init ===
+    // Tar patches: scattered terrain hazards. Placed away from spawn so the
+    // first second of play doesn't trap the player.
+    Game.arenaTarPatches = [];
+    for (let ti = 0; ti < ARENA_TAR_COUNT; ti++) {
+      let tx = 0, ty = 0, tr = 0, attempts = 0;
+      do {
+        tx = rand(160, worldW - 160);
+        ty = rand(160, worldH - 160);
+        tr = rand(ARENA_TAR_RADIUS_MIN, ARENA_TAR_RADIUS_MAX);
+        attempts += 1;
+      } while (Math.hypot(tx - Game.player.x, ty - Game.player.y) < 480 && attempts < 8);
+      Game.arenaTarPatches.push({
+        x: tx, y: ty, r: tr,
+        t: rand(0, Math.PI * 2),    // shimmer phase
+        // Pre-baked irregular silhouette so each patch renders with a unique
+        // blob outline without re-randomizing every frame.
+        blobs: Array.from({ length: 7 }, (_, k) => ({
+          ang: (k / 7) * Math.PI * 2 + rand(-0.25, 0.25),
+          dr:  rand(0.78, 1.18),
+        })),
+      });
+    }
+    Game.arenaSupplies = [];
+    Game.arenaSupplyT = ARENA_SUPPLY_INTERVAL * 0.6; // first drop a bit sooner
+    Game.arenaDayT = ARENA_DAY_LENGTH * 0.15;        // start late-morning
+    Game.arenaLightningT = rand(ARENA_LIGHTNING_MIN_GAP, ARENA_LIGHTNING_MAX_GAP);
+    Game.arenaLightningFlash = 0;
+    Game.arenaPerks = [];
+    Game.arenaPerkChoosing = false;
+    Game.arenaPerkChoices = [];
+    Game.arenaPerkSelectedIdx = 0;
+    Game.arenaFireRateMul   = 1;
+    Game.arenaDmgMul        = 1;
+    Game.arenaCritChance    = 0;
+    Game.arenaSpeedMul      = 1;
+    Game.arenaMagnetMul     = 1;
+    Game.arenaDashCDMul     = 1;
+    Game.arenaDmgTakenMul   = 1;
+    // === Batch v4 init ===
+    Game.arenaTurrets = [];
+    Game.arenaTurretCdT = 0;
+    Game.arenaDangerPulseT = 0;
+    Game.arenaHeartbeatT = 0;
+    Game.arenaEliteMinionsPending = 0;
+    Game.arenaShowLeaderboard = false;
+    // Hardcore is opt-in per run: it is set on the title screen before
+    // beginPlaying. We do *not* reset it here so the title-screen toggle
+    // sticks until the player explicitly changes it. We do, however, force
+    // the perk picker off in hardcore so wave clears just transition.
+    if (Game.arenaHardcore) {
+      Game.arenaPerkChoosing = false;
+    }
+    // Tutorial: show only on the very first arena run for this profile.
+    try {
+      const seen = safeLocalStorage.getItem(ARENA_TUTORIAL_STORE_KEY) === '1';
+      Game.arenaTutorialSeen = seen;
+      Game.arenaTutorialT = seen ? 0 : ARENA_TUTORIAL_DURATION;
+    } catch (e) {
+      Game.arenaTutorialSeen = true;
+      Game.arenaTutorialT = 0;
+    }
+    // Speed is unused for scrolling in arena, but other systems still read
+    // it (e.g. cinematic, audio mix). Keep it modest so they don't think
+    // we're in a chase.
+    Game.speed = 0;
+    Game.targetSpeed = 0;
+  } else {
+    const spawnBounds = roadBounds(H - 110);
+    Game.player.x = (spawnBounds.x0 + spawnBounds.x1) * 0.5;
+    Game.player.y = H - 110;
+    Game.player.vx = 0;
+  }
   pauseBtn.classList.add('show');
   const horn = COSMETIC_BY_ID[Game.cosmetics && Game.cosmetics.equippedHorn];
   if (horn && horn.sfx && SFX[horn.sfx]) {
@@ -4938,6 +5257,7 @@ function beginPlaying() {
     announceEvent('WASTELAND RUN: ' + Game.runMutators.map(m => m.name).join(' · '), '#ff80ff');
   }
   if (Game.mode === 'extraction') announceEvent('ESCORT CONVOY TO EXTRACTION', '#7af07a');
+  if (Game.mode === 'arena') announceEvent('WAVE 1 — ARENA 2.5D', '#7af0ff');
   // Spawn boss right away in boss levels
   if (Game.mode === 'ironthrone') {
     spawnIronThroneBoss(Game.ironThroneStage);
@@ -5023,6 +5343,18 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   if (Game.mode === 'daily') bonusScrap += reason === 'victory' ? DAILY_VICTORY_SCRAP_BONUS : DAILY_SCRAP_BONUS;
   Game.scrapBonusEarned = bonusScrap;
   Game.scrapEarned = baseScrap + bonus + bonusScrap;
+  // Phase 6 — arena combo multiplier on scrap earned
+  if (Game.mode === 'arena' && Game.arenaCombo > 0) {
+    const comboMul = ARENA_COMBO_MULTIPLIER_MIN + (ARENA_COMBO_MULTIPLIER_MAX - ARENA_COMBO_MULTIPLIER_MIN) * 
+                     Math.min(Game.arenaCombo / (ARENA_COMBO_KILLS_PER_TIER * 5), 1);
+    Game.scrapEarned = Math.floor(Game.scrapEarned * comboMul);
+    Game._arenaComboMultiplier = comboMul.toFixed(2) + 'x';
+    // Batch v4 — hardcore doubles scrap as compensation for losing perks.
+    if (Game.arenaHardcore) {
+      Game.scrapEarned = Math.floor(Game.scrapEarned * ARENA_HARDCORE_SCRAP_MUL);
+      Game._arenaComboMultiplier += ' · HC';
+    }
+  }
   // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
   if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
   Profile.earn(Game.scrapEarned);
@@ -5049,6 +5381,10 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     died: reason === 'death',
     // iron throne: stage number that was just cleared (incremented on boss death)
     ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
+    // Phase 5 — arena wave reached (max wave number entered)
+    arenaWave: Game.mode === 'arena' ? (Game.arenaWave || 0) : 0,
+    // Batch v3 — arena kills for leaderboard rows
+    arenaKills: Game.mode === 'arena' ? (Game.arenaKills || 0) : 0,
   };
   Profile.recordRunResult(runResult);
   // === STRATEGY v3.1: detect new personal best after recording ===
@@ -5859,6 +6195,13 @@ function fireBossPattern(b) {
 function updateLoading(dt) {
   // animate background scrolling and player driving onto the road
   Game.loadingT += dt;
+  // Arena mode: skip the road drive-in entirely. Just hold for a short beat
+  // so the loading overlay reads, then drop straight into play. Arena has
+  // no road and the player should not be off-screen during entry.
+  if (Game.mode === 'arena') {
+    if (Game.loadingT >= Math.min(0.6, Game.loadingDur)) beginPlaying();
+    return;
+  }
   Game.bgScroll += Game.speed * dt * 0.3;
   Game.laneOffset = (Game.laneOffset + Game.speed * dt) % 60;
   // ease the player from offscreen up to position
@@ -6094,8 +6437,17 @@ function update(dt) {
   Game.t += dt;
   if (Game.state !== 'playing' || Game.paused) return;
   if (Game.hintTime > 0) Game.hintTime -= dt;
-  if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.hitFlash > 0) Game.hitFlash -= dt;
+  // === Phase 1 — 2.5D top-down arena ===
+  // Runs an entirely separate simulation: free movement, world camera,
+  // homing enemies, world-space bullets. The legacy scroll pipeline below
+  // is bypassed so its assumptions (player.y == H-110, road bounds, scroll
+  // speed, scroll-based distance scoring, etc.) don't fight the new mode.
+  if (Game.mode === 'arena') {
+    updateArena(dt);
+    return;
+  }
+  if (Game.bossWarning > 0) Game.bossWarning -= dt;
   if (Game.storyBeatT > 0) Game.storyBeatT -= dt;
   if (Game.eventBanner) {
     Game.eventBanner.t -= dt;
@@ -6996,6 +7348,11 @@ function fireGuns() {
 
 function damagePlayer(amt) {
   if (Game.state !== 'playing') return;
+  // Phase 1 refinement — arena dash i-frames absorb damage entirely.
+  if (Game.mode === 'arena' && (Game.arenaInvulnT || 0) > 0) {
+    shockwave(Game.player.x, Game.player.y, 'rgba(255,220,140,0.45)', 60);
+    return;
+  }
   if (isPowerupActive('shield')) {
     // shield absorbs hit fully — visual cue only
     shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 70);
@@ -7004,6 +7361,8 @@ function damagePlayer(amt) {
   amt *= Game.damageTakenMul;
   // Armor plating absorbs half of incoming damage
   if (isPowerupActive('armor')) amt *= 0.5;
+  // Batch v3 — arena perk: flat reduction in damage taken.
+  if (Game.mode === 'arena' && Game.arenaDmgTakenMul) amt *= Game.arenaDmgTakenMul;
   if (Settings.damageNumbers) addPopup('-' + Math.ceil(amt), Game.player.x, Game.player.y - 36, '#ff8a8a', 12);
   Game.health -= amt;
   Game.flash = 1;
@@ -7013,6 +7372,11 @@ function damagePlayer(amt) {
   Game.bountyStreak = 0;
   Game.bountyMul = 1;
   Game.comboT = 0;
+  // Phase 6 — reset arena combo on damage
+  if (Game.mode === 'arena') {
+    Game.arenaCombo = 0;
+    Game.arenaWaveTookDamage = true;
+  }
   if (Game.health <= 0) {
     Game.health = 0;
     triggerPlayerDeath();
@@ -8350,17 +8714,57 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
 
   ctx.save();
   ctx.translate(x, y + suspensionBob - spawnN * 6);
+
+  // === Phase 2 — 2.5D presentation ===
+  // When the caller is rendering the chassis as part of a top-down camera
+  // (arena mode), the radial body-shadow must stay anchored to the ground
+  // rather than spinning with the chassis. We draw it here, in the
+  // unrotated parent frame, offset along a fixed sun direction so the
+  // shadow always sits "below-right" of the vehicle. For legacy
+  // (forward-scrolling) renders we keep the original behavior — shadow
+  // drawn inside the rotation block (it doesn't look wrong there because
+  // the chassis is always head-up).
+  const topDown = !!opts.topDown;
+  if (topDown) {
+    ctx.save();
+    // Sun direction: light from upper-left → shadow falls to lower-right.
+    const sunDx = 3, sunDy = 6;
+    ctx.translate(sunDx, sunDy);
+    const shTop = ctx.createRadialGradient(0, h * 0.05, 2, 0, h * 0.08, w * 0.92);
+    shTop.addColorStop(0, 'rgba(0,0,0,0.5)');
+    shTop.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shTop;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.08, w * 0.68, h * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.rotate(tilt);
+  // Slight flatten makes the chassis read as viewed from above; a tiny
+  // bank-driven shear simulates the body tipping into a turn without
+  // breaking the wheels' alignment.
+  if (topDown) {
+    const bank = clamp(opts.bank || 0, -1, 1);
+    ctx.scale(1, 0.94);
+    if (bank !== 0) {
+      // Vertical shear proportional to signed bank. Magnitude capped at
+      // ~0.12 so wheel positions still read correctly.
+      ctx.transform(1, bank * 0.12, 0, 1 - Math.abs(bank) * 0.05, 0, 0);
+    }
+  }
   ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03);
   ctx.globalAlpha *= ghostAlpha * cloakFade;
 
-  const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.92);
-  sh.addColorStop(0, 'rgba(0,0,0,0.54)');
-  sh.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sh;
-  ctx.beginPath();
-  ctx.ellipse(0, h * 0.18, w * 0.66, h * 0.36, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (!topDown) {
+    const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.92);
+    sh.addColorStop(0, 'rgba(0,0,0,0.54)');
+    sh.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.18, w * 0.66, h * 0.36, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (visual.silhouette === 'tank' || vehicle.shape === 'tank') {
     const tw = w + 12, th = h;
@@ -8427,48 +8831,85 @@ function drawObstacle(o) {
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h);
+    pathRoundRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h, 4);
+    ctx.fill();
     ctx.fillStyle = '#5a4030';
-    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    pathRoundRect(-o.w/2, -o.h/2, o.w, o.h, 4);
+    ctx.fill();
     ctx.fillStyle = '#3a2818';
-    ctx.fillRect(-o.w/2 + 4, -o.h/2 + 14, o.w - 8, 22);
+    pathRoundRect(-o.w/2 + 4, -o.h/2 + 14, o.w - 8, 22, 3);
+    ctx.fill();
     ctx.fillStyle = '#1a0f08';
-    ctx.fillRect(-o.w/2 + 6, -o.h/2 + 4, 8, 6);
-    ctx.fillRect( o.w/2 - 14, -o.h/2 + 24, 10, 8);
+    pathRoundRect(-o.w/2 + 6, -o.h/2 + 4, 8, 6, 1.5);
+    ctx.fill();
+    pathRoundRect( o.w/2 - 14, -o.h/2 + 24, 10, 8, 1.5);
+    ctx.fill();
     ctx.fillStyle = '#0d0805';
-    ctx.fillRect(-o.w/2 - 3, -o.h/2 + 10, 5, 12);
-    ctx.fillRect( o.w/2 - 2, -o.h/2 + 10, 5, 12);
+    pathRoundRect(-o.w/2 - 3, -o.h/2 + 10, 5, 12, 1.5);
+    ctx.fill();
+    pathRoundRect( o.w/2 - 2, -o.h/2 + 10, 5, 12, 1.5);
+    ctx.fill();
     // rust streak
     ctx.fillStyle = 'rgba(180,80,40,0.3)';
     ctx.fillRect(-o.w/2 + 2, -o.h/2 + 14, 2, 18);
     // bright hazard banding (visual clarity) — yellow/black diagonal stripes
     // along the bumper so the silhouette reads instantly against the road
     ctx.fillStyle = '#ffd000';
-    ctx.fillRect(-o.w/2,  o.h/2 - 6, o.w, 4);
+    pathRoundRect(-o.w/2,  o.h/2 - 6, o.w, 4, 2);
+    ctx.fill();
     ctx.fillStyle = '#1a0f08';
     for (let sx = -o.w/2; sx < o.w/2; sx += 8) {
       ctx.fillRect(sx + 2, o.h/2 - 6, 4, 4);
     }
     ctx.restore();
   } else if (o.kind === 'barrel') {
+    // Top-down hazardous barrel — circular footprint with a banded shell so
+    // it reads as a cylinder rather than a sharp-edged box. Matches the
+    // smooth-rendering pass applied across the rest of the game world.
+    ctx.save();
+    // ground shadow (offset ellipse)
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(o.x - o.w/2 + 2, o.y - o.h/2 + 3, o.w, o.h);
-    // body
-    const bg = ctx.createLinearGradient(o.x - o.w/2, 0, o.x + o.w/2, 0);
-    bg.addColorStop(0, '#8a3a18'); bg.addColorStop(0.5, '#c25a2b'); bg.addColorStop(1, '#8a3a18');
+    ctx.beginPath();
+    ctx.ellipse(o.x + 2, o.y + 3, o.w * 0.52, o.h * 0.52, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body — radial gradient for a cylindrical sheen
+    const bg = ctx.createRadialGradient(o.x - o.w * 0.18, o.y - o.h * 0.12, 1, o.x, o.y, o.w * 0.6);
+    bg.addColorStop(0, '#d97244');
+    bg.addColorStop(0.55, '#c25a2b');
+    bg.addColorStop(1, '#6f2a13');
     ctx.fillStyle = bg;
-    ctx.fillRect(o.x - o.w/2, o.y - o.h/2, o.w, o.h);
-    ctx.fillStyle = '#1a0f08';
-    ctx.fillRect(o.x - o.w/2, o.y - 4, o.w, 2);
-    ctx.fillRect(o.x - o.w/2, o.y + 4, o.w, 2);
-    // bright yellow hazard band around middle for visibility against road
-    ctx.fillStyle = '#ffd000';
-    ctx.fillRect(o.x - o.w/2, o.y - 2, o.w, 6);
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, o.w * 0.5, o.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // dark rim banding (top + bottom of the cylinder)
+    ctx.strokeStyle = 'rgba(20,12,8,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y - o.h * 0.22, o.w * 0.46, o.h * 0.16, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y + o.h * 0.22, o.w * 0.46, o.h * 0.16, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // bright yellow hazard band — drawn as a thick stroked ring so it
+    // wraps around the cylinder shape instead of looking like a flat stripe
+    ctx.strokeStyle = '#ffd000';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, o.w * 0.46, o.h * 0.12, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // outline for crisper silhouette against road
+    ctx.strokeStyle = 'rgba(20,12,8,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, o.w * 0.5, o.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // hazard '!' glyph
     ctx.fillStyle = '#1a0f08';
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', o.x, o.y);
+    ctx.restore();
   } else if (o.kind === 'civilian') {
     // Bright, friendly-looking sedan — clearly NOT an enemy
     const col = o.color || '#4aa8e8';
@@ -8740,6 +9181,102 @@ function storyPulseWave(t, rate = STORY_RING_PULSE_RATE) {
   return 0.5 + 0.5 * Math.sin((t || 0) * rate);
 }
 
+// Phase 3 helper: when rendering inside the arena camera, attach
+// topDown + forcedRot so enemy vehicles get the same pseudo-3D
+// presentation as the player chassis.
+function arenaEnemyTopDownOpts(e) {
+  if (Game.mode !== 'arena' || e.arenaAng === undefined) return {};
+  return { topDown: true, forcedRot: e.arenaAng + Math.PI / 2 };
+}
+
+// Batch v3 — sniper render: chassis with a long fixed barrel oriented along
+// the aim angle (or facing while not aiming). Includes a small scope glint.
+function drawArenaSniper(e) {
+  const ang = (e._sniperFiring && e._sniperAimAng !== undefined) ? e._sniperAimAng
+            : (e.arenaAng !== undefined ? e.arenaAng : 0);
+  ctx.save();
+  // shadow
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(e.x + 3, e.y + 6, e.w * 0.55, e.h * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  // chassis
+  ctx.translate(e.x, e.y);
+  ctx.rotate(ang);
+  ctx.fillStyle = e.hitAnimT > 0 ? '#ff8080' : '#5a1818';
+  ctx.fillRect(-e.h * 0.5, -e.w * 0.5, e.h, e.w);
+  ctx.strokeStyle = '#240808';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-e.h * 0.5 + 0.5, -e.w * 0.5 + 0.5, e.h - 1, e.w - 1);
+  // turret base
+  ctx.fillStyle = '#3a1010';
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.min(e.w, e.h) * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  // long barrel
+  ctx.fillStyle = '#1a0808';
+  ctx.fillRect(0, -2, e.h * 0.85, 4);
+  // scope glint
+  ctx.fillStyle = e._sniperFiring ? '#ff4040' : '#ffd86b';
+  ctx.beginPath();
+  ctx.arc(-2, 0, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // HP bar
+  if (e.hp < (e.maxHp || ARENA_SNIPER_HP)) {
+    const w = Math.max(20, e.w);
+    const k = clamp(e.hp / Math.max(1, e.maxHp || ARENA_SNIPER_HP), 0, 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(e.x - w / 2, e.y - e.h / 2 - 8, w, 3);
+    ctx.fillStyle = k > 0.5 ? '#d2ff6f' : k > 0.25 ? '#ffd86b' : '#ff4040';
+    ctx.fillRect(e.x - w / 2, e.y - e.h / 2 - 8, w * k, 3);
+  }
+}
+
+// Batch v3 — kamikaze render: angular spiked chassis with a pulsing red core.
+function drawArenaKamikaze(e) {
+  const ang = e.arenaAng !== undefined ? e.arenaAng : 0;
+  const p = Game.player;
+  const close = p ? clamp(1 - Math.hypot(e.x - p.x, e.y - p.y) / ARENA_KAMI_PRIME_RADIUS, 0, 1) : 0;
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * (4 + close * 12));
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(e.x + 2, e.y + 4, e.w * 0.55, e.h * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.translate(e.x, e.y);
+  ctx.rotate(ang);
+  // spikes
+  ctx.fillStyle = '#3a1a08';
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const r1 = Math.min(e.w, e.h) * 0.55;
+    const r2 = r1 + 5;
+    const aw = 0.32;
+    ctx.moveTo(Math.cos(a - aw) * r1, Math.sin(a - aw) * r1);
+    ctx.lineTo(Math.cos(a) * r2,       Math.sin(a) * r2);
+    ctx.lineTo(Math.cos(a + aw) * r1, Math.sin(a + aw) * r1);
+    ctx.closePath();
+  }
+  ctx.fill();
+  // chassis
+  ctx.fillStyle = e.hitAnimT > 0 ? '#fff3b0' : '#a04a18';
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.min(e.w, e.h) * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+  // pulsing core
+  ctx.fillStyle = `rgba(${255}, ${80 - close * 60 | 0}, ${30 + pulse * 40 | 0}, 1)`;
+  ctx.beginPath();
+  ctx.arc(0, 0, 4 + pulse * 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawEnemy(e) {
   const anim = enemyAnimState(e);
   if (e.kind === 'bike')   { drawBike(e);   return; }
@@ -8747,12 +9284,17 @@ function drawEnemy(e) {
   if (e.kind === 'zombie') { drawZombie(e); return; }
   if (e.kind === 'drone')  { drawDrone(e);  return; }
   if (e.kind === 'tank')   { drawTank(e);   return; }
+  // Batch v3 — sniper: compact gunner silhouette with a long barrel that
+  // points along the aim angle. Chassis tinted darker red for readability.
+  if (e.kind === 'sniper') { drawArenaSniper(e); return; }
+  // Batch v3 — kamikaze: small spiked chassis tinted yellow-orange.
+  if (e.kind === 'kamikaze') { drawArenaKamikaze(e); return; }
   const rv = {
     id: 'enemy_buggy',
     color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
     base: { maxHp: e.maxHp || 2, maxV: Math.abs(e.vy || 120) * 4 },
   };
-  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, {
+  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
@@ -8760,7 +9302,7 @@ function drawEnemy(e) {
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = 'rgba(20,8,8,0.75)';
@@ -8826,7 +9368,7 @@ function drawBike(e) {
     color: { body:'#5b1111', hood:'#3a0b0b', cab:'#1a0909', windshield:'#ff6464', glow:'#ff5050' },
     base: { maxHp: e.maxHp || 1, maxV: Math.abs(e.vy || 60) * 6 },
   };
-  drawVehicle(e.x, e.y, rv, e.vx || 0, Math.max(22, e.w + 8), Math.max(34, e.h + 6), {
+  drawVehicle(e.x, e.y, rv, e.vx || 0, Math.max(22, e.w + 8), Math.max(34, e.h + 6), Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
@@ -8834,7 +9376,7 @@ function drawBike(e) {
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = '#1a0f08';
@@ -8879,14 +9421,14 @@ function drawMortar(e) {
     color: { body:'#563116', hood:'#3e2512', cab:'#23150a', windshield:'#ffb36a', glow:'#ff9c4a' },
     base: { maxHp: e.maxHp || 3, maxV: 100 },
   };
-  drawVehicle(e.x, e.y, rv, 0, Math.max(30, e.w + 8), Math.max(34, e.h + 10), {
+  drawVehicle(e.x, e.y, rv, 0, Math.max(30, e.w + 8), Math.max(34, e.h + 10), Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   ctx.fillStyle = '#22140b';
@@ -8990,6 +9532,11 @@ function drawZombie(e) {
 function drawDrone(e) {
   ctx.save();
   ctx.translate(e.x, e.y);
+  // In arena mode, rotate the whole drone to face its movement direction
+  // (same convention as player: arenaAng points right, art points up).
+  if (Game.mode === 'arena' && e.arenaAng !== undefined) {
+    ctx.rotate(e.arenaAng + Math.PI / 2);
+  }
   const tilt = clamp(e.vx / 160, -1, 1) * 0.3 + Math.sin((Game.t || 0) * 8 + e.x * 0.03) * 0.04;
   ctx.rotate(tilt);
   const pulse = 0.6 + 0.4 * Math.sin((Game.t || 0) * 9);
@@ -9037,14 +9584,14 @@ function drawTank(e) {
     color: { body:'#384016', hood:'#252c12', cab:'#1a2010', windshield:'#9bd66d', glow:'#d2ff6f' },
     base: { maxHp: e.maxHp || 6, maxV: Math.abs(e.vy || 60) * 4 },
   };
-  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, {
+  drawVehicle(e.x, e.y, rv, e.vx || 0, e.w + 2, e.h + 2, Object.assign({
     noCosmetic: true,
     damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
     enemy: e,
     spawnAnimT: e.spawnAnimT || 0,
     hitAnimT: e.hitAnimT || 0,
     storyAnimT: e.storyAnimT || 0,
-  });
+  }, arenaEnemyTopDownOpts(e)));
   ctx.save();
   ctx.translate(e.x, e.y);
   if (e.fireT < 0.4) {
@@ -9380,12 +9927,16 @@ function drawBullets() {
   for (const b of Game.bullets) {
     if (b.big) {
       ctx.fillStyle = 'rgba(255,180,80,0.3)';
-      ctx.fillRect(b.x - b.w, b.y - b.h, b.w * 2, b.h * 2);
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y, b.w * 1.1, b.h * 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.fillStyle = b.homing ? '#ffaaff' : '#fff3b0';
-    ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+    pathRoundRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, b.w / 2);
+    ctx.fill();
     ctx.fillStyle = b.homing ? 'rgba(255,100,255,0.5)' : 'rgba(255,180,80,0.5)';
-    ctx.fillRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4);
+    pathRoundRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4, 1);
+    ctx.fill();
   }
   // Enemy bullets — same additive halo trick, tinted red so threats remain
   // easy to read against the player's warm tracers.
@@ -9435,7 +9986,8 @@ function drawBullets() {
       ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI*2); ctx.fill();
     }
     ctx.fillStyle = '#ff5050';
-    ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+    pathRoundRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, b.w / 2);
+    ctx.fill();
     ctx.fillStyle = 'rgba(255,80,80,0.5)';
     ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill();
   }
@@ -9490,10 +10042,12 @@ function drawSkidMarks() {
     const rot = Math.atan2(s.vy || 1, (s.vx || 0.001)) * SKID_ROTATION_FACTOR;
     ctx.rotate(rot);
     ctx.fillStyle = `rgba(20,12,6,${a})`;
-    ctx.fillRect(-s.w/2, -s.h/2, s.w, s.h);
+    pathRoundRect(-s.w/2, -s.h/2, s.w, s.h, 1);
+    ctx.fill();
     if (detail >= 1) {
       ctx.fillStyle = `rgba(60,46,30,${a * 0.5})`;
-      ctx.fillRect(-s.w/2 + 1, -s.h/2 + 0.5, s.w - 2, Math.max(0.8, s.h * 0.4));
+      pathRoundRect(-s.w/2 + 1, -s.h/2 + 0.5, s.w - 2, Math.max(0.8, s.h * 0.4), 0.5);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -9657,7 +10211,8 @@ function drawPlayerNitroTrail() {
     // cheaper than re-drawing the full vehicle each frame and reads as a
     // motion smear instead of a duplicate sprite.
     ctx.fillStyle = 'rgba(122,240,255,0.75)';
-    ctx.fillRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h);
+    pathRoundRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h, 4);
+    ctx.fill();
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -9741,6 +10296,8 @@ function drawHUD() {
     subL = 'CONVOY HP ' + Math.max(0, Math.round((Game.extraction || {}).hp || 0));
   } else if (Game.mode === 'custom' && Game.levelData) {
     subL = 'CUSTOM · ' + Game.levelData.name;
+  } else if (Game.mode === 'arena') {
+    subL = 'WAVE ' + (Game.arenaWave || 1) + ' · KILLS ' + (Game.arenaKills || 0);
   }
   ctx.fillText(subL, 50, hudH * 0.72);
 
@@ -9780,6 +10337,13 @@ function drawHUD() {
   } else if (Game.mode === 'custom' && Game.levelData) {
     const L = Game.levelData;
     mainR = L.obj === 'score' ? `${Math.floor(Game.score)}/${L.target}` : L.obj === 'kills' ? `${Game.kills}/${L.target}` : L.obj === 'distance' ? `${Math.floor(Game.distance)}/${L.target}M` : Math.max(0, L.target - Game.t).toFixed(1) + 'S';
+  } else if (Game.mode === 'arena') {
+    if ((Game.arenaWaveBreak || 0) > 0) {
+      mainR = 'NEXT ' + Math.max(0, Game.arenaWaveBreak).toFixed(1) + 'S';
+    } else {
+      const remain = Math.max(0, (Game.arenaWaveRemain || 0) + (Game.enemies ? Game.enemies.length : 0));
+      mainR = 'LEFT ' + remain;
+    }
   }
   ctx.fillText(mainR, W - 50, hudH * 0.32);
   ctx.fillStyle = 'rgba(245,215,110,0.7)';
@@ -10371,6 +10935,27 @@ function drawDeathOverlay() {
     ctx.globalAlpha = ta * 0.8;
     ctx.fillStyle = '#ffb36a';
     ctx.fillText('RUN ENDED', W/2, H * 0.53);
+    // Phase 5 — arena death: show wave reached and personal best
+    if (Game.mode === 'arena') {
+      const wv = Game.arenaWave || 0;
+      const pr = Profile.active && Profile.active();
+      const best = pr ? (pr.bestArenaWave || 0) : 0;
+      ctx.fillStyle = '#ffd86b';
+      ctx.fillText('WAVE ' + wv + ' · BEST ' + Math.max(best, wv), W/2, H * 0.59);
+      // Phase 6 — show combo & multiplier earned
+      const comboNum = Game.arenaCombo || 0;
+      const comboMul = Game._arenaComboMultiplier || '1.00x';
+      ctx.font = `bold ${W < 500 ? 11 : 13}px "Courier New", monospace`;
+      ctx.fillStyle = comboNum > 20 ? '#ff6f9f' : comboNum > 10 ? '#ffb36a' : '#d2ff6f';
+      ctx.fillText('COMBO ' + comboNum + ' · ' + comboMul + ' SCRAP', W/2, H * 0.65);
+      // Batch v3 — perks acquired this run
+      const perkCount = (Game.arenaPerks || []).length;
+      if (perkCount > 0) {
+        ctx.font = `bold ${W < 500 ? 10 : 12}px "Courier New", monospace`;
+        ctx.fillStyle = '#c0b0ff';
+        ctx.fillText('PERKS x' + perkCount + ' · KILLS ' + (Game.arenaKills || 0), W/2, H * 0.70);
+      }
+    }
   }
   ctx.restore();
   // Debris particles on early death frames
@@ -10392,6 +10977,9 @@ function drawDeathOverlay() {
 function render() {
   if (Game.state === 'playing' || Game.state === 'gameover' || Game.state === 'victory'
       || Game.state === 'loading' || Game.state === 'dying' || Game.state === 'replay') {
+    // Arena rendering uses a camera-translated world layer. The HUD/post-FX
+    // remain in screen space (drawn inside renderArena after restoring).
+    if (Game.mode === 'arena' && Game.world) { renderArena(); return; }
     ctx.save();
     if (Game.shake > 0 && !Game.paused) {
       // Smoothed shake: interpolate offsets toward a randomly-picked target so
@@ -10567,7 +11155,8 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
   const cw = canvas.width = size.w;
   const ch = canvas.height = size.h;
   const bay = opts.bay !== undefined ? !!opts.bay : (size.w > 80 || size.h > 90);
-  c.imageSmoothingEnabled = false;
+  c.imageSmoothingEnabled = true;
+  c.imageSmoothingQuality = 'high';
   c.clearRect(0, 0, cw, ch);
   const pt = (Game.animT || Game.t || 0) + (v.id.length * 0.31);
   const prev = ctx;
@@ -15295,6 +15884,10 @@ const Cinematic = (function () {
       const out = document.createElement('canvas');
       out.width = w; out.height = h;
       const c = out.getContext('2d');
+      // Match the live game's smooth rendering so the exported poster doesn't
+      // re-introduce pixelated edges when scaled down for sharing.
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = 'high';
       // 1. Base = the current rendered canvas.
       c.drawImage(cvs, 0, 0, w, h);
       // 2. Dramatic dark vignette + gold tint to push poster mood.
@@ -16014,6 +16607,10 @@ function updateExtraction(dt) {
 }
 
 function triggerVehicleAbility() {
+  // === Phase 1 refinement — arena hijacks the vehicle-ability key (Q) ===
+  // In arena mode, Q triggers a directional dash with brief i-frames instead
+  // of the legacy per-vehicle special. Legacy modes are unchanged.
+  if (Game.mode === 'arena') { arenaTryDash(); return; }
   if (!Game.vehicle || !Game.activeAbility || Game.activeAbility.cooldown > 0) return;
   const special = vehicleSpecialAbility(Game.vehicle.id);
   if (!special) return;
@@ -16229,8 +16826,13 @@ const GamepadInput = {
     const gp = Array.from(pads || []).find(Boolean);
     if (!gp || Game.state !== 'playing') return;
     const ax = readGamepadAxis(gp, 0);
+    const ay = readGamepadAxis(gp, 1);
     input.left = input.left || ax < 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT] && gp.buttons[GAMEPAD_BUTTON_DPAD_LEFT].pressed);
     input.right = input.right || ax > 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT] && gp.buttons[GAMEPAD_BUTTON_DPAD_RIGHT].pressed);
+    // Up/down used only by arena mode; reading unconditionally is harmless
+    // because legacy modes never inspect input.up/input.down.
+    input.up = input.up || ay < 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_UP] && gp.buttons[GAMEPAD_BUTTON_DPAD_UP].pressed);
+    input.down = input.down || ay > 0 || (gp.buttons[GAMEPAD_BUTTON_DPAD_DOWN] && gp.buttons[GAMEPAD_BUTTON_DPAD_DOWN].pressed);
     input.fire = input.fire || isGamepadActionPressed(gp, 'fire');
     const specialPressed = isGamepadActionPressed(gp, 'special');
     if (specialPressed && !this._specialHeld) triggerVehicleAbility();
@@ -17124,7 +17726,7 @@ const SplitScreen = (() => {
     for (let i = 0; i < playerCount; i++) {
       _players.push({
         index: i,
-        input: { left: false, right: false, fire: false, touchTargetX: null, touchFire: false, special: false },
+        input: { left: false, right: false, fire: false, touchTargetX: null, touchTargetY: null, touchFire: false, special: false },
         score: 0,
         kills: 0,
         distance: 0,
@@ -17447,6 +18049,3180 @@ boot = function() {
 // ============================================================
 // === END PHASE 2: CONSOLE PLATFORM ===
 // ============================================================
+
+// ============================================================
+// === PHASE 1 — TRUE 2.5D TOP-DOWN ARENA MODE ===
+// Self-contained: only active when Game.mode === 'arena'. Provides:
+//   • 4-directional player movement (WASD / arrows / left stick / dpad)
+//   • velocity-aligned facing so the chassis rotates to face travel
+//   • bounded rectangular world with tiled ground + edge fog
+//   • smoothed camera follow with velocity look-ahead
+//   • homing-bike enemy that steers toward the player in world space
+//   • world-space bullets fired in the direction the vehicle is facing
+//   • all legacy modes untouched — replays/multiplayer/protocols unchanged
+// ============================================================
+
+// Player tuning (independent from legacy stats so arena can be tuned without
+// affecting classic/winding feel).
+const ARENA_PLAYER_DRAG     = 2.8;   // exponential decay per second when no input
+const ARENA_MAX_SPEED_MUL   = 0.85;  // multiplier on vehicleStats.maxV
+const ARENA_ACCEL_MUL       = 1.15;  // multiplier on vehicleStats.accel
+const ARENA_FACING_TURN_RATE = 9.0;  // rad/s — how fast the chassis aligns to velocity
+const ARENA_CAMERA_LERP     = 6.0;   // higher = snappier follow
+const ARENA_CAMERA_LOOKAHEAD = 0.42; // fraction of velocity used as look-ahead
+const ARENA_BULLET_SPEED    = 820;
+const ARENA_ENEMY_SPAWN_MIN = 0.55;
+const ARENA_ENEMY_SPAWN_MAX = 1.4;
+const ARENA_ENEMY_MAX_LIVE  = 14;
+const ARENA_PICKUP_INTERVAL_MIN = 2.8;
+const ARENA_PICKUP_INTERVAL_MAX = 5.5;
+const ARENA_PICKUP_MAX_LIVE = 8;
+const ARENA_DROP_CHANCE_SCRAP   = 0.55;
+const ARENA_DROP_CHANCE_POWERUP = 0.12;
+const ARENA_DROP_CHANCE_REPAIR  = 0.18;
+
+// Phase 4 — wave system & enemy shooting
+const ARENA_WAVE_BREAK_DUR     = 2.5;   // seconds between waves
+const ARENA_WAVE_BASE_COUNT    = 5;     // enemies in wave 1
+const ARENA_WAVE_GROWTH        = 2;     // extra enemies per wave
+const ARENA_WAVE_MAX_ENEMIES   = 24;    // hard cap on concurrent enemies
+const ARENA_ENEMY_FIRE_RANGE   = 380;   // px — enemies only shoot within this
+const ARENA_DRONE_FIRE_RATE    = 1.8;   // seconds between drone shots
+const ARENA_MORTAR_FIRE_RATE   = 3.0;   // seconds between mortar lobs
+const ARENA_TANK_FIRE_RATE     = 2.2;   // seconds between tank shots
+// Enemy bullets are deliberately slower than player bullets (820) so the
+// player has time to react and dodge — this is the primary skill check.
+const ARENA_ENEMY_BULLET_SPEED = 320;
+const ARENA_DECOR_COUNT        = 40;    // scattered rocks/ruins in world
+
+// Phase 5 — boss waves & proximity mines
+const ARENA_BOSS_WAVE_EVERY    = 5;     // every Nth wave is a boss wave
+const ARENA_BOSS_HP_MUL        = 5;     // boss HP relative to base tank
+const ARENA_BOSS_SIZE_MUL      = 1.6;   // boss visual/hitbox scale
+const ARENA_MINE_INTERVAL_MIN  = 6;     // seconds between mine spawns
+const ARENA_MINE_INTERVAL_MAX  = 12;
+const ARENA_MINE_MAX_LIVE      = 5;
+const ARENA_MINE_ARM_RANGE     = 70;    // proximity that arms the mine
+const ARENA_MINE_FUSE          = 0.55;  // seconds from arm to detonation
+const ARENA_MINE_BLAST_RADIUS  = 110;
+const ARENA_MINE_PLAYER_DMG    = 22;
+const ARENA_MINE_ENEMY_DMG     = 6;
+
+// Phase 6 — combo system & multipliers
+const ARENA_COMBO_RESET_ON_DAMAGE = true;  // reset combo if player takes damage
+const ARENA_COMBO_MULTIPLIER_MIN  = 1.0;   // base scrap multiplier (0 combo)
+const ARENA_COMBO_MULTIPLIER_MAX  = 5.0;   // max scrap multiplier (high combo)
+const ARENA_COMBO_KILLS_PER_TIER  = 5;     // kills needed per multiplier tier
+const ARENA_COMBO_WAVE_CLEAR_BONUS = 8;    // combo points for clearing wave with no damage
+const ARENA_COMBO_MAX             = 50;    // hard cap on combo counter
+
+// === Phase 1-5 refinement pass v2 — extra constants ===
+// Phase 1 — dash ability (Q key in arena replaces vehicle special).
+const ARENA_DASH_DIST            = 280;   // distance traveled during dash
+const ARENA_DASH_DUR             = 0.18;  // seconds of dash motion
+const ARENA_DASH_COOLDOWN        = 3.0;   // seconds before dash is ready again
+const ARENA_DASH_INVULN          = 0.30;  // i-frames during dash + brief recovery
+const ARENA_DASH_GHOST_LIFE      = 0.32;  // motion-trail afterimage life
+const ARENA_DASH_GHOST_INTERVAL  = 0.018; // seconds between afterimages
+
+// Phase 2 — tire skid trails when banking hard.
+const ARENA_SKID_BANK_THRESHOLD  = 0.55;  // |bank| above this to lay a trail
+const ARENA_SKID_SPEED_THRESHOLD = 180;   // px/s above this to lay a trail
+const ARENA_SKID_TRAIL_LIFE      = 2.2;   // seconds before the trail fades
+const ARENA_SKID_TRAIL_MAX       = 90;    // hard cap on trail segments
+const ARENA_SKID_INTERVAL        = 0.05;  // seconds between trail segments
+
+// Phase 3/4 — pre-spawn marker telegraphs.
+const ARENA_SPAWN_MARKER_TIME    = 0.85;  // seconds of warning before an enemy spawns
+const ARENA_SPAWN_MARKER_MAX     = 16;    // hard cap on simultaneous markers
+
+// Phase 4 — explosive barrels scattered through the world.
+const ARENA_BARREL_COUNT         = 14;    // number of barrels placed at run start
+const ARENA_BARREL_HP            = 3;     // bullets to ignite a barrel
+const ARENA_BARREL_BLAST_RADIUS  = 130;   // splash radius on detonation
+const ARENA_BARREL_PLAYER_DMG    = 18;    // dmg to player if inside blast
+const ARENA_BARREL_ENEMY_DMG     = 12;    // dmg to each enemy inside blast
+const ARENA_BARREL_BURN_TIME     = 0.65;  // seconds from ignite to explode
+const ARENA_BARREL_CHAIN_DELAY   = 0.18;  // chained barrels ignite slightly later
+
+// Phase 4 — wave intro banner.
+const ARENA_WAVE_INTRO_TIME      = 1.8;   // seconds of intro overlay
+
+// Phase 5 — boss phase + charged shot telegraph.
+const ARENA_BOSS_ENRAGE_PCT      = 0.5;   // HP fraction at which boss enrages
+const ARENA_BOSS_FIRE_RATE_MUL   = 0.55;  // fire-rate multiplier while enraged
+const ARENA_BOSS_CHARGE_TIME     = 0.7;   // seconds to telegraph a charged shot
+const ARENA_BOSS_CHARGE_RATE     = 4.5;   // every Nth boss shot is a charged shot
+const ARENA_BOSS_CHARGE_DMG_MUL  = 2.0;   // damage multiplier on charged shots
+const ARENA_BOSS_CHARGE_SPEED    = 1.6;   // bullet speed multiplier on charged shots
+
+// === Batch v3 — Arena content & atmosphere ===
+// Sniper enemy: stationary high-damage shooter with a laser-sight telegraph.
+const ARENA_SNIPER_HP            = 4;
+const ARENA_SNIPER_FIRE_RATE     = 3.4;   // seconds between shots
+const ARENA_SNIPER_TELEGRAPH     = 0.85;  // seconds the laser sight tracks before firing
+const ARENA_SNIPER_RANGE         = 760;
+const ARENA_SNIPER_BULLET_SPEED  = 760;
+const ARENA_SNIPER_BULLET_DMG    = 20;
+const ARENA_SNIPER_MIN_KILLS     = 12;    // unlocks after this many kills
+const ARENA_SNIPER_ROLL_PCT      = 0.16;
+// Kamikaze enemy: very fast, low-HP rusher that explodes on contact or death.
+const ARENA_KAMI_HP              = 2;
+const ARENA_KAMI_BLAST_RADIUS    = 96;
+const ARENA_KAMI_PLAYER_DMG      = 22;
+const ARENA_KAMI_ENEMY_DMG       = 18;
+const ARENA_KAMI_BLINK_RATE      = 6.5;   // pulses-per-second of the warning blink while close
+const ARENA_KAMI_PRIME_RADIUS    = 180;   // distance from player at which it starts blinking
+const ARENA_KAMI_MIN_KILLS       = 5;
+const ARENA_KAMI_ROLL_PCT        = 0.18;
+// Tar patches: terrain hazards that slow the player while overlapping.
+const ARENA_TAR_COUNT            = 7;
+const ARENA_TAR_RADIUS_MIN       = 70;
+const ARENA_TAR_RADIUS_MAX       = 130;
+const ARENA_TAR_SLOW_MUL         = 0.45;  // player max-velocity multiplier inside tar
+const ARENA_TAR_DRAG_MUL         = 2.4;   // extra drag multiplier inside tar
+// Supply drops: parachuted crates that grant scrap + health on collect.
+const ARENA_SUPPLY_INTERVAL      = 36;    // seconds between drop attempts
+const ARENA_SUPPLY_DESCEND_TIME  = 3.2;   // seconds for the chute to land
+const ARENA_SUPPLY_LIFE_AFTER    = 24;    // seconds the crate persists on the ground
+const ARENA_SUPPLY_SCRAP_REWARD  = 60;    // scrap awarded on pickup
+const ARENA_SUPPLY_HEAL_REWARD   = 25;    // hp restored on pickup
+const ARENA_SUPPLY_MAX_LIVE      = 2;
+// Day/night cycle: a slow global tint with rare lightning flashes during night.
+const ARENA_DAY_LENGTH           = 90;    // seconds per full day-night loop
+const ARENA_NIGHT_TINT_ALPHA     = 0.42;  // peak darkness alpha at midnight
+const ARENA_LIGHTNING_MIN_GAP    = 6.5;   // minimum seconds between lightning strikes during night
+const ARENA_LIGHTNING_MAX_GAP    = 14;
+const ARENA_LIGHTNING_FLASH      = 0.42;  // seconds the flash overlay decays over
+// Inter-wave perks: 3 choices offered between waves (skipped on boss-wave breaks).
+const ARENA_PERK_OPTIONS         = 3;
+const ARENA_PERK_HOLD_MAX        = 12;    // perks accumulated this run (storage cap)
+const ARENA_PERKS = [
+  { id: 'hp_up',       name: '+25 MAX HP',     desc: 'Raise max HP by 25 and heal to full.', color: '#ff6f9f' },
+  { id: 'dmg_up',      name: '+15% DAMAGE',    desc: 'All bullets deal 15% more damage.',    color: '#ffd86b' },
+  { id: 'fire_up',     name: '+20% FIRE RATE', desc: 'Guns fire 20% faster.',                color: '#ff8a3d' },
+  { id: 'speed_up',    name: '+15% TOP SPEED', desc: 'Increase max velocity by 15%.',        color: '#40d8ff' },
+  { id: 'dash_cd',     name: '-35% DASH CD',   desc: 'Dash recharges 35% faster.',           color: '#d2ff6f' },
+  { id: 'magnet',      name: '+50% MAGNET',    desc: 'Pickups travel to you from 50% further.', color: '#c0b0ff' },
+  { id: 'armor',       name: '-12% DMG TAKEN', desc: 'Reduce damage taken by 12%.',          color: '#7aaaff' },
+  { id: 'crit',        name: '+15% CRIT',      desc: 'Adds a 15% chance to crit for 2x dmg.', color: '#ff4040' },
+];
+// Arena leaderboard: top-N rows of {wave, score, kills, when} per profile.
+const ARENA_LEADERBOARD_MAX      = 10;
+
+// === Batch v4 — turrets / hardcore / elites / tutorial constants ===
+// Deployable turret: player places at their position by pressing E.
+const ARENA_TURRET_SCRAP_COST    = 35;     // scrap deducted on placement
+const ARENA_TURRET_LIFE          = 16;     // seconds before it self-destructs
+const ARENA_TURRET_RANGE         = 360;    // targeting/firing radius
+const ARENA_TURRET_FIRE_RATE     = 0.42;   // seconds between shots
+const ARENA_TURRET_BULLET_SPEED  = 780;
+const ARENA_TURRET_DMG           = 9;
+const ARENA_TURRET_HP            = 40;
+const ARENA_TURRET_MAX_LIVE      = 3;      // maximum simultaneous turrets
+const ARENA_TURRET_PLACE_CD      = 1.2;    // seconds between placements
+// Elite minions accompany boss waves: small fast adds with low HP.
+const ARENA_ELITE_MINION_COUNT   = 4;      // queued per boss wave
+const ARENA_ELITE_MINION_HP      = 3;
+const ARENA_ELITE_MINION_DMG     = 12;
+const ARENA_ELITE_MINION_MAXV    = 360;
+// Hardcore mode: no perks, but scrap is doubled.
+const ARENA_HARDCORE_SCRAP_MUL   = 2;
+// Danger pulse: triggers when HP fraction drops below this.
+const ARENA_DANGER_HP_FRAC       = 0.25;
+const ARENA_HEARTBEAT_INTERVAL   = 1.1;    // seconds between heartbeat SFX
+// Tutorial overlay duration on first arena run.
+const ARENA_TUTORIAL_DURATION    = 6.0;
+const ARENA_TUTORIAL_STORE_KEY   = 'mr_arena_tutorial_seen_v1';
+
+function arenaCameraTargetX() {
+  const p = Game.player;
+  return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
+}
+function arenaCameraTargetY() {
+  const p = Game.player;
+  return p.y + p.vy * ARENA_CAMERA_LOOKAHEAD - H * 0.5;
+}
+
+function updateArena(dt) {
+  const p = Game.player;
+  const cam = Game.camera;
+  const world = Game.world;
+  if (!p || !cam || !world) return;
+
+  // ---- power-ups & basic timers (subset that's safe in arena) ----
+  updatePowerups(dt);
+  applyMagnet(dt);
+  Game.shake = Math.max(0, Game.shake - dt * 2.4);
+  Game.flash = Math.max(0, Game.flash - dt * 3);
+  if (Game.muzzleT > 0) Game.muzzleT -= dt;
+
+  // === Phase 1-5 refinement timers ===
+  arenaUpdateDash(dt);
+  arenaUpdateSkidTrails(dt);
+  arenaUpdateSpawnMarkers(dt);
+  arenaUpdateBarrels(dt);
+  arenaUpdateBossPhase();
+  // === Batch v3 timers ===
+  arenaUpdateAtmosphere(dt);
+  arenaUpdateSupplies(dt);
+  arenaUpdateTarPatches(dt);
+  // === Batch v4 timers ===
+  arenaUpdateTurrets(dt);
+  arenaUpdateDangerPulse(dt);
+  if (Game.arenaTutorialT > 0) Game.arenaTutorialT = Math.max(0, Game.arenaTutorialT - dt);
+  if (Game.arenaTurretCdT > 0) Game.arenaTurretCdT = Math.max(0, Game.arenaTurretCdT - dt);
+  if (Game.arenaWaveIntroT > 0) Game.arenaWaveIntroT -= dt;
+  if (Game.arenaBossChargeT > 0) Game.arenaBossChargeT = Math.max(0, Game.arenaBossChargeT - dt);
+
+  readKbd();
+
+  // ---- player movement (4-directional) ----
+  const stats = Game.vehicleStats || { accel: 1100, maxV: 420 };
+  // Batch v3: apply speed perk + tar slow to the effective max velocity.
+  const speedPerkMul = Game.arenaSpeedMul || 1;
+  const tarSlow = arenaPlayerInTar() ? ARENA_TAR_SLOW_MUL : 1;
+  const accel = stats.accel * ARENA_ACCEL_MUL;
+  const maxV  = stats.maxV  * ARENA_MAX_SPEED_MUL * speedPerkMul * tarSlow;
+  let ax = 0, ay = 0;
+  if (input.left)  ax -= 1;
+  if (input.right) ax += 1;
+  if (input.up)    ay -= 1;
+  if (input.down)  ay += 1;
+  // Touch: drag toward the finger in arena world-space. Legacy modes still
+  // only consume touchTargetX, so this adds full 2-axis arena control without
+  // changing classic horizontal steering.
+  if (ax === 0 && input.touchTargetX !== null) {
+    const tx = clamp(input.touchTargetX, 0, W) + cam.x;
+    const dx = tx - p.x;
+    ax = clamp(dx * 0.01, -1, 1);
+  }
+  if (ay === 0 && input.touchTargetY !== null) {
+    const ty = clamp(input.touchTargetY, 0, H) + cam.y;
+    const dy = ty - p.y;
+    ay = clamp(dy * 0.01, -1, 1);
+  }
+  // normalize diagonal so 8-way input doesn't out-accelerate cardinal input
+  const aMag = Math.hypot(ax, ay);
+  if (aMag > 1) { ax /= aMag; ay /= aMag; }
+  // Phase 1 refinement — dash overrides player input/drag so the burst
+  // velocity remains pure for ARENA_DASH_DUR seconds.
+  const dashActive = (Game.arenaDashT || 0) > 0;
+  if (!dashActive) {
+    if (ax !== 0) p.vx += ax * accel * dt;
+    if (ay !== 0) p.vy += ay * accel * dt;
+    // drag on the unforced axes (and gentle drag overall so the car settles)
+    // Batch v3: tar increases drag noticeably, making it sticky.
+    const tarDragMul = arenaPlayerInTar() ? ARENA_TAR_DRAG_MUL : 1;
+    if (ax === 0) p.vx -= p.vx * Math.min(1, ARENA_PLAYER_DRAG * tarDragMul * dt);
+    if (ay === 0) p.vy -= p.vy * Math.min(1, ARENA_PLAYER_DRAG * tarDragMul * dt);
+  }
+  // clamp total speed (dash bypasses this to deliver its full burst)
+  const spd = Math.hypot(p.vx, p.vy);
+  const dashing = (Game.arenaDashT || 0) > 0;
+  if (!dashing && spd > maxV) {
+    const k = maxV / spd;
+    p.vx *= k; p.vy *= k;
+  }
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+  // world bounds — bounce gently off the wall so it reads as solid
+  const halfW = p.w / 2, halfH = p.h / 2;
+  if (p.x < halfW)               { p.x = halfW;               p.vx = Math.abs(p.vx) * 0.35; }
+  if (p.x > world.w - halfW)     { p.x = world.w - halfW;     p.vx = -Math.abs(p.vx) * 0.35; }
+  if (p.y < halfH)               { p.y = halfH;               p.vy = Math.abs(p.vy) * 0.35; }
+  if (p.y > world.h - halfH)     { p.y = world.h - halfH;     p.vy = -Math.abs(p.vy) * 0.35; }
+
+  // ---- facing: smoothly align chassis to velocity vector ----
+  const moveSpeed = Math.hypot(p.vx, p.vy);
+  // Track bank: signed turn rate (rad/s) smoothed into [-1, 1] for the
+  // pseudo-3D lean in drawVehicle. Positive = clockwise turn.
+  const prevFacing = p.facing;
+  if (moveSpeed > 18) {
+    const desired = Math.atan2(p.vy, p.vx);
+    let dA = desired - p.facing;
+    while (dA >  Math.PI) dA -= 2 * Math.PI;
+    while (dA < -Math.PI) dA += 2 * Math.PI;
+    const maxTurn = ARENA_FACING_TURN_RATE * dt;
+    p.facing += clamp(dA, -maxTurn, maxTurn);
+  }
+  // Per-frame facing delta → bank target. Cap and smooth so the lean
+  // doesn't flicker on small steering corrections.
+  let dFacing = p.facing - prevFacing;
+  while (dFacing >  Math.PI) dFacing -= 2 * Math.PI;
+  while (dFacing < -Math.PI) dFacing += 2 * Math.PI;
+  const bankTarget = dt > 0 ? clamp((dFacing / dt) / ARENA_FACING_TURN_RATE, -1, 1) : 0;
+  p.bank = (p.bank || 0) + (bankTarget - (p.bank || 0)) * Math.min(1, 8 * dt);
+
+  // HUD-friendly stats: distance = total path driven, speed used by FX/audio
+  Game.distance += moveSpeed * dt;
+  Game.speed = moveSpeed;
+
+  // ---- camera follow with velocity look-ahead ----
+  const targetCX = arenaCameraTargetX();
+  const targetCY = arenaCameraTargetY();
+  const k = Math.min(1, ARENA_CAMERA_LERP * dt);
+  cam.x += (targetCX - cam.x) * k;
+  cam.y += (targetCY - cam.y) * k;
+  // keep camera inside the world so we never look at empty void
+  cam.x = clamp(cam.x, 0, Math.max(0, world.w - W));
+  cam.y = clamp(cam.y, 0, Math.max(0, world.h - H));
+
+  // ---- exhaust trail in direction opposite of facing ----
+  if (moveSpeed > 60 && Math.random() < 0.65) {
+    const bx = p.x - Math.cos(p.facing) * (p.h * 0.4);
+    const by = p.y - Math.sin(p.facing) * (p.h * 0.4);
+    emitExhaustTrail(bx, by, 1);
+  }
+
+  // ---- fire ----
+  Game.fireCooldown -= dt;
+  const wantsFire = input.fire || Settings.autoFire;
+  if (wantsFire && Game.fireCooldown <= 0) {
+    fireArenaGuns();
+    const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
+    const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
+    const arenaPerkMul = Game.arenaFireRateMul || 1;
+    Game.fireCooldown = (stats.fireRate || 0.18) * rapidMul * overdriveMul * arenaPerkMul;
+  }
+
+  // ---- player bullets ----
+  for (let i = Game.bullets.length - 1; i >= 0; i--) {
+    const b = Game.bullets[i];
+    // homing: same logic as legacy mode
+    if (b.homing && Game.enemies.length > 0) {
+      let tx = null, ty = null, bestDist = Infinity;
+      for (const e of Game.enemies) {
+        const d = Math.hypot(e.x - b.x, e.y - b.y);
+        if (d < bestDist) { bestDist = d; tx = e.x; ty = e.y; }
+      }
+      if (tx !== null) {
+        const bspd = Math.hypot(b.vx || 0, b.vy || 0);
+        if (bspd > 1) {
+          const desiredAngle = Math.atan2(ty - b.y, tx - b.x);
+          const currentAngle = Math.atan2(b.vy || 0, b.vx || 0);
+          let dA = desiredAngle - currentAngle;
+          while (dA >  Math.PI) dA -= 2 * Math.PI;
+          while (dA < -Math.PI) dA += 2 * Math.PI;
+          const maxTurn = 3.5 * dt;
+          const newAngle = currentAngle + clamp(dA, -maxTurn, maxTurn);
+          b.vx = Math.cos(newAngle) * bspd;
+          b.vy = Math.sin(newAngle) * bspd;
+        }
+      }
+    }
+    b.x += (b.vx || 0) * dt;
+    b.y += (b.vy || 0) * dt;
+    b.life = (b.life || 1.4) - dt;
+    if (b.life <= 0 || b.x < -40 || b.y < -40 || b.x > world.w + 40 || b.y > world.h + 40) {
+      Game.bullets.splice(i, 1);
+    }
+  }
+
+  // ---- Phase 4: wave-based enemy spawning ----
+  // Batch v3: pause all wave progression while the perk-select modal is open.
+  if (Game.arenaPerkChoosing) {
+    // While the player is choosing a perk we still want the world to feel
+    // alive (cycle, particles, etc.) but enemies/bullets pause. Skip to the
+    // tail of updateArena so existing entities sit still.
+    arenaUpdateAtmosphere(dt);
+    arenaUpdateSupplies(dt);
+    // keep the camera centered on the player without lookahead
+    cam.x += (p.x - W / 2 - cam.x) * Math.min(1, dt * 4);
+    cam.y += (p.y - H / 2 - cam.y) * Math.min(1, dt * 4);
+    cam.x = clamp(cam.x, 0, world.w - W);
+    cam.y = clamp(cam.y, 0, world.h - H);
+    return;
+  }
+  if (Game.arenaWaveBreak > 0) {
+    Game.arenaWaveBreak -= dt;
+    if (Game.arenaWaveBreak <= 0) {
+      // start next wave
+      Game.arenaWave += 1;
+      // Phase 5 — boss wave every Nth wave: fewer mooks + 1 elite boss
+      const isBoss = (Game.arenaWave % ARENA_BOSS_WAVE_EVERY) === 0;
+      Game.arenaWaveRemain = Math.min(
+        ARENA_WAVE_BASE_COUNT + (Game.arenaWave - 1) * ARENA_WAVE_GROWTH,
+        ARENA_WAVE_MAX_ENEMIES
+      );
+      if (isBoss) {
+        // reduce mooks, queue boss as next spawn
+        Game.arenaWaveRemain = Math.max(2, Math.floor(Game.arenaWaveRemain * 0.5));
+        Game.arenaBossPending = true;
+        // Batch v4 — queue elite minions to spawn alongside the boss so the
+        // wave isn't just a single big target.
+        Game.arenaEliteMinionsPending = ARENA_ELITE_MINION_COUNT;
+        announceEvent('⚠ BOSS WAVE ' + Game.arenaWave + ' ⚠', '#ff4040');
+        SFX.boss();
+        Game.shake = Math.max(Game.shake, 0.6);
+        Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
+        Game.arenaWaveIntroLabel = 'BOSS WAVE ' + Game.arenaWave;
+        Game.arenaWaveIntroAccent = '#ff4040';
+      } else {
+        announceEvent('WAVE ' + Game.arenaWave, '#ffd86b');
+        SFX.boss();
+        Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
+        Game.arenaWaveIntroLabel = 'WAVE ' + Game.arenaWave;
+        Game.arenaWaveIntroAccent = '#ffd86b';
+      }
+    }
+  } else {
+    Game.arenaSpawnT -= dt;
+    if (Game.arenaSpawnT <= 0 && Game.arenaWaveRemain > 0 && Game.enemies.length < ARENA_WAVE_MAX_ENEMIES) {
+      spawnArenaEnemy();
+      Game.arenaWaveRemain -= 1;
+      const diff = 1 + Game.arenaKills * 0.02;
+      Game.arenaSpawnT = rand(ARENA_ENEMY_SPAWN_MIN, ARENA_ENEMY_SPAWN_MAX) / diff;
+    }
+    // wave cleared — start break
+    if (Game.arenaWaveRemain <= 0 && Game.enemies.length === 0) {
+      Game.arenaWaveBreak = ARENA_WAVE_BREAK_DUR;
+      // bonus for clearing wave
+      const waveBonus = 200 + Game.arenaWave * 100;
+      Game.score += waveBonus;
+      addPopup('WAVE ' + Game.arenaWave + ' CLEAR +' + waveBonus, p.x, p.y - 30, '#d2ff6f', 15);
+      // Phase 6 — wave clear combo bonus (if no damage taken)
+      if (!Game.arenaWaveTookDamage) {
+        Game.arenaCombo = Math.min(Game.arenaCombo + ARENA_COMBO_WAVE_CLEAR_BONUS, ARENA_COMBO_MAX);
+        addPopup('PERFECT WAVE +' + ARENA_COMBO_WAVE_CLEAR_BONUS + ' COMBO', p.x, p.y - 50, '#ff6f9f', 13);
+      }
+      Game.arenaWaveTookDamage = false;
+      SFX.victory();
+      // Batch v3 — offer a perk choice between waves (skip on boss-wave breaks
+      // because the upcoming boss wave already gets its own intro).
+      const nextIsBoss = ((Game.arenaWave + 1) % ARENA_BOSS_WAVE_EVERY) === 0;
+      if (!nextIsBoss && !Game.arenaHardcore && Game.arenaPerks.length < ARENA_PERK_HOLD_MAX) {
+        arenaOpenPerkPicker();
+      }
+    }
+  }
+
+  // ---- enemy update + collisions ----
+  for (let i = Game.enemies.length - 1; i >= 0; i--) {
+    const e = Game.enemies[i];
+    if (e.spawnAnimT > 0) e.spawnAnimT = Math.max(0, e.spawnAnimT - dt);
+    if (e.hitAnimT > 0) e.hitAnimT = Math.max(0, e.hitAnimT - dt);
+    // Steer toward player at limited turn rate, accelerate up to maxV.
+    const dxp = p.x - e.x, dyp = p.y - e.y;
+    const distp = Math.max(1, Math.hypot(dxp, dyp));
+    const desired = Math.atan2(dyp, dxp);
+    const curAng = e.arenaAng !== undefined ? e.arenaAng : desired;
+    let dA = desired - curAng;
+    while (dA >  Math.PI) dA -= 2 * Math.PI;
+    while (dA < -Math.PI) dA += 2 * Math.PI;
+    const turn = clamp(dA, -e.arenaTurn * dt, e.arenaTurn * dt);
+    e.arenaAng = curAng + turn;
+    const targetVx = Math.cos(e.arenaAng) * e.arenaMaxV;
+    const targetVy = Math.sin(e.arenaAng) * e.arenaMaxV;
+    const kAccel = Math.min(1, e.arenaAccel * dt / e.arenaMaxV);
+    e.vx = (e.vx || 0) + (targetVx - (e.vx || 0)) * kAccel;
+    e.vy = (e.vy || 0) + (targetVy - (e.vy || 0)) * kAccel;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    // clamp to world (enemies cannot escape the arena either)
+    e.x = clamp(e.x, e.w/2, world.w - e.w/2);
+    e.y = clamp(e.y, e.h/2, world.h - e.h/2);
+
+    // Phase 4 — enemy shooting (drones, mortars, tanks fire at player)
+    if (e.fireT !== undefined && e.fireT !== 999 && e.spawnAnimT <= 0) {
+      e.fireT -= dt;
+      if (e.fireT <= 0 && distp < ARENA_ENEMY_FIRE_RANGE) {
+        const ang = Math.atan2(dyp, dxp);
+        const sp = ARENA_ENEMY_BULLET_SPEED;
+        if (e.kind === 'drone') {
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 5, h: 5,
+            vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+            dmg: 8, big: false, src: e,
+          });
+          e.fireT = ARENA_DRONE_FIRE_RATE;
+        } else if (e.kind === 'mortar') {
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 7, h: 7,
+            vx: Math.cos(ang) * sp * 0.6, vy: Math.sin(ang) * sp * 0.6,
+            dmg: 14, big: true, src: e,
+          });
+          SFX.mortar();
+          e.fireT = ARENA_MORTAR_FIRE_RATE;
+        } else if (e.kind === 'tank') {
+          // Phase 5 refinement — boss periodically fires a charged shot
+          // (slow-motion telegraph then a heavy, fast, high-damage bullet).
+          // Non-boss tanks keep the legacy single shot.
+          const enraged = !!(e.arenaBoss && Game.arenaBossPhase === 1);
+          if (e.arenaBoss) {
+            e.arenaBossShotN = (e.arenaBossShotN || 0) + 1;
+            const isCharged = (e.arenaBossShotN % Math.max(2, Math.round(ARENA_BOSS_CHARGE_RATE))) === 0;
+            if (isCharged) {
+              Game.arenaBossChargeT = ARENA_BOSS_CHARGE_TIME;
+              // queue a deferred heavy bullet by stashing the fire angle on
+              // the boss; we fire it when arenaBossChargeT lapses.
+              e._chargeAng = ang;
+              e._chargeReady = true;
+              e.fireT = ARENA_TANK_FIRE_RATE * (enraged ? ARENA_BOSS_FIRE_RATE_MUL : 0.5) + ARENA_BOSS_CHARGE_TIME;
+              continue;
+            }
+          }
+          const bulletSpeed = sp * 1.1 * (enraged ? 1.1 : 1);
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 8, h: 8,
+            vx: Math.cos(ang) * bulletSpeed, vy: Math.sin(ang) * bulletSpeed,
+            dmg: 18 * (enraged ? 1.15 : 1), big: true, src: e,
+          });
+          SFX.bigShot();
+          e.fireT = ARENA_TANK_FIRE_RATE * (enraged ? ARENA_BOSS_FIRE_RATE_MUL : 1);
+        } else if (e.kind === 'sniper') {
+          // Batch v3 — sniper: latch a telegraph angle, draw a laser sight
+          // for ARENA_SNIPER_TELEGRAPH seconds, then fire a fast piercing
+          // bullet. Telegraph timing exposed via e._sniperAimT for the renderer.
+          if (e._sniperAimT === undefined || e._sniperAimT <= 0) {
+            e._sniperAimT = ARENA_SNIPER_TELEGRAPH;
+            e._sniperAimAng = ang;
+            e._sniperFiring = true;
+            // hold fireT so we don't re-enter until aim window expires
+            e.fireT = ARENA_SNIPER_TELEGRAPH + 0.05;
+          }
+        }
+      }
+      // Sniper post-telegraph fire (independent of fireT path so the bullet
+      // is locked to the telegraphed angle).
+      if (e.kind === 'sniper' && e._sniperFiring) {
+        e._sniperAimT -= dt;
+        // track player slowly during telegraph so a moving player can still
+        // dodge — but the line visibly drifts so it's readable
+        if (e._sniperAimT > 0) {
+          const wantAng = Math.atan2(dyp, dxp);
+          let dAa = wantAng - e._sniperAimAng;
+          while (dAa >  Math.PI) dAa -= 2 * Math.PI;
+          while (dAa < -Math.PI) dAa += 2 * Math.PI;
+          e._sniperAimAng += clamp(dAa, -1.2 * dt, 1.2 * dt);
+        } else {
+          // fire!
+          const ang3 = e._sniperAimAng;
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 6, h: 6,
+            vx: Math.cos(ang3) * ARENA_SNIPER_BULLET_SPEED,
+            vy: Math.sin(ang3) * ARENA_SNIPER_BULLET_SPEED,
+            dmg: ARENA_SNIPER_BULLET_DMG, big: true, src: e, pierce: true,
+            sniper: true,
+          });
+          SFX.bigShot();
+          emit(e.x, e.y, 10, { color: '#ff4040', speed: 220, life: 0.35, size: 2, spread: Math.PI / 6 });
+          e._sniperFiring = false;
+          e.fireT = ARENA_SNIPER_FIRE_RATE * (0.6 + Math.random() * 0.5);
+        }
+      }
+      // Phase 5 refinement — when boss charge telegraph completes, fire the
+      // heavy charged shot toward the last latched angle.
+      if (e.arenaBoss && e._chargeReady && Game.arenaBossChargeT <= 0) {
+        e._chargeReady = false;
+        const ang2 = (e._chargeAng !== undefined) ? e._chargeAng : Math.atan2(dyp, dxp);
+        const sp2 = ARENA_ENEMY_BULLET_SPEED * ARENA_BOSS_CHARGE_SPEED;
+        Game.enemyBullets.push({
+          x: e.x, y: e.y, w: 12, h: 12,
+          vx: Math.cos(ang2) * sp2, vy: Math.sin(ang2) * sp2,
+          dmg: 18 * ARENA_BOSS_CHARGE_DMG_MUL, big: true, src: e,
+        });
+        SFX.bigShot();
+        emit(e.x, e.y, 14, { color: '#ff8a3d', speed: 200, life: 0.4, size: 3, spread: Math.PI / 4 });
+        Game.shake = Math.max(Game.shake, 0.25);
+      }
+    }
+
+    // bullet-vs-enemy
+    for (let j = Game.bullets.length - 1; j >= 0; j--) {
+      const b = Game.bullets[j];
+      if (b.owner !== 'p') continue;
+      if (aabb(e, b)) {
+        e.hp -= b.dmg || 1;
+        e.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
+        if (!b.pierce) Game.bullets.splice(j, 1);
+        emit(b.x, b.y, 4, { color:'#ffd86b', speed:200, life:0.25, size:3, spread: Math.PI * 2 });
+        if (e.hp <= 0) {
+          // Phase 5 — boss death: bigger fx + guaranteed powerup
+          if (e.arenaBoss) {
+            SFX.bigBoom();
+            emit(e.x, e.y, 40, { color:'#ff4040', speed:380, life:0.8, size:5, spread: Math.PI * 2 });
+            emit(e.x, e.y, 24, { color:'#ffd86b', speed:280, life:0.6, size:4, spread: Math.PI * 2 });
+            shockwave(e.x, e.y, 'rgba(255,80,80,0.6)', 140);
+            shockwave(e.x, e.y, 'rgba(255,200,80,0.4)', 200);
+            Game.shake = Math.max(Game.shake, 0.9);
+            applyKill(e.x, e.y, (ENEMY_SCORE[e.kind] || 200) * 5);
+            // guaranteed powerup drop
+            Game.pickups.push({ kind:'powerup', power:rollPowerup(), x:e.x, y:e.y, w:26, h:26, t:0 });
+            // bonus scrap pile
+            Game.pickups.push({ kind:'scrap', x:e.x+30, y:e.y, w:22, h:22, t:0 });
+            Game.pickups.push({ kind:'scrap', x:e.x-30, y:e.y, w:22, h:22, t:0 });
+            addPopup('BOSS DOWN', e.x, e.y - 30, '#ff4040', 16);
+          } else if (e.kind === 'kamikaze') {
+            // Batch v3 — kamikaze killed by a bullet still detonates so it
+            // rewards aggressive AOE clears without trivializing the threat.
+            arenaDetonateKamikaze(e);
+            applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+          } else {
+            SFX.explode();
+            emit(e.x, e.y, 18, { color:'#ff8a3d', speed:280, life:0.55, size:4, spread: Math.PI * 2 });
+            shockwave(e.x, e.y, 'rgba(255,140,60,0.4)', 60);
+            applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+            arenaEnemyDrop(e.x, e.y);
+          }
+          Game.arenaKills += 1;
+          // Phase 6 — increment combo on kill
+          Game.arenaCombo = Math.min(Game.arenaCombo + 1, ARENA_COMBO_MAX);
+          Game.enemies.splice(i, 1);
+          break;
+        }
+      }
+    }
+    if (i >= Game.enemies.length || Game.enemies[i] !== e) continue;
+
+    // contact damage to player
+    if (aabb(e, p)) {
+      // Batch v3 — kamikaze detonates on contact instead of doing simple
+      // contact damage (the splash also chains barrels and damages enemies).
+      if (e.kind === 'kamikaze') {
+        arenaDetonateKamikaze(e);
+        Game.enemies.splice(i, 1);
+        Game.arenaKills += 1;
+        continue;
+      }
+      damagePlayer(e.contact || 14);
+      // knockback the enemy off the player so we don't multi-hit per frame
+      const nx = (e.x - p.x) / distp;
+      const ny = (e.y - p.y) / distp;
+      e.x += nx * 18; e.y += ny * 18;
+      e.vx = nx * e.arenaMaxV * 0.6;
+      e.vy = ny * e.arenaMaxV * 0.6;
+      Game.shake = Math.max(Game.shake, 0.5);
+    }
+  }
+
+  // ---- Phase 4: enemy bullet update & player collision ----
+  for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
+    const b = Game.enemyBullets[i];
+    b.x += (b.vx || 0) * dt;
+    b.y += (b.vy || 0) * dt;
+    // out-of-world cull
+    if (b.x < -40 || b.y < -40 || b.x > world.w + 40 || b.y > world.h + 40) {
+      Game.enemyBullets.splice(i, 1);
+      continue;
+    }
+    if (aabb(b, p)) {
+      if (isPowerupActive('shield')) {
+        emit(b.x, b.y, 8, { color:'#7aaaff', speed:220, life:0.4, size:3, spread: Math.PI * 2 });
+        shockwave(p.x, p.y, 'rgba(122,170,255,0.4)', 50);
+      } else {
+        damagePlayer(b.dmg || 8);
+        emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2, spread: Math.PI * 2 });
+      }
+      Game.enemyBullets.splice(i, 1);
+    }
+  }
+
+  // ---- Phase 5: proximity mines (hazards) ----
+  Game.arenaMineT -= dt;
+  if (Game.arenaMineT <= 0 && Game.arenaMines.length < ARENA_MINE_MAX_LIVE) {
+    // spawn at a random world position, but not too close to the player
+    let mx = 0, my = 0, attempts = 0;
+    do {
+      mx = rand(60, world.w - 60);
+      my = rand(60, world.h - 60);
+      attempts += 1;
+    } while (Math.hypot(mx - p.x, my - p.y) < 240 && attempts < 8);
+    Game.arenaMines.push({
+      x: mx, y: my, w: 20, h: 20,
+      t: 0,           // total age (for idle pulse)
+      armed: false,   // proximity-triggered
+      fuse: 0,        // countdown when armed
+    });
+    Game.arenaMineT = rand(ARENA_MINE_INTERVAL_MIN, ARENA_MINE_INTERVAL_MAX);
+  }
+  for (let i = Game.arenaMines.length - 1; i >= 0; i--) {
+    const m = Game.arenaMines[i];
+    m.t += dt;
+    if (!m.armed) {
+      // arm when player or any enemy is within proximity
+      const dpx = Math.hypot(p.x - m.x, p.y - m.y);
+      let trigger = dpx < ARENA_MINE_ARM_RANGE;
+      if (!trigger) {
+        for (const e of Game.enemies) {
+          if (Math.hypot(e.x - m.x, e.y - m.y) < ARENA_MINE_ARM_RANGE) { trigger = true; break; }
+        }
+      }
+      if (trigger) {
+        m.armed = true;
+        m.fuse = ARENA_MINE_FUSE;
+        SFX.click();
+      }
+    } else {
+      m.fuse -= dt;
+      if (m.fuse <= 0) {
+        // detonate: splash damage to player + enemies, big visual
+        SFX.bigBoom();
+        emit(m.x, m.y, 28, { color:'#ff8a3d', speed:340, life:0.7, size:4, spread: Math.PI * 2 });
+        emit(m.x, m.y, 16, { color:'#ffd86b', speed:240, life:0.5, size:3, spread: Math.PI * 2 });
+        shockwave(m.x, m.y, 'rgba(255,140,60,0.55)', ARENA_MINE_BLAST_RADIUS * 1.4);
+        Game.shake = Math.max(Game.shake, 0.55);
+        // player splash
+        if (Math.hypot(p.x - m.x, p.y - m.y) < ARENA_MINE_BLAST_RADIUS) {
+          if (isPowerupActive('shield')) {
+            shockwave(p.x, p.y, 'rgba(122,170,255,0.55)', 70);
+          } else {
+            damagePlayer(ARENA_MINE_PLAYER_DMG);
+          }
+        }
+        // enemy splash (kill or wound)
+        for (let ei = Game.enemies.length - 1; ei >= 0; ei--) {
+          const en = Game.enemies[ei];
+          if (Math.hypot(en.x - m.x, en.y - m.y) < ARENA_MINE_BLAST_RADIUS) {
+            en.hp -= ARENA_MINE_ENEMY_DMG;
+            en.hitAnimT = ENEMY_HIT_ANIM_WINDOW;
+            if (en.hp <= 0) {
+              applyKill(en.x, en.y, ENEMY_SCORE[en.kind] || 200);
+              arenaEnemyDrop(en.x, en.y);
+              Game.arenaKills += 1;
+              // Phase 6 — increment combo on mine kill
+              Game.arenaCombo = Math.min(Game.arenaCombo + 1, ARENA_COMBO_MAX);
+              Game.enemies.splice(ei, 1);
+            }
+          }
+        }
+        Game.arenaMines.splice(i, 1);
+      }
+    }
+  }
+
+  // ---- Phase 3: arena pickup spawning ----
+  Game.arenaPickupT -= dt;
+  if (Game.arenaPickupT <= 0) {
+    spawnArenaPickup();
+    Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
+  }
+
+  // ---- Phase 3: arena pickup update & collection ----
+  for (let i = Game.pickups.length - 1; i >= 0; i--) {
+    const pk = Game.pickups[i];
+    pk.t += dt;
+    // no vertical scroll in arena — pickups stay put
+    // magnet pull toward player
+    const dxPk = p.x - pk.x, dyPk = p.y - pk.y;
+    const distPk = Math.hypot(dxPk, dyPk);
+    const magnetR = 90 + (isPowerupActive('magnet') ? 120 : 0);
+    if (distPk < magnetR && distPk > 1) {
+      const pull = 280 * dt / distPk;
+      pk.x += dxPk * pull;
+      pk.y += dyPk * pull;
+    }
+    if (aabb(pk, p)) {
+      if (pk.kind === 'scrap') {
+        const x2 = isPowerupActive('x2') ? 2 : 1;
+        const salvageMul = isPowerupActive('salvage') ? 1.5 : 1;
+        const score = Math.round(75 * x2 * Game.pickupScoreMul * salvageMul);
+        Game.score += score;
+        emit(pk.x, pk.y, 12, { color:'#f5d76e', speed:220, life:0.5, size:3, spread: Math.PI * 2 });
+        addPopup((x2 > 1 ? 'x2 ' : '') + '+' + score, pk.x, pk.y - 12, '#f5d76e', 13);
+        SFX.scrap();
+        Haptics.scrap();
+      } else if (pk.kind === 'repair') {
+        Game.health = Math.min(Game.maxHealth, Game.health + Game.maxHealth * 0.3);
+        emit(pk.x, pk.y, 14, { color:'#7af07a', speed:220, life:0.5, size:3, spread: Math.PI * 2 });
+        addPopup('+HULL', pk.x, pk.y - 12, '#7af07a', 13);
+        SFX.pickup();
+        Haptics.pickup();
+      } else if (pk.kind === 'powerup') {
+        activatePowerup(pk.power, pk);
+        Haptics.pickup();
+      }
+      Game.pickups.splice(i, 1);
+    }
+  }
+
+  // ---- decay popups & particles & shockwaves (reuse legacy decay) ----
+  for (let i = Game.particles.length - 1; i >= 0; i--) {
+    const pr = Game.particles[i];
+    pr.x += pr.vx * dt;
+    pr.y += pr.vy * dt;
+    pr.vx *= 0.96; pr.vy *= 0.96;
+    if (pr.gravity) pr.vy += pr.gravity * dt;
+    pr.life -= dt;
+    if (pr.life <= 0) Game.particles.splice(i, 1);
+  }
+  for (let i = Game.shockwaves.length - 1; i >= 0; i--) {
+    const s = Game.shockwaves[i];
+    s.life -= dt;
+    s.r += (s.maxR - s.r) * Math.min(1, 6 * dt);
+    if (s.life <= 0) Game.shockwaves.splice(i, 1);
+  }
+  for (let i = Game.popups.length - 1; i >= 0; i--) {
+    const u = Game.popups[i];
+    u.y += u.vy * dt;
+    u.life -= dt;
+    if (u.life <= 0) Game.popups.splice(i, 1);
+  }
+}
+
+function fireArenaGuns() {
+  const p = Game.player;
+  const stats = Game.vehicleStats || { dmg: 14 };
+  const overdriveMul = isPowerupActive('overdrive') ? 1.2 : 1;
+  const triple = isPowerupActive('triple');
+  // Batch v3 — arena damage + crit + fire-rate perks.
+  const dmgPerkMul   = Game.arenaDmgMul || 1;
+  const critChance   = Game.arenaCritChance || 0;
+  const critRoll     = (critChance > 0 && Math.random() < critChance);
+  const critMul      = critRoll ? 2 : 1;
+  const fa = p.facing;
+  const cs = Math.cos(fa), sn = Math.sin(fa);
+  const sp = ARENA_BULLET_SPEED;
+  // muzzle origin at the front of the vehicle (its "nose" in the facing dir)
+  const noseDist = p.h * 0.5 + 6;
+  const nx = p.x + cs * noseDist;
+  const ny = p.y + sn * noseDist;
+  const mk = (vxBoost, vyBoost, w, h, dmgScale) => {
+    const vx = cs * sp + vxBoost;
+    const vy = sn * sp + vyBoost;
+    Game.bullets.push({
+      owner: 'p',
+      x: nx, y: ny, w, h,
+      vx, vy,
+      dmg: (stats.dmg || 14) * overdriveMul * (dmgScale || 1) * dmgPerkMul * critMul,
+      homing: isPowerupActive('homing') || false,
+      hitIds: [],
+      life: 1.6,
+      crit: critRoll,
+    });
+  };
+  Game.muzzleT = 0.08;
+  mk(0, 0, 5, 14, 1);
+  if (triple) {
+    // side shots perpendicular to facing
+    const px = -sn, py = cs;
+    mk(px * 180, py * 180, 4, 12, 0.7);
+    mk(-px * 180, -py * 180, 4, 12, 0.7);
+  }
+  SFX.shoot();
+  emit(nx, ny, 3, { color: (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#ffe07a',
+                    speed: 140, life: 0.2, size: critRoll ? 3 : 2, spread: Math.PI / 3 });
+  if (critRoll) addPopup('CRIT', p.x, p.y - 28, '#ff4040', 12);
+}
+
+// === Phase 1 refinement — dash ability ===
+// Q in arena mode triggers a short, fixed-distance dash in the player's
+// facing direction. Briefly invulnerable + emits a ghost trail and dust
+// shockwave so the action reads clearly even on small screens.
+function arenaTryDash() {
+  if (Game.state !== 'playing' || Game.paused) return;
+  if (Game.mode !== 'arena') return;
+  if ((Game.arenaDashCD || 0) > 0) return;
+  const p = Game.player;
+  if (!p) return;
+  // Dash direction: prefer current input vector so players can dash sideways
+  // even when chassis is facing somewhere else; fall back to facing.
+  let dx = 0, dy = 0;
+  if (input.left)  dx -= 1;
+  if (input.right) dx += 1;
+  if (input.up)    dy -= 1;
+  if (input.down)  dy += 1;
+  if (dx === 0 && dy === 0 && input.touchTargetX !== null && input.touchTargetY !== null && Game.camera) {
+    const tx = clamp(input.touchTargetX, 0, W) + Game.camera.x;
+    const ty = clamp(input.touchTargetY, 0, H) + Game.camera.y;
+    dx = tx - p.x; dy = ty - p.y;
+  }
+  const mag = Math.hypot(dx, dy);
+  let dirX, dirY;
+  if (mag > 0.01) {
+    dirX = dx / mag; dirY = dy / mag;
+  } else {
+    dirX = Math.cos(p.facing); dirY = Math.sin(p.facing);
+  }
+  // Instantly point chassis along dash for a satisfying snap.
+  p.facing = Math.atan2(dirY, dirX);
+  // Set initial dash velocity so updateArena will glide for ARENA_DASH_DUR.
+  const dashSpeed = ARENA_DASH_DIST / ARENA_DASH_DUR;
+  p.vx = dirX * dashSpeed;
+  p.vy = dirY * dashSpeed;
+  Game.arenaDashT = ARENA_DASH_DUR;
+  Game.arenaInvulnT = ARENA_DASH_INVULN + ARENA_DASH_DUR;
+  Game.arenaDashCD = ARENA_DASH_COOLDOWN * (Game.arenaDashCDMul || 1);
+  Game._arenaDashGhostT = 0;
+  // FX: shockwave puff + audible whoosh + screenshake.
+  shockwave(p.x, p.y, 'rgba(255,210,140,0.55)', 60);
+  emit(p.x, p.y, 10, { color: '#ffd86b', speed: 220, life: 0.32, size: 3, spread: Math.PI * 2 });
+  Game.shake = Math.max(Game.shake, 0.18);
+  if (typeof SFX === 'object' && typeof SFX.nitroOn === 'function') SFX.nitroOn();
+  else if (typeof SFX === 'object' && typeof SFX.click === 'function') SFX.click();
+  addPopup('DASH', p.x, p.y - 36, '#ffd86b', 11);
+}
+
+function arenaUpdateDash(dt) {
+  if (Game.mode !== 'arena') return;
+  Game.arenaDashCD = Math.max(0, (Game.arenaDashCD || 0) - dt);
+  Game.arenaDashT  = Math.max(0, (Game.arenaDashT  || 0) - dt);
+  Game.arenaInvulnT = Math.max(0, (Game.arenaInvulnT || 0) - dt);
+  // Spawn afterimage ghosts at a fixed interval during dash.
+  if (Game.arenaDashT > 0) {
+    Game._arenaDashGhostT = (Game._arenaDashGhostT || 0) - dt;
+    if (Game._arenaDashGhostT <= 0) {
+      const p = Game.player;
+      if (p) {
+        Game.arenaDashGhosts.push({
+          x: p.x, y: p.y, facing: p.facing, life: ARENA_DASH_GHOST_LIFE, max: ARENA_DASH_GHOST_LIFE,
+        });
+        Game._arenaDashGhostT = ARENA_DASH_GHOST_INTERVAL;
+      }
+    }
+  }
+  // Decay ghosts regardless of state (lets them fade out after dash ends).
+  if (Game.arenaDashGhosts && Game.arenaDashGhosts.length) {
+    for (let i = Game.arenaDashGhosts.length - 1; i >= 0; i--) {
+      Game.arenaDashGhosts[i].life -= dt;
+      if (Game.arenaDashGhosts[i].life <= 0) Game.arenaDashGhosts.splice(i, 1);
+    }
+  }
+}
+
+// === Phase 2 refinement — tire skid trails when banking hard at speed. ===
+function arenaUpdateSkidTrails(dt) {
+  if (!Game.arenaSkidTrails) return;
+  // decay
+  for (let i = Game.arenaSkidTrails.length - 1; i >= 0; i--) {
+    Game.arenaSkidTrails[i].life -= dt;
+    if (Game.arenaSkidTrails[i].life <= 0) Game.arenaSkidTrails.splice(i, 1);
+  }
+  // emit new
+  const p = Game.player;
+  if (!p) return;
+  const spd = Math.hypot(p.vx || 0, p.vy || 0);
+  const bank = Math.abs(p.bank || 0);
+  if (spd < ARENA_SKID_SPEED_THRESHOLD || bank < ARENA_SKID_BANK_THRESHOLD) {
+    Game._arenaSkidT = 0;
+    return;
+  }
+  Game._arenaSkidT = (Game._arenaSkidT || 0) - dt;
+  if (Game._arenaSkidT > 0) return;
+  Game._arenaSkidT = ARENA_SKID_INTERVAL;
+  // Tire positions: perpendicular to facing, just behind the chassis.
+  const cs = Math.cos(p.facing), sn = Math.sin(p.facing);
+  const back = -p.h * 0.32;
+  const sideOffset = p.w * 0.32;
+  const bx = p.x + cs * back;
+  const by = p.y + sn * back;
+  const perpX = -sn, perpY = cs;
+  Game.arenaSkidTrails.push({ x: bx + perpX * sideOffset, y: by + perpY * sideOffset,
+                              life: ARENA_SKID_TRAIL_LIFE, max: ARENA_SKID_TRAIL_LIFE,
+                              rot: p.facing });
+  Game.arenaSkidTrails.push({ x: bx - perpX * sideOffset, y: by - perpY * sideOffset,
+                              life: ARENA_SKID_TRAIL_LIFE, max: ARENA_SKID_TRAIL_LIFE,
+                              rot: p.facing });
+  while (Game.arenaSkidTrails.length > ARENA_SKID_TRAIL_MAX) Game.arenaSkidTrails.shift();
+}
+
+// === Phase 3/4 refinement — pre-spawn enemy markers ===
+// Instead of popping enemies into existence, queue a marker that pulses for
+// ARENA_SPAWN_MARKER_TIME at the spawn position. When the marker expires,
+// the actual enemy is created there. Boss spawns skip this telegraph since
+// boss waves are already announced with their own banner.
+function arenaQueueSpawnMarker(spawnArgs) {
+  if (!Game.arenaSpawnMarkers) Game.arenaSpawnMarkers = [];
+  if (Game.arenaSpawnMarkers.length >= ARENA_SPAWN_MARKER_MAX) {
+    // marker queue full — fall through to immediate spawn
+    arenaInstantiateFromArgs(spawnArgs);
+    return;
+  }
+  Game.arenaSpawnMarkers.push(Object.assign({
+    t: 0,
+    life: ARENA_SPAWN_MARKER_TIME,
+  }, spawnArgs));
+}
+
+function arenaUpdateSpawnMarkers(dt) {
+  if (!Game.arenaSpawnMarkers || !Game.arenaSpawnMarkers.length) return;
+  for (let i = Game.arenaSpawnMarkers.length - 1; i >= 0; i--) {
+    const m = Game.arenaSpawnMarkers[i];
+    m.t += dt;
+    m.life -= dt;
+    if (m.life <= 0) {
+      arenaInstantiateFromArgs(m);
+      Game.arenaSpawnMarkers.splice(i, 1);
+    }
+  }
+}
+
+function arenaInstantiateFromArgs(a) {
+  const p = Game.player;
+  Game.enemies.push({
+    kind: a.kind,
+    x: a.x, y: a.y,
+    w: a.w, h: a.h,
+    vx: 0, vy: 0,
+    hp: a.hp, maxHp: a.hp,
+    contact: a.contact,
+    fireT: a.fireT,
+    spawnAnimT: 0.35,
+    hitAnimT: 0,
+    storyAnimT: 0,
+    baseX: a.x, wave: 0, waveSpeed: 0, waveAmp: 0,
+    arenaAng: p ? Math.atan2(p.y - a.y, p.x - a.x) : 0,
+    arenaMaxV: a.maxV,
+    arenaAccel: a.accel,
+    arenaTurn: a.turnR,
+    arenaBoss: !!a.isBoss,
+    // Batch v4 — elite minion flag (small fast adds on boss waves).
+    arenaElite: !!a.isElite,
+    // Phase 5 — boss charge counter for periodic charged shots.
+    arenaBossShotN: a.isBoss ? 0 : undefined,
+  });
+  // Spawn arrival FX: small dust shockwave reinforces the telegraph payoff.
+  shockwave(a.x, a.y, 'rgba(255,180,80,0.4)', a.isBoss ? 80 : 36);
+  if (a.isBoss) {
+    emit(a.x, a.y, 18, { color: '#ff4040', speed: 220, life: 0.55, size: 3, spread: Math.PI * 2 });
+  }
+}
+
+// === Phase 4 refinement — explosive barrels ===
+// Barrels are static world-space hazards. Shoot one and it ignites for a brief
+// fuse then detonates in a ARENA_BARREL_BLAST_RADIUS splash that damages
+// enemies and player alike. Adjacent burning barrels ignite each other,
+// rewarding shooting clustered groups for area kills.
+function arenaUpdateBarrels(dt) {
+  if (!Game.arenaBarrels || !Game.arenaBarrels.length) return;
+  const p = Game.player;
+  // bullet hits → ignite (skip already-burning or dead)
+  for (let i = Game.arenaBarrels.length - 1; i >= 0; i--) {
+    const b = Game.arenaBarrels[i];
+    if (b.dead) continue;
+    b.t += dt;
+    if (b.burnT > 0) {
+      b.burnT -= dt;
+      // burning fuse — emit fire particles
+      if (Math.random() < 0.6) {
+        Game.particles.push({
+          x: b.x + rand(-4, 4), y: b.y - 10 + rand(-3, 3),
+          vx: rand(-12, 12), vy: rand(-50, -20),
+          life: 0.45, max: 0.45, size: 3 + (Math.random() * 3 | 0),
+          color: 'rgba(255,140,60,0.85)',
+        });
+      }
+      if (b.burnT <= 0) {
+        arenaDetonateBarrel(b);
+        Game.arenaBarrels.splice(i, 1);
+      }
+      continue;
+    }
+    // player bullet damage
+    for (let j = Game.bullets.length - 1; j >= 0; j--) {
+      const bl = Game.bullets[j];
+      if (bl.owner !== 'p') continue;
+      if (aabb(b, bl)) {
+        b.hp -= (bl.dmg || 1);
+        if (!bl.pierce) Game.bullets.splice(j, 1);
+        emit(bl.x, bl.y, 4, { color:'#ffb36a', speed:160, life:0.25, size:2, spread: Math.PI * 2 });
+        if (b.hp <= 0 && b.burnT <= 0) {
+          b.burnT = ARENA_BARREL_BURN_TIME;
+          SFX.click && SFX.click();
+        }
+        break;
+      }
+    }
+    // enemy bullet damage (a stray rocket / mortar can also light a barrel,
+    // creating delightful environmental kills)
+    for (let j = Game.enemyBullets.length - 1; j >= 0; j--) {
+      const eb = Game.enemyBullets[j];
+      if (aabb(b, eb)) {
+        b.hp -= (eb.dmg || 4) * 0.5;
+        Game.enemyBullets.splice(j, 1);
+        if (b.hp <= 0 && b.burnT <= 0) b.burnT = ARENA_BARREL_BURN_TIME;
+        break;
+      }
+    }
+    // player contact at speed scuffs it (small chip damage) so high-speed
+    // collisions are also threats.
+    if (p && aabb(b, p)) {
+      const psd = Math.hypot(p.vx || 0, p.vy || 0);
+      if (psd > 240) {
+        b.hp -= 1;
+        // bounce player slightly
+        const nx = (p.x - b.x), ny = (p.y - b.y);
+        const nl = Math.max(1, Math.hypot(nx, ny));
+        p.vx = nx / nl * Math.max(psd * 0.5, 180);
+        p.vy = ny / nl * Math.max(psd * 0.5, 180);
+        Game.shake = Math.max(Game.shake, 0.18);
+        if (b.hp <= 0 && b.burnT <= 0) b.burnT = ARENA_BARREL_BURN_TIME;
+      }
+    }
+  }
+}
+
+function arenaDetonateBarrel(b) {
+  SFX.bigBoom && SFX.bigBoom();
+  emit(b.x, b.y, 36, { color:'#ff8a3d', speed:380, life:0.75, size:5, spread: Math.PI * 2 });
+  emit(b.x, b.y, 18, { color:'#ffd86b', speed:260, life:0.55, size:4, spread: Math.PI * 2 });
+  shockwave(b.x, b.y, 'rgba(255,140,60,0.6)', ARENA_BARREL_BLAST_RADIUS * 1.4);
+  Game.shake = Math.max(Game.shake, 0.55);
+  // damage enemies in radius
+  for (let ei = Game.enemies.length - 1; ei >= 0; ei--) {
+    const e = Game.enemies[ei];
+    if (Math.hypot(e.x - b.x, e.y - b.y) <= ARENA_BARREL_BLAST_RADIUS) {
+      e.hp -= ARENA_BARREL_ENEMY_DMG;
+      e.hitAnimT = 0.25;
+      if (e.hp <= 0) {
+        applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+        arenaEnemyDrop(e.x, e.y);
+        Game.arenaKills += 1;
+        Game.arenaCombo = Math.min((Game.arenaCombo || 0) + 1, ARENA_COMBO_MAX);
+        Game.enemies.splice(ei, 1);
+      }
+    }
+  }
+  // player splash (respects dash i-frames + shield via damagePlayer)
+  if (Game.player && Math.hypot(Game.player.x - b.x, Game.player.y - b.y) <= ARENA_BARREL_BLAST_RADIUS) {
+    damagePlayer(ARENA_BARREL_PLAYER_DMG);
+  }
+  // chain reaction: nearby barrels start burning on a slight delay
+  if (Game.arenaBarrels) {
+    for (const other of Game.arenaBarrels) {
+      if (other.burnT > 0) continue;
+      if (Math.hypot(other.x - b.x, other.y - b.y) <= ARENA_BARREL_BLAST_RADIUS) {
+        other.burnT = ARENA_BARREL_CHAIN_DELAY;
+        other.hp = 0;
+      }
+    }
+  }
+}
+
+// === Phase 5 refinement — boss enrage + charged shot telegraph ===
+function arenaUpdateBossPhase() {
+  if (!Game.enemies || !Game.enemies.length) {
+    if (Game.arenaBossPhase !== 0) Game.arenaBossPhase = 0;
+    return;
+  }
+  const boss = Game.enemies.find(e => e.arenaBoss);
+  if (!boss) {
+    if (Game.arenaBossPhase !== 0) Game.arenaBossPhase = 0;
+    return;
+  }
+  const pct = (boss.hp || 0) / Math.max(1, boss.maxHp || 1);
+  if (Game.arenaBossPhase === 0 && pct <= ARENA_BOSS_ENRAGE_PCT) {
+    Game.arenaBossPhase = 1;
+    boss.arenaTurn *= 1.3;
+    boss.arenaMaxV *= 1.2;
+    announceEvent('BOSS ENRAGED', '#ff4040');
+    SFX.boss && SFX.boss();
+    Game.shake = Math.max(Game.shake, 0.8);
+    shockwave(boss.x, boss.y, 'rgba(255,80,80,0.6)', 180);
+  }
+}
+
+function arenaUpdateAtmosphere(dt) {
+  if (Game.mode !== 'arena') return;
+  // Day-night clock advances always (even during perk picker so the world
+  // visually breathes while paused).
+  Game.arenaDayT = ((Game.arenaDayT || 0) + dt) % ARENA_DAY_LENGTH;
+  // Night-only lightning: when we're past the midpoint of the cycle, count
+  // down toward the next strike.
+  const nightAmt = arenaNightAmount(); // 0..1
+  if (nightAmt > 0.35) {
+    Game.arenaLightningT = (Game.arenaLightningT || 0) - dt;
+    if (Game.arenaLightningT <= 0) {
+      arenaTriggerLightning();
+      Game.arenaLightningT = rand(ARENA_LIGHTNING_MIN_GAP, ARENA_LIGHTNING_MAX_GAP);
+    }
+  }
+  if (Game.arenaLightningFlash > 0) {
+    Game.arenaLightningFlash = Math.max(0, Game.arenaLightningFlash - dt);
+  }
+}
+function arenaNightAmount() {
+  // Returns a 0..1 darkness factor: 0 at noon, 1 at midnight, sinusoidal.
+  const phase = ((Game.arenaDayT || 0) / ARENA_DAY_LENGTH) * Math.PI * 2;
+  // shift so 0 is noon
+  return 0.5 - 0.5 * Math.cos(phase);
+}
+function arenaTriggerLightning() {
+  Game.arenaLightningFlash = ARENA_LIGHTNING_FLASH;
+  SFX.lightning && SFX.lightning();
+  Game.shake = Math.max(Game.shake, 0.25);
+}
+
+// Supply drops: a parachute that descends from above the camera, then lands
+// as a collectible crate. On pickup it grants scrap + heals the player.
+function arenaUpdateSupplies(dt) {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSupplies) Game.arenaSupplies = [];
+  // schedule next drop
+  Game.arenaSupplyT = (Game.arenaSupplyT || 0) - dt;
+  if (Game.arenaSupplyT <= 0 && Game.arenaSupplies.length < ARENA_SUPPLY_MAX_LIVE) {
+    arenaSpawnSupplyDrop();
+    Game.arenaSupplyT = ARENA_SUPPLY_INTERVAL * (0.85 + Math.random() * 0.3);
+  }
+  // tick existing drops
+  for (let i = Game.arenaSupplies.length - 1; i >= 0; i--) {
+    const s = Game.arenaSupplies[i];
+    s.t += dt;
+    if (s.phase === 'descend') {
+      // approach landing position via interp on s.t / ARENA_SUPPLY_DESCEND_TIME
+      const k = clamp(s.t / ARENA_SUPPLY_DESCEND_TIME, 0, 1);
+      s.descendK = k;
+      if (k >= 1) {
+        s.phase = 'landed';
+        s.life = ARENA_SUPPLY_LIFE_AFTER;
+        SFX.click && SFX.click();
+        emit(s.x, s.y, 14, { color: '#d2ff6f', speed: 200, life: 0.4, size: 3, spread: Math.PI * 2 });
+        shockwave(s.x, s.y, 'rgba(210,255,111,0.45)', 60);
+      }
+    } else if (s.phase === 'landed') {
+      s.life -= dt;
+      if (Game.player && Math.hypot(Game.player.x - s.x, Game.player.y - s.y) < (Game.player.w + 28) * 0.6) {
+        arenaCollectSupply(s);
+        Game.arenaSupplies.splice(i, 1);
+        continue;
+      }
+      if (s.life <= 0) {
+        // expire silently
+        emit(s.x, s.y, 6, { color:'#888', speed:60, life:0.4, size:2, spread:Math.PI*2 });
+        Game.arenaSupplies.splice(i, 1);
+      }
+    }
+  }
+}
+function arenaSpawnSupplyDrop() {
+  const world = Game.world;
+  const p = Game.player;
+  const cam = Game.camera;
+  if (!world || !p || !cam) return;
+  // Drop somewhere visible-ish but not on top of the player so it pulls the
+  // player out of cover.
+  const ang = Math.random() * Math.PI * 2;
+  const dist = rand(180, 360);
+  const lx = clamp(p.x + Math.cos(ang) * dist, 80, world.w - 80);
+  const ly = clamp(p.y + Math.sin(ang) * dist, 80, world.h - 80);
+  Game.arenaSupplies.push({
+    x: lx, y: ly, landX: lx, landY: ly,
+    phase: 'descend', t: 0, descendK: 0,
+    life: 0,
+    rot: 0,
+  });
+  announceEvent('SUPPLY DROP', '#d2ff6f');
+}
+function arenaCollectSupply(s) {
+  if (Game.player) addPopup('SUPPLY +' + ARENA_SUPPLY_SCRAP_REWARD + ' / +' + ARENA_SUPPLY_HEAL_REWARD + ' HP', s.x, s.y - 26, '#d2ff6f', 13);
+  Game.scrapEarned = (Game.scrapEarned || 0) + ARENA_SUPPLY_SCRAP_REWARD;
+  Game.health = Math.min(Game.maxHealth || 100, (Game.health || 0) + ARENA_SUPPLY_HEAL_REWARD);
+  shockwave(s.x, s.y, 'rgba(210,255,111,0.45)', 80);
+  emit(s.x, s.y, 22, { color: '#d2ff6f', speed: 260, life: 0.5, size: 3, spread: Math.PI * 2 });
+  SFX.pickup && SFX.pickup();
+}
+
+// Tar patches: terrain hazards. arenaPlayerInTar is the hot-path check used
+// inside player movement.
+function arenaPlayerInTar() {
+  if (Game.mode !== 'arena') return false;
+  const p = Game.player;
+  const patches = Game.arenaTarPatches;
+  if (!p || !patches || !patches.length) return false;
+  for (const t of patches) {
+    if (Math.hypot(p.x - t.x, p.y - t.y) <= t.r) return true;
+  }
+  return false;
+}
+function arenaUpdateTarPatches(dt) {
+  if (Game.mode !== 'arena') return;
+  const patches = Game.arenaTarPatches;
+  if (!patches || !patches.length) return;
+  // advance shimmer phase + lightly slow enemies that touch tar so they
+  // don't trivialize the player slow.
+  for (const t of patches) {
+    t.t += dt;
+    for (const e of Game.enemies) {
+      if (!e || e.arenaBoss) continue;
+      if (Math.hypot(e.x - t.x, e.y - t.y) < t.r) {
+        e.vx *= Math.pow(0.6, dt);
+        e.vy *= Math.pow(0.6, dt);
+      }
+    }
+  }
+}
+
+// Kamikaze detonation: damages enemies and player in radius and ignites any
+// barrels caught in the blast for satisfying chain combos.
+function arenaDetonateKamikaze(k) {
+  SFX.bigBoom && SFX.bigBoom();
+  emit(k.x, k.y, 28, { color:'#ff8a3d', speed:320, life:0.55, size:4, spread: Math.PI * 2 });
+  emit(k.x, k.y, 14, { color:'#ffd86b', speed:220, life:0.45, size:3, spread: Math.PI * 2 });
+  shockwave(k.x, k.y, 'rgba(255,140,60,0.55)', ARENA_KAMI_BLAST_RADIUS * 1.4);
+  Game.shake = Math.max(Game.shake, 0.45);
+  // enemies in radius
+  for (let ei = Game.enemies.length - 1; ei >= 0; ei--) {
+    const oth = Game.enemies[ei];
+    if (oth === k) continue;
+    if (Math.hypot(oth.x - k.x, oth.y - k.y) <= ARENA_KAMI_BLAST_RADIUS) {
+      oth.hp -= ARENA_KAMI_ENEMY_DMG;
+      oth.hitAnimT = 0.25;
+      if (oth.hp <= 0) {
+        applyKill(oth.x, oth.y, ENEMY_SCORE[oth.kind] || 200);
+        arenaEnemyDrop(oth.x, oth.y);
+        Game.arenaKills += 1;
+        Game.arenaCombo = Math.min((Game.arenaCombo || 0) + 1, ARENA_COMBO_MAX);
+        Game.enemies.splice(ei, 1);
+      }
+    }
+  }
+  // player splash
+  if (Game.player && Math.hypot(Game.player.x - k.x, Game.player.y - k.y) <= ARENA_KAMI_BLAST_RADIUS) {
+    damagePlayer(ARENA_KAMI_PLAYER_DMG);
+  }
+  // chain barrels
+  if (Game.arenaBarrels) {
+    for (const b of Game.arenaBarrels) {
+      if (b.burnT > 0) continue;
+      if (Math.hypot(b.x - k.x, b.y - k.y) <= ARENA_KAMI_BLAST_RADIUS) {
+        b.burnT = ARENA_BARREL_CHAIN_DELAY;
+        b.hp = 0;
+      }
+    }
+  }
+}
+
+// Perk selection: open a modal with N random perk choices. The first applied
+// perk this run is logged for the death overlay's "perks" line.
+function arenaOpenPerkPicker() {
+  // build a random subset of distinct perk ids
+  const pool = ARENA_PERKS.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }
+  Game.arenaPerkChoices = pool.slice(0, Math.min(ARENA_PERK_OPTIONS, pool.length));
+  Game.arenaPerkSelectedIdx = 0;
+  Game.arenaPerkChoosing = true;
+  SFX.powerUp && SFX.powerUp();
+}
+function arenaApplyPerkByIndex(idx) {
+  const choices = Game.arenaPerkChoices || [];
+  const perk = choices[idx];
+  if (!perk) return;
+  arenaApplyPerk(perk.id);
+  Game.arenaPerks.push(perk.id);
+  addPopup('PERK: ' + perk.name, (Game.player && Game.player.x) || W / 2, (Game.player && Game.player.y - 40) || H / 2, perk.color || '#ffd86b', 14);
+  announceEvent('PERK ACQUIRED', perk.color || '#ffd86b');
+  SFX.levelUp && SFX.levelUp();
+  Game.arenaPerkChoosing = false;
+  Game.arenaPerkChoices = [];
+}
+function arenaApplyPerk(id) {
+  switch (id) {
+    case 'hp_up':
+      Game.maxHealth = (Game.maxHealth || 100) + 25;
+      Game.health    = Game.maxHealth;
+      break;
+    case 'dmg_up':   Game.arenaDmgMul      *= 1.15; break;
+    case 'fire_up':  Game.arenaFireRateMul *= 0.80; break; // 20% faster
+    case 'speed_up': Game.arenaSpeedMul    *= 1.15; break;
+    case 'dash_cd':  Game.arenaDashCDMul   *= 0.65; break; // 35% faster cd
+    case 'magnet':   Game.arenaMagnetMul   *= 1.5;  break;
+    case 'armor':    Game.arenaDmgTakenMul *= 0.88; break; // 12% less damage taken
+    case 'crit':     Game.arenaCritChance   = Math.min(0.85, (Game.arenaCritChance || 0) + 0.15); break;
+  }
+}
+
+
+function arenaSpawnPoint() {
+  const world = Game.world;
+  const p = Game.player;
+  const cam = Game.camera;
+  const margin = 48;
+  const offscreenPad = 110;
+  const safeR = 260;
+  if (!world || !p || !cam) return { x: margin, y: margin };
+
+  const visiblePad = 24;
+  const inPaddedView = (x, y) =>
+    x >= cam.x - visiblePad && x <= cam.x + W + visiblePad &&
+    y >= cam.y - visiblePad && y <= cam.y + H + visiblePad;
+
+  for (let attempt = 0; attempt < 18; attempt++) {
+    const side = Math.floor(Math.random() * 4);
+    let x, y;
+    if (side === 0) { // top
+      x = rand(cam.x - offscreenPad, cam.x + W + offscreenPad);
+      y = cam.y - offscreenPad;
+    } else if (side === 1) { // right
+      x = cam.x + W + offscreenPad;
+      y = rand(cam.y - offscreenPad, cam.y + H + offscreenPad);
+    } else if (side === 2) { // bottom
+      x = rand(cam.x - offscreenPad, cam.x + W + offscreenPad);
+      y = cam.y + H + offscreenPad;
+    } else { // left
+      x = cam.x - offscreenPad;
+      y = rand(cam.y - offscreenPad, cam.y + H + offscreenPad);
+    }
+    x = clamp(x, margin, world.w - margin);
+    y = clamp(y, margin, world.h - margin);
+    if (!inPaddedView(x, y) && Math.hypot(x - p.x, y - p.y) >= safeR) return { x, y };
+  }
+
+  const camR = Math.hypot(W, H) * 0.5 + 140;
+  const ang = Math.random() * Math.PI * 2;
+  return {
+    x: clamp(p.x + Math.cos(ang) * camR, margin, world.w - margin),
+    y: clamp(p.y + Math.sin(ang) * camR, margin, world.h - margin),
+  };
+}
+
+function spawnArenaEnemy() {
+  const world = Game.world;
+  const p = Game.player;
+  if (!world || !p) return;
+  // Prefer spawn points just beyond the camera edge so enemies enter from
+  // readable directions instead of popping in after world-bound clamping.
+  const sp = arenaSpawnPoint();
+  const sx = sp.x;
+  const sy = sp.y;
+  const diff = 1 + Game.arenaKills * 0.015;
+
+  // Phase 3 — pick enemy type. Heavier types unlock as kills accumulate.
+  const kills = Game.arenaKills || 0;
+  const roll = Math.random();
+  let kind, w, h, hp, contact, maxV, accel, turnR;
+  // Phase 5 — boss override: when arenaBossPending, this spawn is an elite tank
+  const isBoss = Game.arenaBossPending === true;
+  // Batch v4 — elite minion override: queued alongside boss waves. These
+  // are small fast adds, drawn as red drones, with a flag so they read as
+  // elite on hit-fx/scoring.
+  const isElite = !isBoss && (Game.arenaEliteMinionsPending || 0) > 0;
+  if (isBoss) {
+    Game.arenaBossPending = false;
+    kind = 'tank';
+    w = Math.round(42 * ARENA_BOSS_SIZE_MUL);
+    h = Math.round(56 * ARENA_BOSS_SIZE_MUL);
+    hp = Math.ceil(10 * diff * ARENA_BOSS_HP_MUL);
+    contact = 36; maxV = 150; accel = 360; turnR = 1.2;
+  } else if (isElite) {
+    Game.arenaEliteMinionsPending -= 1;
+    kind = 'drone';
+    w = 28; h = 32;
+    hp = Math.ceil(ARENA_ELITE_MINION_HP * diff);
+    contact = ARENA_ELITE_MINION_DMG;
+    maxV = ARENA_ELITE_MINION_MAXV + Math.min(120, kills * 1.5);
+    accel = 700; turnR = 3.6;
+  } else if (kills >= 25 && roll < 0.10) {
+    kind = 'tank';  w = 42; h = 56; hp = Math.ceil(10 * diff);
+    contact = 24; maxV = 140 + Math.min(80, kills * 1.5); accel = 320; turnR = 1.4;
+  } else if (kills >= 15 && roll < 0.22) {
+    kind = 'mortar'; w = 34; h = 44; hp = Math.ceil(6 * diff);
+    contact = 18; maxV = 160 + Math.min(100, kills * 2); accel = 360; turnR = 1.8;
+  } else if (kills >= ARENA_SNIPER_MIN_KILLS && roll < 0.22 + ARENA_SNIPER_ROLL_PCT) {
+    // Batch v3 — sniper: slow, stationary-ish, telegraphs a laser-sight then
+    // fires a fast piercing hitscan-style bullet.
+    kind = 'sniper'; w = 30; h = 38; hp = Math.ceil(ARENA_SNIPER_HP * diff);
+    contact = 12; maxV = 70 + Math.min(40, kills * 0.5); accel = 220; turnR = 1.4;
+  } else if (kills >= ARENA_KAMI_MIN_KILLS && roll < 0.40 + ARENA_KAMI_ROLL_PCT) {
+    // Batch v3 — kamikaze: fast, low-HP, explodes on contact.
+    kind = 'kamikaze'; w = 22; h = 30; hp = Math.ceil(ARENA_KAMI_HP * diff);
+    contact = 0; // damage comes from the explosion, not contact
+    maxV = 320 + Math.min(220, kills * 3.2); accel = 720; turnR = 4.0;
+  } else if (kills >= 8 && roll < 0.38) {
+    kind = 'drone';  w = 26; h = 30; hp = Math.ceil(2 * diff);
+    contact = 10; maxV = 260 + Math.min(200, kills * 3); accel = 600; turnR = 3.2;
+  } else {
+    kind = 'bike';   w = 28; h = 40; hp = Math.ceil(3 * diff);
+    contact = 14; maxV = 200 + Math.min(180, kills * 3); accel = 480; turnR = 2.4;
+  }
+
+  // Phase 4 — set fireT so shooting enemies will fire in updateArena.
+  // Bikes are ram-only (fireT stays 999).
+  let fireT = 999;
+  if (kind === 'drone')  fireT = ARENA_DRONE_FIRE_RATE * (0.5 + Math.random());
+  if (kind === 'mortar') fireT = ARENA_MORTAR_FIRE_RATE * (0.5 + Math.random());
+  if (kind === 'tank')   fireT = ARENA_TANK_FIRE_RATE * (0.5 + Math.random());
+  if (kind === 'sniper') fireT = ARENA_SNIPER_FIRE_RATE * (0.6 + Math.random() * 0.6);
+
+  // Phase 5 — boss fires faster
+  if (isBoss) fireT = ARENA_TANK_FIRE_RATE * 0.5;
+
+  const args = {
+    kind, x: sx, y: sy, w, h, hp, contact, fireT,
+    maxV, accel, turnR, isBoss, isElite,
+  };
+  // Phase 3/4 refinement — non-boss spawns route through a spawn marker
+  // (visible pulse on the world floor) for readability. Bosses spawn
+  // instantly since their wave already gets a separate banner.
+  if (isBoss) arenaInstantiateFromArgs(args);
+  else        arenaQueueSpawnMarker(args);
+}
+
+// Phase 3 — periodically place pickups at random world positions.
+function spawnArenaPickup() {
+  const world = Game.world;
+  const p = Game.player;
+  if (!world || !p) return;
+  if (Game.pickups.length >= ARENA_PICKUP_MAX_LIVE) return;
+  // random position inside the world (with margin so pickups aren't at edges)
+  const margin = 80;
+  const px = rand(margin, world.w - margin);
+  const py = rand(margin, world.h - margin);
+  const r = Math.random();
+  let kind, power;
+  if (r < 0.12) { kind = 'powerup'; power = rollPowerup(); }
+  else if (r < 0.30) { kind = 'repair'; }
+  else { kind = 'scrap'; }
+  const pk = { kind, x: px, y: py, w: kind === 'powerup' ? 26 : 22, h: kind === 'powerup' ? 26 : 22, t: 0 };
+  if (power) pk.power = power;
+  Game.pickups.push(pk);
+}
+
+// Phase 3 — drop scrap/powerup at enemy death position in arena.
+function arenaEnemyDrop(ex, ey) {
+  const r = Math.random();
+  if (r < ARENA_DROP_CHANCE_POWERUP) {
+    Game.pickups.push({ kind: 'powerup', power: rollPowerup(), x: ex, y: ey, w: 26, h: 26, t: 0 });
+  } else if (r < ARENA_DROP_CHANCE_POWERUP + ARENA_DROP_CHANCE_REPAIR) {
+    Game.pickups.push({ kind: 'repair', x: ex, y: ey, w: 22, h: 22, t: 0 });
+  } else if (r < ARENA_DROP_CHANCE_POWERUP + ARENA_DROP_CHANCE_REPAIR + ARENA_DROP_CHANCE_SCRAP) {
+    Game.pickups.push({ kind: 'scrap', x: ex, y: ey, w: 22, h: 22, t: 0 });
+  }
+}
+
+function renderArena() {
+  const p = Game.player;
+  const cam = Game.camera;
+  const world = Game.world;
+  if (!p || !cam || !world) return;
+
+  // --- backdrop: deep gradient sky/horizon (screen space) ---
+  const t = activeBiomeTheme ? activeBiomeTheme() : null;
+  const skyTop = (t && (Game.isNight ? t.skyNightTop : t.skyDayTop)) || '#2a1a14';
+  const skyBot = (t && (Game.isNight ? t.skyNightBottom : t.skyDayBottom)) || '#1a1008';
+  const gsky = ctx.createLinearGradient(0, 0, 0, H);
+  gsky.addColorStop(0, skyTop);
+  gsky.addColorStop(1, skyBot);
+  ctx.fillStyle = gsky;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  // screen-shake (mirrors legacy render() prelude — keep it consistent so
+  // damage feedback still reads)
+  if (Game.shake > 0 && !Game.paused) {
+    const amp = Game.shake * 14 * Settings.shake;
+    const nowT = Game.t || 0;
+    if (nowT >= Game.shakeRetargetT) {
+      Game.shakeTX = (Math.random() - 0.5) * 2;
+      Game.shakeTY = (Math.random() - 0.5) * 2;
+      Game.shakeRetargetT = nowT + 0.05;
+    }
+    const sk = 0.35;
+    Game.shakeOX += (Game.shakeTX - Game.shakeOX) * sk;
+    Game.shakeOY += (Game.shakeTY - Game.shakeOY) * sk;
+    ctx.translate(Game.shakeOX * amp, Game.shakeOY * amp);
+  } else {
+    Game.shakeOX *= 0.7; Game.shakeOY *= 0.7;
+  }
+
+  // --- world layer: translate by camera ---
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  // ground: tiled cells across the visible portion of the world
+  const tileSize = 128;
+  const groundBase = (t && (Game.isNight ? t.shoulderNight : t.shoulderDay)) || '#3a261a';
+  // dim the line color so the grid reads as subtle texture, not road striping
+  const groundLine = Game.isNight ? 'rgba(255,220,160,0.05)' : 'rgba(255,220,160,0.08)';
+  // fill an inset rectangle that covers the visible camera region (slightly
+  // padded so tile grid doesn't shimmer at edges)
+  const vx0 = Math.max(0, cam.x - 8);
+  const vy0 = Math.max(0, cam.y - 8);
+  const vx1 = Math.min(world.w, cam.x + W + 8);
+  const vy1 = Math.min(world.h, cam.y + H + 8);
+  ctx.fillStyle = groundBase;
+  ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+  // subtle scrolling grid for spatial reference (snap to camera so it scrolls
+  // believably). Cheap fills only — no gradients.
+  ctx.fillStyle = groundLine;
+  const gx0 = Math.floor(vx0 / tileSize) * tileSize;
+  const gy0 = Math.floor(vy0 / tileSize) * tileSize;
+  for (let gx = gx0; gx <= vx1; gx += tileSize) {
+    ctx.fillRect(gx, vy0, 1, vy1 - vy0);
+  }
+  for (let gy = gy0; gy <= vy1; gy += tileSize) {
+    ctx.fillRect(vx0, gy, vx1 - vx0, 1);
+  }
+
+  // World boundary fence — clear visual cue you've hit the edge.
+  ctx.strokeStyle = 'rgba(255,180,80,0.7)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, world.w, world.h);
+
+  // Phase 4 — scattered ground decor (rocks & ruins). Only draw visible ones.
+  if (Game.arenaDecor && Game.arenaDecor.length) {
+    for (const d of Game.arenaDecor) {
+      if (d.x < cam.x - 30 || d.x > cam.x + W + 30 ||
+          d.y < cam.y - 30 || d.y > cam.y + H + 30) continue;
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rot);
+      const s = d.size;
+      const shade = Math.round(d.shade * 60 + 30);
+      if (d.kind === 'ruin') {
+        ctx.fillStyle = `rgb(${shade},${shade - 8},${shade - 16})`;
+        ctx.fillRect(-s * 0.6, -s * 0.3, s * 1.2, s * 0.6);
+        ctx.fillRect(-s * 0.2, -s * 0.6, s * 0.4, s * 1.2);
+      } else {
+        ctx.fillStyle = `rgb(${shade + 10},${shade},${shade - 10})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 0.55, s * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  // particles / shockwaves / pickups / enemies / bullets — reuse legacy
+  // primitives now that ctx is in world coordinates.
+  // Batch v3 — tar patches sit at the bottom of the floor stack.
+  drawArenaTarPatches();
+  // Phase 2 refinement — skid trails go beneath everything else so they
+  // read as ground markings.
+  drawArenaSkidTrails();
+  // Phase 4 refinement — explosive barrels in the floor layer (below pickups
+  // so a stacked pickup is still grabbable).
+  drawArenaBarrels();
+  for (const pk of Game.pickups) drawPickup(pk);
+  // Batch v3 — supply drop crates with parachute markers.
+  drawArenaSupplies();
+  // Batch v4 — turret bullet trails layered just under turret bodies.
+  drawArenaTurretBulletTrails();
+  // Batch v4 — elite minion rings under enemies for readability.
+  drawArenaEliteRings();
+  // Batch v4 — turrets sit between pickups and enemies in the depth order.
+  drawArenaTurrets();
+  // Phase 3/4 refinement — pre-spawn markers above the floor so the warning
+  // is hard to miss.
+  drawArenaSpawnMarkers();
+  // Phase 5 — proximity mines (drawn in world space, before enemies)
+  if (Game.arenaMines && Game.arenaMines.length) {
+    for (const m of Game.arenaMines) {
+      const idlePulse = 0.6 + 0.4 * Math.sin(m.t * 4);
+      const armedPulse = 0.5 + 0.5 * Math.sin(m.t * 28);
+      const pulse = m.armed ? armedPulse : idlePulse;
+      // proximity / blast-radius telegraphs so mine behavior is readable
+      // before detonation.
+      ctx.save();
+      ctx.globalAlpha = m.armed ? 0.22 : 0.12;
+      ctx.strokeStyle = m.armed ? '#ff4040' : '#ff8a3d';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, ARENA_MINE_ARM_RANGE, 0, Math.PI * 2);
+      ctx.stroke();
+      if (m.armed) {
+        ctx.globalAlpha = 0.34 + pulse * 0.18;
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, ARENA_MINE_BLAST_RADIUS, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+      // outer warning ring
+      ctx.save();
+      ctx.globalAlpha = m.armed ? 0.55 : 0.25;
+      ctx.strokeStyle = m.armed ? '#ff4040' : '#ff8a3d';
+      ctx.lineWidth = m.armed ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.armed ? (16 + pulse * 18) : 20, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      // body
+      ctx.fillStyle = '#2a1a14';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3a2418';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 7, 0, Math.PI * 2); ctx.fill();
+      // blinking LED
+      ctx.fillStyle = m.armed ? `rgba(255,80,80,${0.5 + pulse * 0.5})` : `rgba(255,180,80,${0.4 + pulse * 0.4})`;
+      ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  drawEnemyThreatHalos();
+  for (const e of Game.enemies) drawEnemy(e);
+  drawBullets();
+  drawShockwaves();
+  drawParticles();
+
+  // Phase 5 refinement — boss charged-shot telegraph laser, drawn before
+  // the player so the line passes under the chassis.
+  drawArenaBossTelegraph();
+  // Batch v3 — sniper laser-sight telegraphs for any aiming sniper.
+  drawArenaSniperSights();
+  // Batch v3 — kamikaze priming pulses near the player.
+  drawArenaKamikazePulses();
+  // Phase 1 refinement — dash afterimages: faded chassis silhouettes along
+  // the dash path so the dash motion reads even at low frame rates.
+  drawArenaDashGhosts();
+  // player vehicle — rotates to face travel direction using the existing
+  // `forcedRot` opt (drawVehicle already supports it). The legacy art
+  // points "up" (toward -y), so subtract π/2 to convert a math-angle
+  // (0 = +x) into the chassis-rotation expected by drawVehicle.
+  // `topDown: true` enables the Phase 2 pseudo-3D presentation:
+  // facing-aware grounded shadow + slight flatten + bank-driven lean.
+  if (Game.state === 'dying') {
+    drawWreck();
+  } else if (Game.state !== 'gameover') {
+    drawVehicle(p.x, p.y, Game.vehicle, Math.hypot(p.vx, p.vy), 42, 64, {
+      forcedRot: p.facing + Math.PI / 2,
+      topDown: true,
+      bank: p.bank || 0,
+      damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
+    });
+    // Phase 1 refinement — yellow ring around player while dash i-frames are
+    // active so other players can tell the player is briefly immune.
+    if ((Game.arenaInvulnT || 0) > 0) {
+      const a = clamp(Game.arenaInvulnT / ARENA_DASH_INVULN, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = 0.45 + 0.3 * a;
+      ctx.strokeStyle = '#ffd86b';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(p.w, p.h) * 0.55 + 4 + (1 - a) * 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (Game.hitFlash > 0) {
+      ctx.save();
+      ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
+      ctx.fillStyle = '#fff3b0';
+      ctx.fillRect(p.x - p.w/2 - 2, p.y - p.h/2 - 2, p.w + 4, p.h + 4);
+      ctx.restore();
+    }
+    drawShield();
+    if (Game.muzzleT > 0) {
+      const a = clamp(Game.muzzleT / 0.08, 0, 1);
+      const cs = Math.cos(p.facing), sn = Math.sin(p.facing);
+      const nx = p.x + cs * (p.h * 0.5 + 6);
+      const ny = p.y + sn * (p.h * 0.5 + 6);
+      ctx.save();
+      ctx.globalAlpha = a * 0.7;
+      ctx.fillStyle = (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#fff3b0';
+      ctx.beginPath();
+      ctx.arc(nx, ny, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // popups: drawn in world coords too so they sit above the kill
+  drawPopups();
+
+  ctx.restore(); // end world translate
+
+  // screen-space red damage flash
+  if (Game.flash > 0) {
+    ctx.fillStyle = `rgba(255,80,80,${Game.flash * 0.4})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.restore(); // end shake save
+
+  // Batch v3 — day/night tint sits between gameplay and vignette so the
+  // vignette darken still reads. Lightning flash overlays on top.
+  if (Game.mode === 'arena') {
+    drawArenaNightTint();
+    // Batch v4 — danger pulse sits above the night tint so it's visible
+    // even on heavily-tinted night frames.
+    drawArenaDangerPulse();
+    drawArenaLightningFlash();
+  }
+
+  // vignette
+  ctx.fillStyle = VIGNETTE_PLAY;
+  ctx.fillRect(0, 0, W, H);
+
+  // HUD + overlays — screen space
+  if (Game.state === 'playing') {
+    drawHUD();
+    drawPowerupStrip();
+    drawComboMeter();
+    drawArenaBossBar();
+    // Phase 1 refinement — arena dash cooldown HUD chip.
+    if (Game.mode === 'arena') drawArenaDashHUD();
+    // Phase 6 — arena combo display
+    if (Game.mode === 'arena') drawArenaCombo();
+    // Phase 5 refinement — offscreen threat indicators (boss + armed mines).
+    if (Game.mode === 'arena') drawArenaOffscreenIndicators();
+    drawArenaMinimap();
+    // Phase 4 refinement — wave intro banner overlay.
+    if (Game.mode === 'arena' && (Game.arenaWaveIntroT || 0) > 0) drawArenaWaveIntro();
+    // Batch v3 — perk-select modal sits above the minimap/HUD when active.
+    if (Game.mode === 'arena' && Game.arenaPerkChoosing) drawArenaPerkPicker();
+    // Batch v4 — top-right hardcore badge + bottom-right turret chip.
+    if (Game.mode === 'arena') drawArenaBatchV4HUD();
+    // Batch v4 — first-run tutorial overlay (auto-dismisses on timer).
+    if (Game.mode === 'arena') drawArenaTutorial();
+  }
+  if (Game.state === 'playing' && Game.paused) drawPause();
+  if (Game.state === 'loading') drawLoadingOverlay();
+  if (Game.state === 'dying')   drawDeathOverlay();
+  // Batch v4 — arena leaderboard overlay on death (toggle with L). Drawn
+  // after the death overlay so it sits on top.
+  if (Game.state === 'dying' && Game.mode === 'arena') drawArenaLeaderboardPanel();
+}
+
+// ============================================================
+// === ARENA REFINEMENT RENDERERS (Phase 1-5 v2) ===
+// All renderers below assume the world-space transform is active
+// (i.e. ctx.translate(-cam.x, -cam.y)) unless explicitly noted as
+// screen-space. They cull aggressively against the camera AABB
+// because the arena world can have many invisible entities.
+// ============================================================
+
+// Phase 2 refinement — tire skid trails.
+// Drawn as a stack of small dark dashes rotated to match wheel facing.
+// Each segment fades linearly with remaining life.
+function drawArenaSkidTrails() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSkidTrails || !Game.arenaSkidTrails.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const s of Game.arenaSkidTrails) {
+    // off-camera cull (10px slack)
+    if (s.x < cam.x - 10 || s.x > cam.x + W + 10 ||
+        s.y < cam.y - 10 || s.y > cam.y + H + 10) continue;
+    const a = clamp(s.life / s.max, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = a * 0.5;
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.rot);
+    ctx.fillStyle = '#1a0e08';
+    ctx.fillRect(-5, -1.2, 10, 2.4);
+    ctx.restore();
+  }
+}
+
+// Phase 4 refinement — explosive barrels.
+// Simple top-down disc with hazard chevrons and a rivet ring; when burning,
+// glows orange and emits the fire particles created in arenaUpdateBarrels.
+function drawArenaBarrels() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaBarrels || !Game.arenaBarrels.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const b of Game.arenaBarrels) {
+    if (b.x < cam.x - 30 || b.x > cam.x + W + 30 ||
+        b.y < cam.y - 30 || b.y > cam.y + H + 30) continue;
+    const burning = b.burnT > 0;
+    const pulse = 0.5 + 0.5 * Math.sin(b.t * (burning ? 22 : 4));
+    // ground shadow
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.beginPath();
+    ctx.ellipse(b.x + 3, b.y + 6, 13, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body
+    ctx.fillStyle = burning ? `rgba(${220 + pulse * 30 | 0},${110 + pulse * 60 | 0},${30 + pulse * 10 | 0},1)` : '#a04a18';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 12, 0, Math.PI * 2);
+    ctx.fill();
+    // top inset
+    ctx.fillStyle = burning ? `rgba(${255},${180 + pulse * 60 | 0},${60 + pulse * 40 | 0},1)` : '#6a2a10';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y - 2, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // hazard chevron
+    ctx.fillStyle = burning ? '#fff3b0' : '#ffd86b';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', b.x, b.y - 1);
+    // rivet ring
+    ctx.strokeStyle = burning ? '#fff3b0' : '#3a1a0a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 11.5, 0, Math.PI * 2);
+    ctx.stroke();
+    // burning glow ring
+    if (burning) {
+      ctx.globalAlpha = 0.35 + pulse * 0.35;
+      ctx.strokeStyle = '#ff8a3d';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 16 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      // intent-to-explode blast radius hint (very faint)
+      ctx.globalAlpha = 0.10 + pulse * 0.10;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, ARENA_BARREL_BLAST_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// Phase 3/4 refinement — pre-spawn enemy markers.
+// Pulsing red ring with kind-specific icon; converges as life ticks down
+// so the impending threat reads at a glance.
+function drawArenaSpawnMarkers() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSpawnMarkers || !Game.arenaSpawnMarkers.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const m of Game.arenaSpawnMarkers) {
+    if (m.x < cam.x - 50 || m.x > cam.x + W + 50 ||
+        m.y < cam.y - 50 || m.y > cam.y + H + 50) continue;
+    const k = clamp(m.t / (m.t + m.life || 1), 0, 1);    // 0 → 1 over marker life
+    const ringR = (1 - k) * 36 + 8;
+    const pulse = 0.5 + 0.5 * Math.sin(m.t * 18);
+    ctx.save();
+    // outer red ring contracting toward spawn point
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = '#ff5050';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+    // inner pulsing dot
+    ctx.globalAlpha = 0.65 + pulse * 0.35;
+    ctx.fillStyle = '#ff5050';
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 5 + pulse * 2, 0, Math.PI * 2);
+    ctx.fill();
+    // kind glyph
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = '#fff3b0';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const glyph = m.kind === 'tank' ? 'T' : m.kind === 'mortar' ? 'M' : m.kind === 'drone' ? 'D' : 'B';
+    ctx.fillText(glyph, m.x, m.y - 12 - ringR * 0.4);
+    ctx.restore();
+  }
+}
+
+// Phase 1 refinement — dash afterimage ghosts.
+// Faded yellow silhouettes along the dash path; cheap solid fills, no
+// gradients, so this stays under control on mobile.
+function drawArenaDashGhosts() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaDashGhosts || !Game.arenaDashGhosts.length) return;
+  const p = Game.player;
+  if (!p) return;
+  for (const g of Game.arenaDashGhosts) {
+    const a = clamp(g.life / g.max, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = a * 0.32;
+    ctx.translate(g.x, g.y);
+    ctx.rotate(g.facing + Math.PI / 2);
+    ctx.fillStyle = '#ffd86b';
+    ctx.fillRect(-p.w * 0.4, -p.h * 0.4, p.w * 0.8, p.h * 0.8);
+    ctx.restore();
+  }
+}
+
+// Phase 5 refinement — boss charged-shot telegraph.
+// Draws a red laser line from the boss to the latched fire direction
+// while arenaBossChargeT > 0, pulsing in width to communicate urgency.
+function drawArenaBossTelegraph() {
+  if (Game.mode !== 'arena') return;
+  if ((Game.arenaBossChargeT || 0) <= 0) return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  const boss = Game.enemies.find(e => e.arenaBoss && e._chargeReady);
+  if (!boss) return;
+  const ang = (boss._chargeAng !== undefined) ? boss._chargeAng : 0;
+  const k = clamp(Game.arenaBossChargeT / ARENA_BOSS_CHARGE_TIME, 0, 1);
+  const w = 1.5 + (1 - k) * 6;
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 26);
+  const len = 900;
+  const ex = boss.x + Math.cos(ang) * len;
+  const ey = boss.y + Math.sin(ang) * len;
+  ctx.save();
+  ctx.globalAlpha = 0.35 + pulse * 0.35;
+  ctx.strokeStyle = '#ff4040';
+  ctx.lineWidth = w;
+  ctx.beginPath();
+  ctx.moveTo(boss.x, boss.y);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  // bright core line
+  ctx.globalAlpha = 0.55 + pulse * 0.45;
+  ctx.strokeStyle = '#ffd86b';
+  ctx.lineWidth = Math.max(1, w * 0.35);
+  ctx.beginPath();
+  ctx.moveTo(boss.x, boss.y);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Phase 5 refinement — off-screen threat indicators.
+// Renders chevron arrows on the screen edge pointing toward bosses and
+// armed mines that are currently outside the camera viewport, so players
+// always know where the biggest threats are.
+function drawArenaOffscreenIndicators() {
+  if (Game.mode !== 'arena') return;
+  const cam = Game.camera;
+  if (!cam) return;
+  const targets = [];
+  if (Game.enemies) {
+    for (const e of Game.enemies) {
+      if (!e.arenaBoss) continue;
+      if (e.x >= cam.x && e.x <= cam.x + W && e.y >= cam.y && e.y <= cam.y + H) continue;
+      targets.push({ x: e.x, y: e.y, color: '#ff4040', label: 'BOSS' });
+    }
+  }
+  if (Game.arenaMines) {
+    for (const m of Game.arenaMines) {
+      if (!m.armed) continue;
+      if (m.x >= cam.x && m.x <= cam.x + W && m.y >= cam.y && m.y <= cam.y + H) continue;
+      targets.push({ x: m.x, y: m.y, color: '#ff8a3d', label: 'MINE' });
+    }
+  }
+  if (Game.arenaSpawnMarkers) {
+    for (const sp of Game.arenaSpawnMarkers) {
+      if (sp.x >= cam.x && sp.x <= cam.x + W && sp.y >= cam.y && sp.y <= cam.y + H) continue;
+      targets.push({ x: sp.x, y: sp.y, color: '#ff5050', label: 'SPAWN' });
+    }
+  }
+  if (!targets.length) return;
+  const pad = 28;
+  const cxScr = W / 2, cyScr = H / 2;
+  ctx.save();
+  ctx.font = 'bold 9px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const t of targets) {
+    // direction from camera center to target (in world)
+    const dx = (t.x - (cam.x + W / 2));
+    const dy = (t.y - (cam.y + H / 2));
+    const ang = Math.atan2(dy, dx);
+    // project to screen edge inside the safe-pad rectangle
+    const halfW = W / 2 - pad;
+    const halfH = H / 2 - pad;
+    let scale = Math.min(halfW / Math.max(0.0001, Math.abs(Math.cos(ang))),
+                         halfH / Math.max(0.0001, Math.abs(Math.sin(ang))));
+    const ix = cxScr + Math.cos(ang) * scale;
+    const iy = cyScr + Math.sin(ang) * scale;
+    // arrow body
+    ctx.save();
+    ctx.translate(ix, iy);
+    ctx.rotate(ang);
+    ctx.fillStyle = t.color;
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-6, -7);
+    ctx.lineTo(-2, 0);
+    ctx.lineTo(-6, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // label slightly behind the arrow
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.label, ix - Math.cos(ang) * 14, iy - Math.sin(ang) * 14);
+  }
+  ctx.restore();
+}
+
+// Phase 1 refinement — dash cooldown HUD chip (screen space).
+// Compact pill on the bottom-left showing dash readiness.
+function drawArenaDashHUD() {
+  if (Game.mode !== 'arena') return;
+  const cd = Game.arenaDashCD || 0;
+  const ready = cd <= 0;
+  const padX = 12;
+  const padY = H - 36;
+  const w = 88, h = 22;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(padX - 2, padY - 2, w + 4, h + 4);
+  ctx.fillStyle = 'rgba(60,40,28,0.85)';
+  ctx.fillRect(padX, padY, w, h);
+  // progress fill
+  const fillPct = ready ? 1 : 1 - clamp(cd / ARENA_DASH_COOLDOWN, 0, 1);
+  ctx.fillStyle = ready ? '#d2ff6f' : '#ffb36a';
+  ctx.fillRect(padX, padY, w * fillPct, h);
+  // label
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = ready ? '#1a3a0e' : '#3a1a08';
+  ctx.fillText(ready ? 'DASH (Q)' : 'DASH ' + cd.toFixed(1) + 'S', padX + w / 2, padY + h / 2);
+  // outline
+  ctx.strokeStyle = '#8a5a3a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(padX + 0.5, padY + 0.5, w - 1, h - 1);
+  ctx.restore();
+}
+
+// Phase 4 refinement — wave intro banner overlay.
+// Big text + accent strip with subtle slide-in animation tied to remaining
+// time. Sits centered over the world.
+function drawArenaWaveIntro() {
+  if (Game.mode !== 'arena') return;
+  const t = clamp(Game.arenaWaveIntroT / ARENA_WAVE_INTRO_TIME, 0, 1);
+  // ease: full opacity for the first half, fade for the second
+  const a = t > 0.5 ? 1 : t * 2;
+  const slideX = (1 - t) * -20;
+  const label = Game.arenaWaveIntroLabel || '';
+  const accent = Game.arenaWaveIntroAccent || '#ffd86b';
+  const y = H * 0.32;
+  const fontSize = W < 500 ? 28 : 42;
+  ctx.save();
+  ctx.globalAlpha = a * 0.92;
+  // accent strip
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, y - fontSize * 0.9, W, fontSize * 1.8);
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, y - fontSize * 0.9, W, 3);
+  ctx.fillRect(0, y + fontSize * 0.9 - 3, W, 3);
+  // big label
+  ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#1a0a04';
+  ctx.fillText(label, W / 2 + slideX + 3, y + 3);
+  ctx.fillStyle = accent;
+  ctx.fillText(label, W / 2 + slideX, y);
+  // small subtitle
+  ctx.font = `bold ${Math.round(fontSize * 0.32)}px "Courier New", monospace`;
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('INCOMING', W / 2 + slideX, y + fontSize * 0.65);
+  ctx.restore();
+}
+
+
+function drawArenaBossBar() {
+  if (Game.mode !== 'arena' || !Game.enemies || !Game.enemies.length) return;
+  const boss = Game.enemies.find(e => e.arenaBoss);
+  if (!boss) return;
+  const hudH = W < 500 ? 48 : 56;
+  const bbW = Math.min(300, W * 0.58);
+  const bbH = 12;
+  const bbX = (W - bbW) / 2;
+  const bbY = hudH + 8;
+  const pct = clamp((boss.hp || 0) / Math.max(1, boss.maxHp || 1), 0, 1);
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 8);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.68)';
+  ctx.fillRect(bbX - 4, bbY - 4, bbW + 8, bbH + 20);
+  ctx.fillStyle = '#1a0707';
+  ctx.fillRect(bbX, bbY, bbW, bbH);
+  ctx.fillStyle = `rgba(255,64,64,${0.18 + pulse * 0.16})`;
+  ctx.fillRect(bbX - 3, bbY - 3, bbW + 6, bbH + 6);
+  ctx.fillStyle = '#ff4040';
+  ctx.fillRect(bbX, bbY, bbW * pct, bbH);
+  ctx.strokeStyle = '#ffb36a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bbX, bbY, bbW, bbH);
+  ctx.fillStyle = '#ffb36a';
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('ARENA BOSS', W / 2, bbY + bbH + 4);
+  ctx.restore();
+}
+
+// Compact minimap showing the world, player, and enemies. Drawn in the
+// top-right corner; cheap (no gradients) so it works at low quality.
+function drawArenaCombo() {
+  const x = 12, y = 50;
+  const comboNum = Game.arenaCombo || 0;
+  const comboMul = ARENA_COMBO_MULTIPLIER_MIN + (ARENA_COMBO_MULTIPLIER_MAX - ARENA_COMBO_MULTIPLIER_MIN) * 
+                   Math.min(comboNum / (ARENA_COMBO_KILLS_PER_TIER * 5), 1);
+  const nextTier = Math.ceil((comboNum + 1) / ARENA_COMBO_KILLS_PER_TIER) * ARENA_COMBO_KILLS_PER_TIER;
+  
+  // Phase 6 — combo display with multiplier bar
+  ctx.save();
+  ctx.font = 'bold 14px "Courier New", monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  
+  // title
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('COMBO', x, y);
+  
+  // counter + multiplier
+  ctx.font = 'bold 22px "Courier New", monospace';
+  const textColor = comboNum > 20 ? '#ff6f9f' : comboNum > 10 ? '#ffb36a' : '#d2ff6f';
+  ctx.fillStyle = textColor;
+  ctx.fillText(comboNum.toString(), x, y + 16);
+  
+  // multiplier on the right
+  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.fillStyle = comboMul >= 3 ? '#ff4040' : comboMul >= 2 ? '#ffb36a' : '#d2ff6f';
+  ctx.fillText(comboMul.toFixed(2) + 'x', x + 50, y + 22);
+  
+  // progress bar to next tier
+  const barW = 100, barH = 8;
+  const progress = (comboNum % ARENA_COMBO_KILLS_PER_TIER) / ARENA_COMBO_KILLS_PER_TIER;
+  ctx.fillStyle = 'rgba(60,40,30,0.6)';
+  ctx.fillRect(x, y + 42, barW, barH);
+  ctx.fillStyle = '#ffb36a';
+  ctx.fillRect(x, y + 42, barW * progress, barH);
+  ctx.strokeStyle = '#8a5a3a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y + 42, barW, barH);
+  
+  // progress text
+  ctx.font = '9px "Courier New", monospace';
+  ctx.fillStyle = '#ffb36a';
+  ctx.textAlign = 'center';
+  ctx.fillText((comboNum % ARENA_COMBO_KILLS_PER_TIER) + '/' + ARENA_COMBO_KILLS_PER_TIER, x + barW/2, y + 53);
+  
+  ctx.restore();
+}
+
+function drawArenaMinimap() {
+  const world = Game.world;
+  const p = Game.player;
+  if (!world || !p) return;
+  const padX = 14;
+  const padY = 84; // sit below the HUD strip
+  const size = Math.min(120, W * 0.22);
+  const x0 = W - size - padX;
+  const y0 = padY;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x0 - 2, y0 - 2, size + 4, size + 4);
+  ctx.fillStyle = 'rgba(60,40,28,0.85)';
+  ctx.fillRect(x0, y0, size, size);
+  ctx.strokeStyle = 'rgba(255,210,140,0.6)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, size - 1, size - 1);
+  const sx = size / world.w;
+  const sy = size / world.h;
+  // current camera viewport for orientation in the large arena.
+  if (Game.camera) {
+    ctx.strokeStyle = 'rgba(122,240,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 + Game.camera.x * sx, y0 + Game.camera.y * sy, W * sx, H * sy);
+  }
+  // enemies
+  for (const e of Game.enemies) {
+    ctx.fillStyle = e.arenaBoss ? '#ff4040' : (e.kind === 'drone' ? '#ff9fff' : '#ff6a4a');
+    const dot = e.arenaBoss ? 5 : 3;
+    ctx.fillRect(x0 + e.x * sx - dot/2, y0 + e.y * sy - dot/2, dot, dot);
+  }
+  // pickups on minimap
+  ctx.fillStyle = '#f5d76e';
+  for (const pk of Game.pickups) {
+    ctx.fillRect(x0 + pk.x * sx - 1, y0 + pk.y * sy - 1, 2, 2);
+  }
+  // Phase 5 — mines on minimap (red when armed, orange when idle)
+  if (Game.arenaMines && Game.arenaMines.length) {
+    for (const m of Game.arenaMines) {
+      ctx.fillStyle = m.armed ? '#ff4040' : '#ff8a3d';
+      ctx.fillRect(x0 + m.x * sx - 1, y0 + m.y * sy - 1, 2, 2);
+    }
+  }
+  // player
+  ctx.fillStyle = '#7af0ff';
+  ctx.fillRect(x0 + p.x * sx - 2, y0 + p.y * sy - 2, 4, 4);
+  // facing tick
+  ctx.strokeStyle = '#7af0ff';
+  ctx.beginPath();
+  ctx.moveTo(x0 + p.x * sx, y0 + p.y * sy);
+  ctx.lineTo(x0 + p.x * sx + Math.cos(p.facing) * 6, y0 + p.y * sy + Math.sin(p.facing) * 6);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ============================================================
+// === END PHASE 1 ARENA MODE ===
+// ============================================================
+
+// ============================================================
+// === BATCH v3 ARENA RENDERERS ===
+// Tar patches, supply drops, sniper sights, kamikaze pulses,
+// night tint, lightning flash, perk picker. All assume the
+// world-space transform is active unless noted as screen-space.
+// ============================================================
+
+// Tar patches: irregular dark blobs with a faint shimmer. Pre-baked blob
+// outline (set up in beginPlaying) keeps per-frame work bounded.
+function drawArenaTarPatches() {
+  if (Game.mode !== 'arena') return;
+  const patches = Game.arenaTarPatches;
+  if (!patches || !patches.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const t of patches) {
+    // cull off-camera (with margin = patch radius)
+    if (t.x + t.r < cam.x || t.x - t.r > cam.x + W ||
+        t.y + t.r < cam.y || t.y - t.r > cam.y + H) continue;
+    ctx.save();
+    // base blob outline
+    ctx.beginPath();
+    const segs = t.blobs || [];
+    for (let i = 0; i < segs.length; i++) {
+      const b = segs[i];
+      const r = t.r * b.dr;
+      const x = t.x + Math.cos(b.ang) * r;
+      const y = t.y + Math.sin(b.ang) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else         ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#0a0604';
+    ctx.fill();
+    // glossy highlight ring — slowly rotates via t.t for a subtle shimmer
+    ctx.globalAlpha = 0.18 + 0.12 * Math.sin(t.t * 1.8);
+    ctx.strokeStyle = '#5a3a18';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // hazard ring
+    ctx.globalAlpha = 0.35;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#3a1a08';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Supply drop crates with descending parachute marker. While 'descend' we
+// draw a chute + descent shadow growing on the ground. Landed crates pulse
+// to draw the player's eye.
+function drawArenaSupplies() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSupplies || !Game.arenaSupplies.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const s of Game.arenaSupplies) {
+    if (s.x < cam.x - 80 || s.x > cam.x + W + 80 ||
+        s.y < cam.y - 80 || s.y > cam.y + H + 80) continue;
+    if (s.phase === 'descend') {
+      const k = s.descendK || 0;
+      // landing shadow grows
+      ctx.save();
+      ctx.globalAlpha = 0.18 + 0.22 * k;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(s.landX, s.landY + 4, 18 - k * 4, 9 - k * 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // landing reticle
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = '#d2ff6f';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.arc(s.landX, s.landY, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      // parachute drifts down toward landX/landY
+      const ay = s.landY - (1 - k) * 110;       // 110px above landing
+      const ax = s.landX + Math.sin(s.t * 1.4) * 6;  // slight sway
+      ctx.save();
+      // chute canopy
+      ctx.fillStyle = '#d2ff6f';
+      ctx.beginPath();
+      ctx.moveTo(ax - 18, ay - 4);
+      ctx.quadraticCurveTo(ax, ay - 22, ax + 18, ay - 4);
+      ctx.lineTo(ax + 14, ay - 4);
+      ctx.lineTo(ax, ay - 12);
+      ctx.lineTo(ax - 14, ay - 4);
+      ctx.closePath();
+      ctx.fill();
+      // chute cords
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ax - 14, ay - 4); ctx.lineTo(ax - 6, ay + 6);
+      ctx.moveTo(ax, ay - 12);     ctx.lineTo(ax, ay + 6);
+      ctx.moveTo(ax + 14, ay - 4); ctx.lineTo(ax + 6, ay + 6);
+      ctx.stroke();
+      // crate
+      ctx.fillStyle = '#8a5a20';
+      ctx.fillRect(ax - 8, ay + 6, 16, 14);
+      ctx.strokeStyle = '#3a1a08';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ax - 7.5, ay + 6.5, 15, 13);
+      ctx.fillStyle = '#d2ff6f';
+      ctx.font = 'bold 8px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+', ax, ay + 13);
+      ctx.restore();
+    } else {
+      // landed: pulse
+      const pulse = 0.5 + 0.5 * Math.sin(s.t * 4.5);
+      ctx.save();
+      ctx.globalAlpha = 0.45 + pulse * 0.35;
+      ctx.strokeStyle = '#d2ff6f';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 22 + pulse * 5, 0, Math.PI * 2);
+      ctx.stroke();
+      // crate body
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#8a5a20';
+      ctx.fillRect(s.x - 10, s.y - 8, 20, 18);
+      ctx.strokeStyle = '#3a1a08';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(s.x - 9.5, s.y - 7.5, 19, 17);
+      ctx.fillStyle = '#d2ff6f';
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+', s.x, s.y + 1);
+      // life-left chip (subtle)
+      const lifeK = clamp(s.life / ARENA_SUPPLY_LIFE_AFTER, 0, 1);
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = '#d2ff6f';
+      ctx.fillRect(s.x - 10, s.y + 11, 20 * lifeK, 2);
+      ctx.restore();
+    }
+  }
+}
+
+// Sniper laser-sight telegraphs: short red line from sniper toward latched
+// aim direction, intensifying as the shot nears.
+function drawArenaSniperSights() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  for (const e of Game.enemies) {
+    if (e.kind !== 'sniper' || !e._sniperFiring) continue;
+    const aim = e._sniperAimAng;
+    if (aim === undefined) continue;
+    const k = clamp(e._sniperAimT / ARENA_SNIPER_TELEGRAPH, 0, 1);
+    const lineW = 1 + (1 - k) * 4;
+    const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 22);
+    const length = ARENA_SNIPER_RANGE;
+    const ex = e.x + Math.cos(aim) * length;
+    const ey = e.y + Math.sin(aim) * length;
+    ctx.save();
+    ctx.globalAlpha = 0.35 + pulse * 0.25 + (1 - k) * 0.25;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = lineW;
+    ctx.beginPath();
+    ctx.moveTo(e.x, e.y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    // bright dot at the aim origin
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#ffd86b';
+    ctx.beginPath();
+    ctx.arc(e.x + Math.cos(aim) * (e.h * 0.5 + 4),
+            e.y + Math.sin(aim) * (e.h * 0.5 + 4), 3 + (1 - k) * 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// Kamikaze priming pulses: when a kamikaze gets close to the player, render
+// a red blink ring around it to signal incoming detonation.
+function drawArenaKamikazePulses() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  const p = Game.player;
+  if (!p) return;
+  for (const e of Game.enemies) {
+    if (e.kind !== 'kamikaze') continue;
+    const d = Math.hypot(e.x - p.x, e.y - p.y);
+    if (d > ARENA_KAMI_PRIME_RADIUS) continue;
+    const close = clamp(1 - d / ARENA_KAMI_PRIME_RADIUS, 0, 1);
+    const blink = 0.5 + 0.5 * Math.sin((Game.t || 0) * ARENA_KAMI_BLINK_RATE * Math.PI);
+    ctx.save();
+    ctx.globalAlpha = 0.3 + blink * 0.5 * close;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, 14 + blink * 6, 0, Math.PI * 2);
+    ctx.stroke();
+    // optional warning bracket
+    ctx.globalAlpha = 0.5 * close;
+    ctx.fillStyle = '#ff4040';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!!', e.x, e.y - 18);
+    ctx.restore();
+  }
+}
+
+// Screen-space night tint: a dark blue overlay that grows with the night-amount.
+function drawArenaNightTint() {
+  if (Game.mode !== 'arena') return;
+  const n = arenaNightAmount();
+  if (n <= 0.02) return;
+  const a = n * ARENA_NIGHT_TINT_ALPHA;
+  ctx.save();
+  ctx.globalAlpha = a;
+  // cool blue grade
+  ctx.fillStyle = '#0a0e22';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+// Screen-space lightning flash: full-screen white pulse that fades over
+// ARENA_LIGHTNING_FLASH seconds.
+function drawArenaLightningFlash() {
+  if (Game.mode !== 'arena') return;
+  const t = Game.arenaLightningFlash || 0;
+  if (t <= 0) return;
+  const k = clamp(t / ARENA_LIGHTNING_FLASH, 0, 1);
+  // fast initial peak then taper
+  const a = Math.min(0.8, k * 0.8);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  // brief bolt-like streaks
+  if (k > 0.5) {
+    ctx.globalAlpha = (k - 0.5) * 1.4;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const sx = rand(W * 0.2, W * 0.8);
+      let cx = sx, cy = 0;
+      ctx.moveTo(cx, cy);
+      while (cy < H * 0.55) {
+        cy += rand(20, 50);
+        cx += rand(-30, 30);
+        ctx.lineTo(cx, cy);
+      }
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Perk picker modal (screen space). 3 cards laid out across the middle of
+// the screen with keyboard hint and selection highlight.
+function drawArenaPerkPicker() {
+  if (Game.mode !== 'arena' || !Game.arenaPerkChoosing) return;
+  const choices = Game.arenaPerkChoices || [];
+  if (!choices.length) return;
+  // dim background
+  ctx.save();
+  ctx.globalAlpha = 0.75;
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  // title
+  ctx.save();
+  ctx.font = 'bold ' + (W < 500 ? 22 : 32) + 'px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('CHOOSE A PERK', W / 2, H * 0.22);
+  ctx.font = 'bold ' + (W < 500 ? 11 : 13) + 'px "Courier New", monospace';
+  ctx.fillStyle = '#d2ff6f';
+  ctx.fillText('1 / 2 / 3 or ← → + ENTER', W / 2, H * 0.22 + 26);
+  ctx.restore();
+  // card layout
+  const cardW = Math.min(220, (W - 80) / choices.length - 16);
+  const cardH = 170;
+  const gap = 16;
+  const totalW = cardW * choices.length + gap * (choices.length - 1);
+  let x0 = (W - totalW) / 2;
+  const y0 = H * 0.36;
+  const selIdx = Game.arenaPerkSelectedIdx || 0;
+  for (let i = 0; i < choices.length; i++) {
+    const c = choices[i];
+    const cx = x0 + i * (cardW + gap);
+    const selected = (i === selIdx);
+    ctx.save();
+    // card body
+    ctx.fillStyle = selected ? '#3a2418' : '#1a1410';
+    ctx.fillRect(cx, y0, cardW, cardH);
+    ctx.strokeStyle = c.color || '#ffd86b';
+    ctx.lineWidth = selected ? 3 : 1.5;
+    ctx.strokeRect(cx + 0.5, y0 + 0.5, cardW - 1, cardH - 1);
+    // accent strip
+    ctx.fillStyle = c.color || '#ffd86b';
+    ctx.fillRect(cx, y0, cardW, 6);
+    // index badge
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx + 8, y0 + 14, 22, 22);
+    ctx.strokeStyle = c.color || '#ffd86b';
+    ctx.strokeRect(cx + 8.5, y0 + 14.5, 21, 21);
+    ctx.fillStyle = c.color || '#ffd86b';
+    ctx.font = 'bold 14px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), cx + 19, y0 + 25);
+    // perk name
+    ctx.fillStyle = '#ffd86b';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    wrapTextSimple(c.name, cx + 38, y0 + 25, cardW - 46, 16);
+    // perk desc
+    ctx.font = '11px "Courier New", monospace';
+    ctx.fillStyle = '#d2ff6f';
+    ctx.textBaseline = 'top';
+    wrapTextSimple(c.desc, cx + 12, y0 + 56, cardW - 24, 14);
+    // already-owned indicator
+    const owned = (Game.arenaPerks || []).filter(p => p === c.id).length;
+    if (owned > 0) {
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillStyle = '#ff8a3d';
+      ctx.textAlign = 'right';
+      ctx.fillText('OWNED x' + owned, cx + cardW - 8, y0 + cardH - 14);
+    }
+    // selection arrow
+    if (selected) {
+      ctx.fillStyle = c.color || '#ffd86b';
+      ctx.font = 'bold 18px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('▼', cx + cardW / 2, y0 - 16);
+    }
+    ctx.restore();
+  }
+  // mouse / touch selection
+  if (input && (input.mouseX !== undefined) && (input.mouseY !== undefined)) {
+    const mx = input.mouseX, my = input.mouseY;
+    for (let i = 0; i < choices.length; i++) {
+      const cx = x0 + i * (cardW + gap);
+      if (mx >= cx && mx <= cx + cardW && my >= y0 && my <= y0 + cardH) {
+        Game.arenaPerkSelectedIdx = i;
+        if (input.fire || input.tap) {
+          // single-shot apply on tap/fire-press
+          arenaApplyPerkByIndex(i);
+        }
+        break;
+      }
+    }
+  }
+}
+
+// Helper — simple word-wrap that draws to the current ctx at (x, y) with a
+// fixed line height; trims at maxWidth measured via measureText.
+function wrapTextSimple(text, x, y, maxWidth, lineH) {
+  if (!text) return;
+  const words = String(text).split(/\s+/);
+  let line = '';
+  let yy = y;
+  for (let i = 0; i < words.length; i++) {
+    const test = line ? line + ' ' + words[i] : words[i];
+    const w = ctx.measureText(test).width;
+    if (w > maxWidth && line) {
+      ctx.fillText(line, x, yy);
+      yy += lineH;
+      line = words[i];
+    } else {
+      line = test;
+    }
+  }
+  if (line) ctx.fillText(line, x, yy);
+}
+
+// ============================================================
+// === END BATCH v3 ARENA RENDERERS ===
+// ============================================================
+
+
+// ============================================================
+// === BATCH v4 — TURRETS, ELITES, HARDCORE, TUTORIAL, DANGER PULSE ===
+// All systems are arena-mode gated. Helpers live here so they sit
+// near the other arena code without intercalating with legacy
+// game logic.
+// ============================================================
+
+// ----------------------------------------------------------------
+// Deployable turrets
+// ----------------------------------------------------------------
+
+// arenaTryDeployTurret: invoked from the keydown handler when the player
+// presses `E` during arena play. Validates scrap cost, placement cooldown,
+// and the live-turret cap, then pushes a new turret entity into Game.arenaTurrets.
+function arenaTryDeployTurret() {
+  if (Game.mode !== 'arena') return;
+  const p = Game.player;
+  if (!p) return;
+  if (Game.arenaTurretCdT > 0) {
+    addPopup('TURRET COOLDOWN', p.x, p.y - 28, '#ff8a3d', 11);
+    return;
+  }
+  if ((Game.arenaTurrets || []).length >= ARENA_TURRET_MAX_LIVE) {
+    addPopup('TURRET LIMIT', p.x, p.y - 28, '#ff4040', 11);
+    return;
+  }
+  // Spend persistent scrap from the profile wallet so the cost feels real.
+  const wallet = Profile.spend(ARENA_TURRET_SCRAP_COST);
+  if (!wallet) {
+    addPopup('NEED ' + ARENA_TURRET_SCRAP_COST + ' SCRAP', p.x, p.y - 28, '#ff4040', 11);
+    SFX.click && SFX.click();
+    return;
+  }
+  Game.arenaTurrets.push({
+    x: p.x, y: p.y,
+    hp: ARENA_TURRET_HP, maxHp: ARENA_TURRET_HP,
+    life: ARENA_TURRET_LIFE,
+    fireT: 0.25,
+    aimAng: p.facing || 0,
+    kills: 0,
+    placedAt: Game.t || 0,
+    deployT: 0.45, // pop-up animation
+  });
+  Game.arenaTurretCdT = ARENA_TURRET_PLACE_CD;
+  addPopup('TURRET DEPLOYED', p.x, p.y - 32, '#d2ff6f', 13);
+  SFX.powerUp && SFX.powerUp();
+  emit(p.x, p.y, 14, { color:'#d2ff6f', speed:200, life:0.4, size:3, spread:Math.PI*2 });
+  shockwave(p.x, p.y, 'rgba(210,255,111,0.55)', 60);
+}
+
+// arenaUpdateTurrets: each frame, tick lifetime, hunt for the closest enemy
+// in range, fire a bullet on cooldown, and apply contact damage from enemy
+// bullets / enemies that wander into the turret.
+function arenaUpdateTurrets(dt) {
+  if (Game.mode !== 'arena') return;
+  const list = Game.arenaTurrets;
+  if (!list || !list.length) return;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const t = list[i];
+    t.life -= dt;
+    t.deployT = Math.max(0, (t.deployT || 0) - dt);
+    if (t.life <= 0) {
+      arenaDestroyTurret(t, 'expired');
+      list.splice(i, 1);
+      continue;
+    }
+    if (t.hp <= 0) {
+      arenaDestroyTurret(t, 'killed');
+      list.splice(i, 1);
+      continue;
+    }
+    // Find closest enemy in range; ignore boss only if mooks present so
+    // turrets don't waste shots on a 5x-HP target while adds rampage.
+    let target = null, bestDist = ARENA_TURRET_RANGE * ARENA_TURRET_RANGE;
+    let hasNonBoss = false;
+    for (const e of Game.enemies) {
+      if (!e || e.arenaBoss) continue;
+      hasNonBoss = true;
+      const d2 = (e.x - t.x) * (e.x - t.x) + (e.y - t.y) * (e.y - t.y);
+      if (d2 < bestDist) { bestDist = d2; target = e; }
+    }
+    if (!target && !hasNonBoss) {
+      // fall back to boss if it's the only target
+      for (const e of Game.enemies) {
+        if (!e || !e.arenaBoss) continue;
+        const d2 = (e.x - t.x) * (e.x - t.x) + (e.y - t.y) * (e.y - t.y);
+        if (d2 < bestDist) { bestDist = d2; target = e; }
+      }
+    }
+    if (target) {
+      const desired = Math.atan2(target.y - t.y, target.x - t.x);
+      let dA = desired - t.aimAng;
+      while (dA >  Math.PI) dA -= 2 * Math.PI;
+      while (dA < -Math.PI) dA += 2 * Math.PI;
+      t.aimAng += clamp(dA, -4 * dt, 4 * dt);
+      t.fireT -= dt;
+      if (t.fireT <= 0) {
+        t.fireT = ARENA_TURRET_FIRE_RATE;
+        const ang = t.aimAng;
+        Game.bullets.push({
+          owner: 'p', // count as player-source so the bullet-vs-enemy loop picks it up
+          x: t.x + Math.cos(ang) * 12,
+          y: t.y + Math.sin(ang) * 12,
+          w: 4, h: 10,
+          vx: Math.cos(ang) * ARENA_TURRET_BULLET_SPEED,
+          vy: Math.sin(ang) * ARENA_TURRET_BULLET_SPEED,
+          dmg: ARENA_TURRET_DMG * (Game.arenaDmgMul || 1),
+          homing: false,
+          hitIds: [],
+          life: 1.2,
+          fromTurret: true,
+        });
+        SFX.shoot && SFX.shoot();
+        emit(t.x + Math.cos(ang) * 14, t.y + Math.sin(ang) * 14, 2,
+             { color:'#d2ff6f', speed:120, life:0.18, size:2, spread:Math.PI/4 });
+      }
+    }
+    // Enemy bullet hits turret
+    for (let bi = Game.enemyBullets.length - 1; bi >= 0; bi--) {
+      const eb = Game.enemyBullets[bi];
+      if (Math.hypot(eb.x - t.x, eb.y - t.y) < 18) {
+        t.hp -= eb.dmg || 6;
+        Game.enemyBullets.splice(bi, 1);
+        emit(t.x, t.y, 5, { color:'#ff8a3d', speed:160, life:0.25, size:2, spread:Math.PI*2 });
+      }
+    }
+    // Enemy collision damages turret
+    for (const e of Game.enemies) {
+      if (!e || e.kind === 'mortar' || e.kind === 'sniper') continue;
+      if (Math.hypot(e.x - t.x, e.y - t.y) < 24) {
+        t.hp -= 8 * dt; // continuous damage while overlapping
+      }
+    }
+  }
+}
+
+function arenaDestroyTurret(t, reason) {
+  SFX.explode && SFX.explode();
+  emit(t.x, t.y, 18, { color:'#ff8a3d', speed:260, life:0.5, size:3, spread:Math.PI*2 });
+  shockwave(t.x, t.y, 'rgba(255,140,60,0.45)', 70);
+  if (reason === 'killed') Game.shake = Math.max(Game.shake, 0.25);
+}
+
+// ----------------------------------------------------------------
+// Danger pulse + low-HP heartbeat
+// ----------------------------------------------------------------
+
+function arenaUpdateDangerPulse(dt) {
+  if (Game.mode !== 'arena') return;
+  const hpFrac = (Game.health || 0) / Math.max(1, (Game.maxHealth || 100));
+  if (hpFrac > 0 && hpFrac < ARENA_DANGER_HP_FRAC) {
+    Game.arenaDangerPulseT = (Game.arenaDangerPulseT || 0) + dt;
+    Game.arenaHeartbeatT  -= dt;
+    if (Game.arenaHeartbeatT <= 0) {
+      Game.arenaHeartbeatT = ARENA_HEARTBEAT_INTERVAL * (hpFrac < 0.12 ? 0.6 : 1);
+      // Re-use the hit SFX as a low-thump cue (sounds like a beat).
+      SFX.hit && SFX.hit();
+    }
+  } else {
+    // decay pulse smoothly when above the threshold
+    Game.arenaDangerPulseT = Math.max(0, (Game.arenaDangerPulseT || 0) - dt * 1.4);
+    Game.arenaHeartbeatT = 0;
+  }
+}
+
+// ----------------------------------------------------------------
+// Tutorial overlay seen-state persistence
+// ----------------------------------------------------------------
+
+function arenaMarkTutorialSeen() {
+  if (Game.arenaTutorialSeen) return;
+  Game.arenaTutorialSeen = true;
+  Game.arenaTutorialT = 0;
+  try { safeLocalStorage.setItem(ARENA_TUTORIAL_STORE_KEY, '1'); } catch (e) {}
+}
+
+// ----------------------------------------------------------------
+// Leaderboard read accessor used by overlays
+// ----------------------------------------------------------------
+
+function arenaReadLeaderboard() {
+  const p = Profile.active && Profile.active();
+  if (!p || !Array.isArray(p.arenaLeaderboard)) return [];
+  return p.arenaLeaderboard.slice(0, ARENA_LEADERBOARD_MAX);
+}
+
+// ============================================================
+// === BATCH v4 RENDERERS ===
+// All renderers below are pure draw functions that assume the
+// canvas state is already prepared by their caller (world-space
+// or screen-space as commented).
+// ============================================================
+
+// World-space: turret bodies, range halo, lifetime ring.
+function drawArenaTurrets() {
+  if (Game.mode !== 'arena') return;
+  const list = Game.arenaTurrets;
+  if (!list || !list.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const t of list) {
+    if (t.x + 60 < cam.x || t.x - 60 > cam.x + W ||
+        t.y + 60 < cam.y || t.y - 60 > cam.y + H) continue;
+    const lifeK = clamp(t.life / ARENA_TURRET_LIFE, 0, 1);
+    const lowLife = lifeK < 0.25;
+    // soft halo to suggest engagement range (faded for readability)
+    ctx.save();
+    ctx.globalAlpha = 0.10 + 0.05 * Math.sin((Game.t || 0) * 3);
+    ctx.strokeStyle = '#d2ff6f';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, ARENA_TURRET_RANGE, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    // deploy pop-in scale
+    const deployK = 1 - clamp((t.deployT || 0) / 0.45, 0, 1); // 0..1
+    const scale = 0.4 + 0.6 * deployK;
+    // ground pad
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#1a1410';
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a2418';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // base
+    ctx.fillStyle = '#3a2418';
+    ctx.fillRect(-10, -10, 20, 20);
+    // turret head, pointed along aim
+    ctx.rotate(t.aimAng);
+    ctx.fillStyle = lowLife ? '#ff4040' : '#d2ff6f';
+    ctx.fillRect(-6, -5, 12, 10);
+    // barrel
+    ctx.fillStyle = '#1a1410';
+    ctx.fillRect(0, -2, 16, 4);
+    ctx.restore();
+    // lifetime ring around the pad
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.strokeStyle = lowLife ? '#ff4040' : '#d2ff6f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, -Math.PI / 2, -Math.PI / 2 + lifeK * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    // hp pip
+    if (t.hp < t.maxHp) {
+      const hpK = clamp(t.hp / t.maxHp, 0, 1);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(t.x - 14, t.y - 22, 28, 3);
+      ctx.fillStyle = hpK > 0.5 ? '#d2ff6f' : hpK > 0.25 ? '#ffd86b' : '#ff4040';
+      ctx.fillRect(t.x - 14, t.y - 22, 28 * hpK, 3);
+      ctx.restore();
+    }
+  }
+}
+
+// Screen-space: pulsing red edge gradient when HP is critical.
+function drawArenaDangerPulse() {
+  if (Game.mode !== 'arena') return;
+  const t = Game.arenaDangerPulseT || 0;
+  if (t <= 0) return;
+  // strength clamps at 1 after ~0.8s; pulse shape uses a sine on Game.t
+  const k = clamp(t / 0.8, 0, 1);
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 4.5);
+  const alpha = 0.18 + 0.35 * pulse * k;
+  // build a radial gradient feathering from center
+  const grad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.7);
+  grad.addColorStop(0, 'rgba(255,40,40,0)');
+  grad.addColorStop(0.6, 'rgba(255,40,40,' + (alpha * 0.4).toFixed(3) + ')');
+  grad.addColorStop(1, 'rgba(255,40,40,' + alpha.toFixed(3) + ')');
+  ctx.save();
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+// Screen-space: first-run tutorial card. Lists the core controls.
+function drawArenaTutorial() {
+  if (Game.mode !== 'arena') return;
+  if ((Game.arenaTutorialT || 0) <= 0) return;
+  const k = clamp(Game.arenaTutorialT / ARENA_TUTORIAL_DURATION, 0, 1);
+  // fade-in for the first ~0.3 of the window, hold, then fade-out.
+  let a = 1;
+  if (k > 0.85) a = (1 - k) / 0.15;
+  else if (k < 0.15) a = k / 0.15;
+  a = clamp(a, 0, 1);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a * 0.92;
+  // dim
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(0, 0, W, H);
+  // card
+  const cardW = Math.min(420, W - 60);
+  const cardH = 230;
+  const cx = (W - cardW) / 2;
+  const cy = (H - cardH) / 2;
+  ctx.fillStyle = '#1a1410';
+  ctx.fillRect(cx, cy, cardW, cardH);
+  ctx.strokeStyle = '#ffd86b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
+  // accent strip
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillRect(cx, cy, cardW, 6);
+  // title
+  ctx.font = 'bold 16px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('WELCOME TO THE ARENA', cx + cardW / 2, cy + 16);
+  // body lines
+  const lines = [
+    ['WASD / ARROWS', 'Move (4-directional)'],
+    ['SPACE',         'Auto-fires while held'],
+    ['Q',             'Dash — brief i-frames'],
+    ['E',             'Deploy turret (' + ARENA_TURRET_SCRAP_COST + ' scrap)'],
+    ['SURVIVE',       'Clear waves for perks + scrap'],
+  ];
+  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < lines.length; i++) {
+    const y = cy + 56 + i * 24;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#d2ff6f';
+    ctx.fillText(lines[i][0], cx + 24, y);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(lines[i][1], cx + 160, y);
+  }
+  // dismiss hint
+  ctx.font = '10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#888';
+  ctx.fillText('(any key to dismiss · auto-dismiss soon)', cx + cardW / 2, cy + cardH - 16);
+  ctx.restore();
+}
+
+// Screen-space: leaderboard overlay (toggle with L on death screen).
+function drawArenaLeaderboardPanel() {
+  if (Game.mode !== 'arena') return;
+  if (Game.state !== 'dying' || !Game.arenaShowLeaderboard) return;
+  const rows = arenaReadLeaderboard();
+  const panelW = Math.min(520, W - 60);
+  const headerH = 56;
+  const rowH = 22;
+  const panelH = headerH + Math.max(1, rows.length) * rowH + 30;
+  const px = (W - panelW) / 2;
+  const py = (H - panelH) / 2;
+  ctx.save();
+  // dim screen
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, W, H);
+  // panel
+  ctx.fillStyle = '#1a1410';
+  ctx.fillRect(px, py, panelW, panelH);
+  ctx.strokeStyle = '#ffd86b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px + 1, py + 1, panelW - 2, panelH - 2);
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillRect(px, py, panelW, 6);
+  // title
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('ARENA — TOP ' + ARENA_LEADERBOARD_MAX, px + panelW / 2, py + 14);
+  // column headers
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.fillStyle = '#d2ff6f';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const colX = {
+    rank:  px + 16,
+    wave:  px + 56,
+    score: px + 140,
+    kills: px + 260,
+    when:  px + 360,
+  };
+  ctx.fillText('#',     colX.rank,  py + headerH - 12);
+  ctx.fillText('WAVE',  colX.wave,  py + headerH - 12);
+  ctx.fillText('SCORE', colX.score, py + headerH - 12);
+  ctx.fillText('KILLS', colX.kills, py + headerH - 12);
+  ctx.fillText('DATE',  colX.when,  py + headerH - 12);
+  // rows
+  ctx.font = '11px "Courier New", monospace';
+  if (!rows.length) {
+    ctx.fillStyle = '#aaa';
+    ctx.textAlign = 'center';
+    ctx.fillText('(no runs yet)', px + panelW / 2, py + headerH + 20);
+  } else {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const y = py + headerH + 10 + i * rowH;
+      ctx.fillStyle = i === 0 ? '#ffd86b' : '#fff';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(i + 1).padStart(2, ' '), colX.rank, y);
+      ctx.fillText(String(r.wave  || 0),           colX.wave, y);
+      ctx.fillText(String(r.score || 0),           colX.score, y);
+      ctx.fillText(String(r.kills || 0),           colX.kills, y);
+      const dt = new Date(r.when || 0);
+      const dateStr = isNaN(dt.getTime()) ? '?' :
+        (dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'));
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(dateStr, colX.when, y);
+    }
+  }
+  // hint
+  ctx.font = '10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#888';
+  ctx.fillText('(press L to close)', px + panelW / 2, py + panelH - 14);
+  ctx.restore();
+}
+
+// Screen-space: small HUD chip showing hardcore badge + turret cooldown.
+function drawArenaBatchV4HUD() {
+  if (Game.mode !== 'arena' || Game.state !== 'playing') return;
+  // hardcore badge in top-right
+  if (Game.arenaHardcore) {
+    ctx.save();
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    const label = 'HARDCORE';
+    const tw = ctx.measureText(label).width;
+    const pad = 6;
+    const x = W - 12 - tw - pad * 2;
+    const y = 10;
+    ctx.fillStyle = '#ff4040';
+    ctx.fillRect(x, y, tw + pad * 2, 16);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, W - 12 - pad, y + 3);
+    ctx.restore();
+  }
+  // turret chip in bottom-right
+  ctx.save();
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const chipW = 86, chipH = 18;
+  const x = W - chipW - 10;
+  const y = H - chipH - 90; // above the right-side gameplay HUD
+  const cd = Game.arenaTurretCdT || 0;
+  const live = (Game.arenaTurrets || []).length;
+  const ready = cd <= 0 && live < ARENA_TURRET_MAX_LIVE;
+  ctx.fillStyle = 'rgba(20,16,16,0.78)';
+  ctx.fillRect(x, y, chipW, chipH);
+  ctx.strokeStyle = ready ? '#d2ff6f' : '#888';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, chipW - 1, chipH - 1);
+  ctx.fillStyle = ready ? '#d2ff6f' : '#888';
+  ctx.fillText('[E] TURRET ' + live + '/' + ARENA_TURRET_MAX_LIVE, x + 6, y + chipH / 2);
+  if (cd > 0) {
+    ctx.fillStyle = '#3a2418';
+    const k = clamp(cd / ARENA_TURRET_PLACE_CD, 0, 1);
+    ctx.fillRect(x + 1, y + chipH - 3, (chipW - 2) * k, 2);
+  }
+  ctx.restore();
+}
+
+// World-space: elite minion highlight ring drawn before the regular enemy
+// renderer so the marker sits below the chassis.
+function drawArenaEliteRings() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  for (const e of Game.enemies) {
+    if (!e || !e.arenaElite || e.arenaBoss) continue;
+    const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 5);
+    ctx.save();
+    ctx.globalAlpha = 0.35 + pulse * 0.35;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, Math.max(e.w, e.h) * 0.7 + pulse * 3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// World-space: turret bullets get a faint green trail (separate from the
+// normal player bullet renderer because we want a distinct color cue).
+function drawArenaTurretBulletTrails() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.bullets || !Game.bullets.length) return;
+  for (const b of Game.bullets) {
+    if (!b.fromTurret) continue;
+    const sp = Math.hypot(b.vx || 0, b.vy || 0);
+    if (sp < 1) continue;
+    const dx = -(b.vx / sp) * 16, dy = -(b.vy / sp) * 16;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#d2ff6f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x + dx, b.y + dy);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// === END BATCH v4 ===
+// ============================================================
+
 
 boot();
 
