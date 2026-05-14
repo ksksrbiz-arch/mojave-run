@@ -8428,48 +8428,85 @@ function drawObstacle(o) {
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h);
+    pathRoundRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h, 4);
+    ctx.fill();
     ctx.fillStyle = '#5a4030';
-    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    pathRoundRect(-o.w/2, -o.h/2, o.w, o.h, 4);
+    ctx.fill();
     ctx.fillStyle = '#3a2818';
-    ctx.fillRect(-o.w/2 + 4, -o.h/2 + 14, o.w - 8, 22);
+    pathRoundRect(-o.w/2 + 4, -o.h/2 + 14, o.w - 8, 22, 3);
+    ctx.fill();
     ctx.fillStyle = '#1a0f08';
-    ctx.fillRect(-o.w/2 + 6, -o.h/2 + 4, 8, 6);
-    ctx.fillRect( o.w/2 - 14, -o.h/2 + 24, 10, 8);
+    pathRoundRect(-o.w/2 + 6, -o.h/2 + 4, 8, 6, 1.5);
+    ctx.fill();
+    pathRoundRect( o.w/2 - 14, -o.h/2 + 24, 10, 8, 1.5);
+    ctx.fill();
     ctx.fillStyle = '#0d0805';
-    ctx.fillRect(-o.w/2 - 3, -o.h/2 + 10, 5, 12);
-    ctx.fillRect( o.w/2 - 2, -o.h/2 + 10, 5, 12);
+    pathRoundRect(-o.w/2 - 3, -o.h/2 + 10, 5, 12, 1.5);
+    ctx.fill();
+    pathRoundRect( o.w/2 - 2, -o.h/2 + 10, 5, 12, 1.5);
+    ctx.fill();
     // rust streak
     ctx.fillStyle = 'rgba(180,80,40,0.3)';
     ctx.fillRect(-o.w/2 + 2, -o.h/2 + 14, 2, 18);
     // bright hazard banding (visual clarity) — yellow/black diagonal stripes
     // along the bumper so the silhouette reads instantly against the road
     ctx.fillStyle = '#ffd000';
-    ctx.fillRect(-o.w/2,  o.h/2 - 6, o.w, 4);
+    pathRoundRect(-o.w/2,  o.h/2 - 6, o.w, 4, 2);
+    ctx.fill();
     ctx.fillStyle = '#1a0f08';
     for (let sx = -o.w/2; sx < o.w/2; sx += 8) {
       ctx.fillRect(sx + 2, o.h/2 - 6, 4, 4);
     }
     ctx.restore();
   } else if (o.kind === 'barrel') {
+    // Top-down hazardous barrel — circular footprint with a banded shell so
+    // it reads as a cylinder rather than a sharp-edged box. Matches the
+    // smooth-rendering pass applied across the rest of the game world.
+    ctx.save();
+    // ground shadow (offset ellipse)
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(o.x - o.w/2 + 2, o.y - o.h/2 + 3, o.w, o.h);
-    // body
-    const bg = ctx.createLinearGradient(o.x - o.w/2, 0, o.x + o.w/2, 0);
-    bg.addColorStop(0, '#8a3a18'); bg.addColorStop(0.5, '#c25a2b'); bg.addColorStop(1, '#8a3a18');
+    ctx.beginPath();
+    ctx.ellipse(o.x + 2, o.y + 3, o.w * 0.52, o.h * 0.52, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body — radial gradient for a cylindrical sheen
+    const bg = ctx.createRadialGradient(o.x - o.w * 0.18, o.y - o.h * 0.12, 1, o.x, o.y, o.w * 0.6);
+    bg.addColorStop(0, '#d97244');
+    bg.addColorStop(0.55, '#c25a2b');
+    bg.addColorStop(1, '#6f2a13');
     ctx.fillStyle = bg;
-    ctx.fillRect(o.x - o.w/2, o.y - o.h/2, o.w, o.h);
-    ctx.fillStyle = '#1a0f08';
-    ctx.fillRect(o.x - o.w/2, o.y - 4, o.w, 2);
-    ctx.fillRect(o.x - o.w/2, o.y + 4, o.w, 2);
-    // bright yellow hazard band around middle for visibility against road
-    ctx.fillStyle = '#ffd000';
-    ctx.fillRect(o.x - o.w/2, o.y - 2, o.w, 6);
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, o.w * 0.5, o.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // dark rim banding (top + bottom of the cylinder)
+    ctx.strokeStyle = 'rgba(20,12,8,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y - o.h * 0.22, o.w * 0.46, o.h * 0.16, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y + o.h * 0.22, o.w * 0.46, o.h * 0.16, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // bright yellow hazard band — drawn as a thick stroked ring so it
+    // wraps around the cylinder shape instead of looking like a flat stripe
+    ctx.strokeStyle = '#ffd000';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, o.w * 0.46, o.h * 0.12, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // outline for crisper silhouette against road
+    ctx.strokeStyle = 'rgba(20,12,8,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y, o.w * 0.5, o.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // hazard '!' glyph
     ctx.fillStyle = '#1a0f08';
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', o.x, o.y);
+    ctx.restore();
   } else if (o.kind === 'civilian') {
     // Bright, friendly-looking sedan — clearly NOT an enemy
     const col = o.color || '#4aa8e8';
@@ -15305,6 +15342,10 @@ const Cinematic = (function () {
       const out = document.createElement('canvas');
       out.width = w; out.height = h;
       const c = out.getContext('2d');
+      // Match the live game's smooth rendering so the exported poster doesn't
+      // re-introduce pixelated edges when scaled down for sharing.
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = 'high';
       // 1. Base = the current rendered canvas.
       c.drawImage(cvs, 0, 0, w, h);
       // 2. Dramatic dark vignette + gold tint to push poster mood.
