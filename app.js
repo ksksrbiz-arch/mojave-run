@@ -17894,7 +17894,6 @@ function updateArena(dt) {
   }
 
   // ---- Phase 3: arena pickup spawning ----
-  if (Game.arenaPickupT === undefined) Game.arenaPickupT = rand(ARENA_PICKUP_INTERVAL_MIN, ARENA_PICKUP_INTERVAL_MAX);
   Game.arenaPickupT -= dt;
   if (Game.arenaPickupT <= 0) {
     spawnArenaPickup();
