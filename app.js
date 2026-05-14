@@ -8429,17 +8429,57 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
 
   ctx.save();
   ctx.translate(x, y + suspensionBob - spawnN * 6);
+
+  // === Phase 2 — 2.5D presentation ===
+  // When the caller is rendering the chassis as part of a top-down camera
+  // (arena mode), the radial body-shadow must stay anchored to the ground
+  // rather than spinning with the chassis. We draw it here, in the
+  // unrotated parent frame, offset along a fixed sun direction so the
+  // shadow always sits "below-right" of the vehicle. For legacy
+  // (forward-scrolling) renders we keep the original behavior — shadow
+  // drawn inside the rotation block (it doesn't look wrong there because
+  // the chassis is always head-up).
+  const topDown = !!opts.topDown;
+  if (topDown) {
+    ctx.save();
+    // Sun direction: light from upper-left → shadow falls to lower-right.
+    const sunDx = 3, sunDy = 6;
+    ctx.translate(sunDx, sunDy);
+    const shTop = ctx.createRadialGradient(0, h * 0.05, 2, 0, h * 0.08, w * 0.92);
+    shTop.addColorStop(0, 'rgba(0,0,0,0.5)');
+    shTop.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shTop;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.08, w * 0.68, h * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.rotate(tilt);
+  // Slight flatten makes the chassis read as viewed from above; a tiny
+  // bank-driven shear simulates the body tipping into a turn without
+  // breaking the wheels' alignment.
+  if (topDown) {
+    const bank = clamp(opts.bank || 0, -1, 1);
+    ctx.scale(1, 0.94);
+    if (bank !== 0) {
+      // Vertical shear proportional to signed bank. Magnitude capped at
+      // ~0.12 so wheel positions still read correctly.
+      ctx.transform(1, bank * 0.12, 0, 1 - Math.abs(bank) * 0.05, 0, 0);
+    }
+  }
   ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03);
   ctx.globalAlpha *= ghostAlpha * cloakFade;
 
-  const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.92);
-  sh.addColorStop(0, 'rgba(0,0,0,0.54)');
-  sh.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sh;
-  ctx.beginPath();
-  ctx.ellipse(0, h * 0.18, w * 0.66, h * 0.36, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (!topDown) {
+    const sh = ctx.createRadialGradient(0, h * 0.15, 2, 0, h * 0.18, w * 0.92);
+    sh.addColorStop(0, 'rgba(0,0,0,0.54)');
+    sh.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.18, w * 0.66, h * 0.36, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (visual.silhouette === 'tank' || vehicle.shape === 'tank') {
     const tw = w + 12, th = h;
@@ -17678,6 +17718,9 @@ function updateArena(dt) {
 
   // ---- facing: smoothly align chassis to velocity vector ----
   const moveSpeed = Math.hypot(p.vx, p.vy);
+  // Track bank: signed turn rate (rad/s) smoothed into [-1, 1] for the
+  // pseudo-3D lean in drawVehicle. Positive = clockwise turn.
+  const prevFacing = p.facing;
   if (moveSpeed > 18) {
     const desired = Math.atan2(p.vy, p.vx);
     let dA = desired - p.facing;
@@ -17686,6 +17729,13 @@ function updateArena(dt) {
     const maxTurn = ARENA_FACING_TURN_RATE * dt;
     p.facing += clamp(dA, -maxTurn, maxTurn);
   }
+  // Per-frame facing delta → bank target. Cap and smooth so the lean
+  // doesn't flicker on small steering corrections.
+  let dFacing = p.facing - prevFacing;
+  while (dFacing >  Math.PI) dFacing -= 2 * Math.PI;
+  while (dFacing < -Math.PI) dFacing += 2 * Math.PI;
+  const bankTarget = dt > 0 ? clamp((dFacing / dt) / ARENA_FACING_TURN_RATE, -1, 1) : 0;
+  p.bank = (p.bank || 0) + (bankTarget - (p.bank || 0)) * Math.min(1, 8 * dt);
 
   // HUD-friendly stats: distance = total path driven, speed used by FX/audio
   Game.distance += moveSpeed * dt;
@@ -17995,15 +18045,18 @@ function renderArena() {
   drawParticles();
 
   // player vehicle — rotates to face travel direction using the existing
-  // `forcedRot` opt (drawVehicle already supports it).
-  // The legacy art points "up" (toward -y), so subtract π/2 to convert
-  // a math-angle (0 = +x) into the chassis-rotation expected by drawVehicle.
+  // `forcedRot` opt (drawVehicle already supports it). The legacy art
+  // points "up" (toward -y), so subtract π/2 to convert a math-angle
+  // (0 = +x) into the chassis-rotation expected by drawVehicle.
+  // `topDown: true` enables the Phase 2 pseudo-3D presentation:
+  // facing-aware grounded shadow + slight flatten + bank-driven lean.
   if (Game.state === 'dying') {
     drawWreck();
   } else if (Game.state !== 'gameover') {
-    drawPlayerGroundShadow();
     drawVehicle(p.x, p.y, Game.vehicle, Math.hypot(p.vx, p.vy), 42, 64, {
       forcedRot: p.facing + Math.PI / 2,
+      topDown: true,
+      bank: p.bank || 0,
       damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
     });
     if (Game.hitFlash > 0) {
