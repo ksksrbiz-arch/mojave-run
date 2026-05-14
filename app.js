@@ -20589,7 +20589,9 @@ function wrapTextSimple(text, x, y, maxWidth, lineH) {
   if (line) ctx.fillText(line, x, yy);
 }
 
-boot_v3_done: { /* sentinel label kept as a no-op block to mark end of batch v3 renderers */ break boot_v3_done; }
+// ============================================================
+// === END BATCH v3 ARENA RENDERERS ===
+// ============================================================
 
 
 boot();
