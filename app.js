@@ -4293,8 +4293,11 @@ window.addEventListener('keydown', e => {
     setControlHintMode('keyboard');
   }
   ensureAudio();
-  // Batch v3 — arena perk-select keyboard input. Intercept 1/2/3 + arrows +
-  // Enter before any other handler so the picker is reliably navigable.
+  // Batch v4 — first-run tutorial dismisses on any key press while it's up.
+  if (Game.mode === 'arena' && (Game.arenaTutorialT || 0) > 0) {
+    arenaMarkTutorialSeen();
+    // don't return — let the key still trigger gameplay actions
+  }
   if (Game.mode === 'arena' && Game.state === 'playing' && Game.arenaPerkChoosing) {
     if (key === '1' || key === '2' || key === '3') {
       const idx = parseInt(key, 10) - 1;
@@ -4331,6 +4334,19 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (key === 'f') toggleFullscreen();
+  // Batch v4 — arena E key: deploy turret. L on death overlay: toggle leaderboard.
+  // H on title: toggle hardcore arena mode.
+  if (key === 'e' && Game.mode === 'arena' && Game.state === 'playing' && !Game.paused && !Game.arenaPerkChoosing) {
+    arenaTryDeployTurret();
+  }
+  if (key === 'l' && Game.state === 'dying' && Game.mode === 'arena') {
+    Game.arenaShowLeaderboard = !Game.arenaShowLeaderboard;
+  }
+  if (key === 'h' && Game.state === 'title' && Game.mode === 'arena') {
+    Game.arenaHardcore = !Game.arenaHardcore;
+    addPopup(Game.arenaHardcore ? 'HARDCORE: ON' : 'HARDCORE: OFF', W / 2, H * 0.85, Game.arenaHardcore ? '#ff4040' : '#d2ff6f', 14);
+    SFX.click && SFX.click();
+  }
   if (key === 'p' && Game.state === 'playing') togglePause();
   if (key === 'escape') {
     const modal = document.getElementById('modal');
@@ -4687,6 +4703,16 @@ const Game = {
   arenaMagnetMul: 1,           // magnet radius multiplier
   arenaDashCDMul: 1,           // dash cooldown multiplier (<1 = faster)
   arenaDmgTakenMul: 1,         // multiplier on incoming damage (<1 = tougher)
+  // === Batch v4 — turrets, hardcore, elites, tutorial ===
+  arenaTurrets: [],            // [{x,y,life,fireT,kills,placedAt}] deployable auto-turrets
+  arenaTurretCdT: 0,           // cooldown before another turret can be placed
+  arenaHardcore: false,        // when true, disables perk-select but doubles scrap
+  arenaTutorialT: 0,           // remaining seconds for tutorial overlay (first arena run)
+  arenaTutorialSeen: false,    // whether the tutorial has been shown this session
+  arenaShowLeaderboard: false, // true when leaderboard overlay is up on death screen
+  arenaDangerPulseT: 0,        // increasing while HP critical (drives edge pulse)
+  arenaHeartbeatT: 0,          // throttle for low-HP heartbeat SFX
+  arenaEliteMinionsPending: 0, // queued elite minions to spawn alongside the next boss
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -5187,6 +5213,29 @@ function beginPlaying() {
     Game.arenaMagnetMul     = 1;
     Game.arenaDashCDMul     = 1;
     Game.arenaDmgTakenMul   = 1;
+    // === Batch v4 init ===
+    Game.arenaTurrets = [];
+    Game.arenaTurretCdT = 0;
+    Game.arenaDangerPulseT = 0;
+    Game.arenaHeartbeatT = 0;
+    Game.arenaEliteMinionsPending = 0;
+    Game.arenaShowLeaderboard = false;
+    // Hardcore is opt-in per run: it is set on the title screen before
+    // beginPlaying. We do *not* reset it here so the title-screen toggle
+    // sticks until the player explicitly changes it. We do, however, force
+    // the perk picker off in hardcore so wave clears just transition.
+    if (Game.arenaHardcore) {
+      Game.arenaPerkChoosing = false;
+    }
+    // Tutorial: show only on the very first arena run for this profile.
+    try {
+      const seen = safeLocalStorage.getItem(ARENA_TUTORIAL_STORE_KEY) === '1';
+      Game.arenaTutorialSeen = seen;
+      Game.arenaTutorialT = seen ? 0 : ARENA_TUTORIAL_DURATION;
+    } catch (e) {
+      Game.arenaTutorialSeen = true;
+      Game.arenaTutorialT = 0;
+    }
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -5300,6 +5349,11 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
                      Math.min(Game.arenaCombo / (ARENA_COMBO_KILLS_PER_TIER * 5), 1);
     Game.scrapEarned = Math.floor(Game.scrapEarned * comboMul);
     Game._arenaComboMultiplier = comboMul.toFixed(2) + 'x';
+    // Batch v4 — hardcore doubles scrap as compensation for losing perks.
+    if (Game.arenaHardcore) {
+      Game.scrapEarned = Math.floor(Game.scrapEarned * ARENA_HARDCORE_SCRAP_MUL);
+      Game._arenaComboMultiplier += ' · HC';
+    }
   }
   // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
   if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
@@ -18156,6 +18210,31 @@ const ARENA_PERKS = [
 // Arena leaderboard: top-N rows of {wave, score, kills, when} per profile.
 const ARENA_LEADERBOARD_MAX      = 10;
 
+// === Batch v4 — turrets / hardcore / elites / tutorial constants ===
+// Deployable turret: player places at their position by pressing E.
+const ARENA_TURRET_SCRAP_COST    = 35;     // scrap deducted on placement
+const ARENA_TURRET_LIFE          = 16;     // seconds before it self-destructs
+const ARENA_TURRET_RANGE         = 360;    // targeting/firing radius
+const ARENA_TURRET_FIRE_RATE     = 0.42;   // seconds between shots
+const ARENA_TURRET_BULLET_SPEED  = 780;
+const ARENA_TURRET_DMG           = 9;
+const ARENA_TURRET_HP            = 40;
+const ARENA_TURRET_MAX_LIVE      = 3;      // maximum simultaneous turrets
+const ARENA_TURRET_PLACE_CD      = 1.2;    // seconds between placements
+// Elite minions accompany boss waves: small fast adds with low HP.
+const ARENA_ELITE_MINION_COUNT   = 4;      // queued per boss wave
+const ARENA_ELITE_MINION_HP      = 3;
+const ARENA_ELITE_MINION_DMG     = 12;
+const ARENA_ELITE_MINION_MAXV    = 360;
+// Hardcore mode: no perks, but scrap is doubled.
+const ARENA_HARDCORE_SCRAP_MUL   = 2;
+// Danger pulse: triggers when HP fraction drops below this.
+const ARENA_DANGER_HP_FRAC       = 0.25;
+const ARENA_HEARTBEAT_INTERVAL   = 1.1;    // seconds between heartbeat SFX
+// Tutorial overlay duration on first arena run.
+const ARENA_TUTORIAL_DURATION    = 6.0;
+const ARENA_TUTORIAL_STORE_KEY   = 'mr_arena_tutorial_seen_v1';
+
 function arenaCameraTargetX() {
   const p = Game.player;
   return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
@@ -18188,6 +18267,11 @@ function updateArena(dt) {
   arenaUpdateAtmosphere(dt);
   arenaUpdateSupplies(dt);
   arenaUpdateTarPatches(dt);
+  // === Batch v4 timers ===
+  arenaUpdateTurrets(dt);
+  arenaUpdateDangerPulse(dt);
+  if (Game.arenaTutorialT > 0) Game.arenaTutorialT = Math.max(0, Game.arenaTutorialT - dt);
+  if (Game.arenaTurretCdT > 0) Game.arenaTurretCdT = Math.max(0, Game.arenaTurretCdT - dt);
   if (Game.arenaWaveIntroT > 0) Game.arenaWaveIntroT -= dt;
   if (Game.arenaBossChargeT > 0) Game.arenaBossChargeT = Math.max(0, Game.arenaBossChargeT - dt);
 
@@ -18365,6 +18449,9 @@ function updateArena(dt) {
         // reduce mooks, queue boss as next spawn
         Game.arenaWaveRemain = Math.max(2, Math.floor(Game.arenaWaveRemain * 0.5));
         Game.arenaBossPending = true;
+        // Batch v4 — queue elite minions to spawn alongside the boss so the
+        // wave isn't just a single big target.
+        Game.arenaEliteMinionsPending = ARENA_ELITE_MINION_COUNT;
         announceEvent('⚠ BOSS WAVE ' + Game.arenaWave + ' ⚠', '#ff4040');
         SFX.boss();
         Game.shake = Math.max(Game.shake, 0.6);
@@ -18404,7 +18491,7 @@ function updateArena(dt) {
       // Batch v3 — offer a perk choice between waves (skip on boss-wave breaks
       // because the upcoming boss wave already gets its own intro).
       const nextIsBoss = ((Game.arenaWave + 1) % ARENA_BOSS_WAVE_EVERY) === 0;
-      if (!nextIsBoss && Game.arenaPerks.length < ARENA_PERK_HOLD_MAX) {
+      if (!nextIsBoss && !Game.arenaHardcore && Game.arenaPerks.length < ARENA_PERK_HOLD_MAX) {
         arenaOpenPerkPicker();
       }
     }
@@ -18979,6 +19066,8 @@ function arenaInstantiateFromArgs(a) {
     arenaAccel: a.accel,
     arenaTurn: a.turnR,
     arenaBoss: !!a.isBoss,
+    // Batch v4 — elite minion flag (small fast adds on boss waves).
+    arenaElite: !!a.isElite,
     // Phase 5 — boss charge counter for periodic charged shots.
     arenaBossShotN: a.isBoss ? 0 : undefined,
   });
@@ -19396,6 +19485,10 @@ function spawnArenaEnemy() {
   let kind, w, h, hp, contact, maxV, accel, turnR;
   // Phase 5 — boss override: when arenaBossPending, this spawn is an elite tank
   const isBoss = Game.arenaBossPending === true;
+  // Batch v4 — elite minion override: queued alongside boss waves. These
+  // are small fast adds, drawn as red drones, with a flag so they read as
+  // elite on hit-fx/scoring.
+  const isElite = !isBoss && (Game.arenaEliteMinionsPending || 0) > 0;
   if (isBoss) {
     Game.arenaBossPending = false;
     kind = 'tank';
@@ -19403,6 +19496,14 @@ function spawnArenaEnemy() {
     h = Math.round(56 * ARENA_BOSS_SIZE_MUL);
     hp = Math.ceil(10 * diff * ARENA_BOSS_HP_MUL);
     contact = 36; maxV = 150; accel = 360; turnR = 1.2;
+  } else if (isElite) {
+    Game.arenaEliteMinionsPending -= 1;
+    kind = 'drone';
+    w = 28; h = 32;
+    hp = Math.ceil(ARENA_ELITE_MINION_HP * diff);
+    contact = ARENA_ELITE_MINION_DMG;
+    maxV = ARENA_ELITE_MINION_MAXV + Math.min(120, kills * 1.5);
+    accel = 700; turnR = 3.6;
   } else if (kills >= 25 && roll < 0.10) {
     kind = 'tank';  w = 42; h = 56; hp = Math.ceil(10 * diff);
     contact = 24; maxV = 140 + Math.min(80, kills * 1.5); accel = 320; turnR = 1.4;
@@ -19440,7 +19541,7 @@ function spawnArenaEnemy() {
 
   const args = {
     kind, x: sx, y: sy, w, h, hp, contact, fireT,
-    maxV, accel, turnR, isBoss,
+    maxV, accel, turnR, isBoss, isElite,
   };
   // Phase 3/4 refinement — non-boss spawns route through a spawn marker
   // (visible pulse on the world floor) for readability. Bosses spawn
@@ -19587,6 +19688,12 @@ function renderArena() {
   for (const pk of Game.pickups) drawPickup(pk);
   // Batch v3 — supply drop crates with parachute markers.
   drawArenaSupplies();
+  // Batch v4 — turret bullet trails layered just under turret bodies.
+  drawArenaTurretBulletTrails();
+  // Batch v4 — elite minion rings under enemies for readability.
+  drawArenaEliteRings();
+  // Batch v4 — turrets sit between pickups and enemies in the depth order.
+  drawArenaTurrets();
   // Phase 3/4 refinement — pre-spawn markers above the floor so the warning
   // is hard to miss.
   drawArenaSpawnMarkers();
@@ -19717,6 +19824,9 @@ function renderArena() {
   // vignette darken still reads. Lightning flash overlays on top.
   if (Game.mode === 'arena') {
     drawArenaNightTint();
+    // Batch v4 — danger pulse sits above the night tint so it's visible
+    // even on heavily-tinted night frames.
+    drawArenaDangerPulse();
     drawArenaLightningFlash();
   }
 
@@ -19741,10 +19851,17 @@ function renderArena() {
     if (Game.mode === 'arena' && (Game.arenaWaveIntroT || 0) > 0) drawArenaWaveIntro();
     // Batch v3 — perk-select modal sits above the minimap/HUD when active.
     if (Game.mode === 'arena' && Game.arenaPerkChoosing) drawArenaPerkPicker();
+    // Batch v4 — top-right hardcore badge + bottom-right turret chip.
+    if (Game.mode === 'arena') drawArenaBatchV4HUD();
+    // Batch v4 — first-run tutorial overlay (auto-dismisses on timer).
+    if (Game.mode === 'arena') drawArenaTutorial();
   }
   if (Game.state === 'playing' && Game.paused) drawPause();
   if (Game.state === 'loading') drawLoadingOverlay();
   if (Game.state === 'dying')   drawDeathOverlay();
+  // Batch v4 — arena leaderboard overlay on death (toggle with L). Drawn
+  // after the death overlay so it sits on top.
+  if (Game.state === 'dying' && Game.mode === 'arena') drawArenaLeaderboardPanel();
 }
 
 // ============================================================
@@ -20591,6 +20708,519 @@ function wrapTextSimple(text, x, y, maxWidth, lineH) {
 
 // ============================================================
 // === END BATCH v3 ARENA RENDERERS ===
+// ============================================================
+
+
+// ============================================================
+// === BATCH v4 — TURRETS, ELITES, HARDCORE, TUTORIAL, DANGER PULSE ===
+// All systems are arena-mode gated. Helpers live here so they sit
+// near the other arena code without intercalating with legacy
+// game logic.
+// ============================================================
+
+// ----------------------------------------------------------------
+// Deployable turrets
+// ----------------------------------------------------------------
+
+// arenaTryDeployTurret: invoked from the keydown handler when the player
+// presses `E` during arena play. Validates scrap cost, placement cooldown,
+// and the live-turret cap, then pushes a new turret entity into Game.arenaTurrets.
+function arenaTryDeployTurret() {
+  if (Game.mode !== 'arena') return;
+  const p = Game.player;
+  if (!p) return;
+  if (Game.arenaTurretCdT > 0) {
+    addPopup('TURRET COOLDOWN', p.x, p.y - 28, '#ff8a3d', 11);
+    return;
+  }
+  if ((Game.arenaTurrets || []).length >= ARENA_TURRET_MAX_LIVE) {
+    addPopup('TURRET LIMIT', p.x, p.y - 28, '#ff4040', 11);
+    return;
+  }
+  // Spend persistent scrap from the profile wallet so the cost feels real.
+  const wallet = Profile.spend(ARENA_TURRET_SCRAP_COST);
+  if (!wallet) {
+    addPopup('NEED ' + ARENA_TURRET_SCRAP_COST + ' SCRAP', p.x, p.y - 28, '#ff4040', 11);
+    SFX.click && SFX.click();
+    return;
+  }
+  Game.arenaTurrets.push({
+    x: p.x, y: p.y,
+    hp: ARENA_TURRET_HP, maxHp: ARENA_TURRET_HP,
+    life: ARENA_TURRET_LIFE,
+    fireT: 0.25,
+    aimAng: p.facing || 0,
+    kills: 0,
+    placedAt: Game.t || 0,
+    deployT: 0.45, // pop-up animation
+  });
+  Game.arenaTurretCdT = ARENA_TURRET_PLACE_CD;
+  addPopup('TURRET DEPLOYED', p.x, p.y - 32, '#d2ff6f', 13);
+  SFX.powerUp && SFX.powerUp();
+  emit(p.x, p.y, 14, { color:'#d2ff6f', speed:200, life:0.4, size:3, spread:Math.PI*2 });
+  shockwave(p.x, p.y, 'rgba(210,255,111,0.55)', 60);
+}
+
+// arenaUpdateTurrets: each frame, tick lifetime, hunt for the closest enemy
+// in range, fire a bullet on cooldown, and apply contact damage from enemy
+// bullets / enemies that wander into the turret.
+function arenaUpdateTurrets(dt) {
+  if (Game.mode !== 'arena') return;
+  const list = Game.arenaTurrets;
+  if (!list || !list.length) return;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const t = list[i];
+    t.life -= dt;
+    t.deployT = Math.max(0, (t.deployT || 0) - dt);
+    if (t.life <= 0) {
+      arenaDestroyTurret(t, 'expired');
+      list.splice(i, 1);
+      continue;
+    }
+    if (t.hp <= 0) {
+      arenaDestroyTurret(t, 'killed');
+      list.splice(i, 1);
+      continue;
+    }
+    // Find closest enemy in range; ignore boss only if mooks present so
+    // turrets don't waste shots on a 5x-HP target while adds rampage.
+    let target = null, bestDist = ARENA_TURRET_RANGE * ARENA_TURRET_RANGE;
+    let hasNonBoss = false;
+    for (const e of Game.enemies) {
+      if (!e || e.arenaBoss) continue;
+      hasNonBoss = true;
+      const d2 = (e.x - t.x) * (e.x - t.x) + (e.y - t.y) * (e.y - t.y);
+      if (d2 < bestDist) { bestDist = d2; target = e; }
+    }
+    if (!target && !hasNonBoss) {
+      // fall back to boss if it's the only target
+      for (const e of Game.enemies) {
+        if (!e || !e.arenaBoss) continue;
+        const d2 = (e.x - t.x) * (e.x - t.x) + (e.y - t.y) * (e.y - t.y);
+        if (d2 < bestDist) { bestDist = d2; target = e; }
+      }
+    }
+    if (target) {
+      const desired = Math.atan2(target.y - t.y, target.x - t.x);
+      let dA = desired - t.aimAng;
+      while (dA >  Math.PI) dA -= 2 * Math.PI;
+      while (dA < -Math.PI) dA += 2 * Math.PI;
+      t.aimAng += clamp(dA, -4 * dt, 4 * dt);
+      t.fireT -= dt;
+      if (t.fireT <= 0) {
+        t.fireT = ARENA_TURRET_FIRE_RATE;
+        const ang = t.aimAng;
+        Game.bullets.push({
+          owner: 'p', // count as player-source so the bullet-vs-enemy loop picks it up
+          x: t.x + Math.cos(ang) * 12,
+          y: t.y + Math.sin(ang) * 12,
+          w: 4, h: 10,
+          vx: Math.cos(ang) * ARENA_TURRET_BULLET_SPEED,
+          vy: Math.sin(ang) * ARENA_TURRET_BULLET_SPEED,
+          dmg: ARENA_TURRET_DMG * (Game.arenaDmgMul || 1),
+          homing: false,
+          hitIds: [],
+          life: 1.2,
+          fromTurret: true,
+        });
+        SFX.shoot && SFX.shoot();
+        emit(t.x + Math.cos(ang) * 14, t.y + Math.sin(ang) * 14, 2,
+             { color:'#d2ff6f', speed:120, life:0.18, size:2, spread:Math.PI/4 });
+      }
+    }
+    // Enemy bullet hits turret
+    for (let bi = Game.enemyBullets.length - 1; bi >= 0; bi--) {
+      const eb = Game.enemyBullets[bi];
+      if (Math.hypot(eb.x - t.x, eb.y - t.y) < 18) {
+        t.hp -= eb.dmg || 6;
+        Game.enemyBullets.splice(bi, 1);
+        emit(t.x, t.y, 5, { color:'#ff8a3d', speed:160, life:0.25, size:2, spread:Math.PI*2 });
+      }
+    }
+    // Enemy collision damages turret
+    for (const e of Game.enemies) {
+      if (!e || e.kind === 'mortar' || e.kind === 'sniper') continue;
+      if (Math.hypot(e.x - t.x, e.y - t.y) < 24) {
+        t.hp -= 8 * dt; // continuous damage while overlapping
+      }
+    }
+  }
+}
+
+function arenaDestroyTurret(t, reason) {
+  SFX.explode && SFX.explode();
+  emit(t.x, t.y, 18, { color:'#ff8a3d', speed:260, life:0.5, size:3, spread:Math.PI*2 });
+  shockwave(t.x, t.y, 'rgba(255,140,60,0.45)', 70);
+  if (reason === 'killed') Game.shake = Math.max(Game.shake, 0.25);
+}
+
+// ----------------------------------------------------------------
+// Danger pulse + low-HP heartbeat
+// ----------------------------------------------------------------
+
+function arenaUpdateDangerPulse(dt) {
+  if (Game.mode !== 'arena') return;
+  const hpFrac = (Game.health || 0) / Math.max(1, (Game.maxHealth || 100));
+  if (hpFrac > 0 && hpFrac < ARENA_DANGER_HP_FRAC) {
+    Game.arenaDangerPulseT = (Game.arenaDangerPulseT || 0) + dt;
+    Game.arenaHeartbeatT  -= dt;
+    if (Game.arenaHeartbeatT <= 0) {
+      Game.arenaHeartbeatT = ARENA_HEARTBEAT_INTERVAL * (hpFrac < 0.12 ? 0.6 : 1);
+      // Re-use the hit SFX as a low-thump cue (sounds like a beat).
+      SFX.hit && SFX.hit();
+    }
+  } else {
+    // decay pulse smoothly when above the threshold
+    Game.arenaDangerPulseT = Math.max(0, (Game.arenaDangerPulseT || 0) - dt * 1.4);
+    Game.arenaHeartbeatT = 0;
+  }
+}
+
+// ----------------------------------------------------------------
+// Tutorial overlay seen-state persistence
+// ----------------------------------------------------------------
+
+function arenaMarkTutorialSeen() {
+  if (Game.arenaTutorialSeen) return;
+  Game.arenaTutorialSeen = true;
+  Game.arenaTutorialT = 0;
+  try { safeLocalStorage.setItem(ARENA_TUTORIAL_STORE_KEY, '1'); } catch (e) {}
+}
+
+// ----------------------------------------------------------------
+// Leaderboard read accessor used by overlays
+// ----------------------------------------------------------------
+
+function arenaReadLeaderboard() {
+  const p = Profile.active && Profile.active();
+  if (!p || !Array.isArray(p.arenaLeaderboard)) return [];
+  return p.arenaLeaderboard.slice(0, ARENA_LEADERBOARD_MAX);
+}
+
+// ============================================================
+// === BATCH v4 RENDERERS ===
+// All renderers below are pure draw functions that assume the
+// canvas state is already prepared by their caller (world-space
+// or screen-space as commented).
+// ============================================================
+
+// World-space: turret bodies, range halo, lifetime ring.
+function drawArenaTurrets() {
+  if (Game.mode !== 'arena') return;
+  const list = Game.arenaTurrets;
+  if (!list || !list.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const t of list) {
+    if (t.x + 60 < cam.x || t.x - 60 > cam.x + W ||
+        t.y + 60 < cam.y || t.y - 60 > cam.y + H) continue;
+    const lifeK = clamp(t.life / ARENA_TURRET_LIFE, 0, 1);
+    const lowLife = lifeK < 0.25;
+    // soft halo to suggest engagement range (faded for readability)
+    ctx.save();
+    ctx.globalAlpha = 0.10 + 0.05 * Math.sin((Game.t || 0) * 3);
+    ctx.strokeStyle = '#d2ff6f';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, ARENA_TURRET_RANGE, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    // deploy pop-in scale
+    const deployK = 1 - clamp((t.deployT || 0) / 0.45, 0, 1); // 0..1
+    const scale = 0.4 + 0.6 * deployK;
+    // ground pad
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#1a1410';
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a2418';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // base
+    ctx.fillStyle = '#3a2418';
+    ctx.fillRect(-10, -10, 20, 20);
+    // turret head, pointed along aim
+    ctx.rotate(t.aimAng);
+    ctx.fillStyle = lowLife ? '#ff4040' : '#d2ff6f';
+    ctx.fillRect(-6, -5, 12, 10);
+    // barrel
+    ctx.fillStyle = '#1a1410';
+    ctx.fillRect(0, -2, 16, 4);
+    ctx.restore();
+    // lifetime ring around the pad
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.strokeStyle = lowLife ? '#ff4040' : '#d2ff6f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, -Math.PI / 2, -Math.PI / 2 + lifeK * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    // hp pip
+    if (t.hp < t.maxHp) {
+      const hpK = clamp(t.hp / t.maxHp, 0, 1);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(t.x - 14, t.y - 22, 28, 3);
+      ctx.fillStyle = hpK > 0.5 ? '#d2ff6f' : hpK > 0.25 ? '#ffd86b' : '#ff4040';
+      ctx.fillRect(t.x - 14, t.y - 22, 28 * hpK, 3);
+      ctx.restore();
+    }
+  }
+}
+
+// Screen-space: pulsing red edge gradient when HP is critical.
+function drawArenaDangerPulse() {
+  if (Game.mode !== 'arena') return;
+  const t = Game.arenaDangerPulseT || 0;
+  if (t <= 0) return;
+  // strength clamps at 1 after ~0.8s; pulse shape uses a sine on Game.t
+  const k = clamp(t / 0.8, 0, 1);
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 4.5);
+  const alpha = 0.18 + 0.35 * pulse * k;
+  // build a radial gradient feathering from center
+  const grad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.7);
+  grad.addColorStop(0, 'rgba(255,40,40,0)');
+  grad.addColorStop(0.6, 'rgba(255,40,40,' + (alpha * 0.4).toFixed(3) + ')');
+  grad.addColorStop(1, 'rgba(255,40,40,' + alpha.toFixed(3) + ')');
+  ctx.save();
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+// Screen-space: first-run tutorial card. Lists the core controls.
+function drawArenaTutorial() {
+  if (Game.mode !== 'arena') return;
+  if ((Game.arenaTutorialT || 0) <= 0) return;
+  const k = clamp(Game.arenaTutorialT / ARENA_TUTORIAL_DURATION, 0, 1);
+  // fade-in for the first ~0.3 of the window, hold, then fade-out.
+  let a = 1;
+  if (k > 0.85) a = (1 - k) / 0.15;
+  else if (k < 0.15) a = k / 0.15;
+  a = clamp(a, 0, 1);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a * 0.92;
+  // dim
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(0, 0, W, H);
+  // card
+  const cardW = Math.min(420, W - 60);
+  const cardH = 230;
+  const cx = (W - cardW) / 2;
+  const cy = (H - cardH) / 2;
+  ctx.fillStyle = '#1a1410';
+  ctx.fillRect(cx, cy, cardW, cardH);
+  ctx.strokeStyle = '#ffd86b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
+  // accent strip
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillRect(cx, cy, cardW, 6);
+  // title
+  ctx.font = 'bold 16px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('WELCOME TO THE ARENA', cx + cardW / 2, cy + 16);
+  // body lines
+  const lines = [
+    ['WASD / ARROWS', 'Move (4-directional)'],
+    ['SPACE',         'Auto-fires while held'],
+    ['Q',             'Dash — brief i-frames'],
+    ['E',             'Deploy turret (' + ARENA_TURRET_SCRAP_COST + ' scrap)'],
+    ['SURVIVE',       'Clear waves for perks + scrap'],
+  ];
+  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < lines.length; i++) {
+    const y = cy + 56 + i * 24;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#d2ff6f';
+    ctx.fillText(lines[i][0], cx + 24, y);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(lines[i][1], cx + 160, y);
+  }
+  // dismiss hint
+  ctx.font = '10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#888';
+  ctx.fillText('(any key to dismiss · auto-dismiss soon)', cx + cardW / 2, cy + cardH - 16);
+  ctx.restore();
+}
+
+// Screen-space: leaderboard overlay (toggle with L on death screen).
+function drawArenaLeaderboardPanel() {
+  if (Game.mode !== 'arena') return;
+  if (Game.state !== 'dying' || !Game.arenaShowLeaderboard) return;
+  const rows = arenaReadLeaderboard();
+  const panelW = Math.min(520, W - 60);
+  const headerH = 56;
+  const rowH = 22;
+  const panelH = headerH + Math.max(1, rows.length) * rowH + 30;
+  const px = (W - panelW) / 2;
+  const py = (H - panelH) / 2;
+  ctx.save();
+  // dim screen
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, W, H);
+  // panel
+  ctx.fillStyle = '#1a1410';
+  ctx.fillRect(px, py, panelW, panelH);
+  ctx.strokeStyle = '#ffd86b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px + 1, py + 1, panelW - 2, panelH - 2);
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillRect(px, py, panelW, 6);
+  // title
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('ARENA — TOP ' + ARENA_LEADERBOARD_MAX, px + panelW / 2, py + 14);
+  // column headers
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.fillStyle = '#d2ff6f';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const colX = {
+    rank:  px + 16,
+    wave:  px + 56,
+    score: px + 140,
+    kills: px + 260,
+    when:  px + 360,
+  };
+  ctx.fillText('#',     colX.rank,  py + headerH - 12);
+  ctx.fillText('WAVE',  colX.wave,  py + headerH - 12);
+  ctx.fillText('SCORE', colX.score, py + headerH - 12);
+  ctx.fillText('KILLS', colX.kills, py + headerH - 12);
+  ctx.fillText('DATE',  colX.when,  py + headerH - 12);
+  // rows
+  ctx.font = '11px "Courier New", monospace';
+  if (!rows.length) {
+    ctx.fillStyle = '#aaa';
+    ctx.textAlign = 'center';
+    ctx.fillText('(no runs yet)', px + panelW / 2, py + headerH + 20);
+  } else {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const y = py + headerH + 10 + i * rowH;
+      ctx.fillStyle = i === 0 ? '#ffd86b' : '#fff';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(i + 1).padStart(2, ' '), colX.rank, y);
+      ctx.fillText(String(r.wave  || 0),           colX.wave, y);
+      ctx.fillText(String(r.score || 0),           colX.score, y);
+      ctx.fillText(String(r.kills || 0),           colX.kills, y);
+      const dt = new Date(r.when || 0);
+      const dateStr = isNaN(dt.getTime()) ? '?' :
+        (dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'));
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(dateStr, colX.when, y);
+    }
+  }
+  // hint
+  ctx.font = '10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#888';
+  ctx.fillText('(press L to close)', px + panelW / 2, py + panelH - 14);
+  ctx.restore();
+}
+
+// Screen-space: small HUD chip showing hardcore badge + turret cooldown.
+function drawArenaBatchV4HUD() {
+  if (Game.mode !== 'arena' || Game.state !== 'playing') return;
+  // hardcore badge in top-right
+  if (Game.arenaHardcore) {
+    ctx.save();
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    const label = 'HARDCORE';
+    const tw = ctx.measureText(label).width;
+    const pad = 6;
+    const x = W - 12 - tw - pad * 2;
+    const y = 10;
+    ctx.fillStyle = '#ff4040';
+    ctx.fillRect(x, y, tw + pad * 2, 16);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, W - 12 - pad, y + 3);
+    ctx.restore();
+  }
+  // turret chip in bottom-right
+  ctx.save();
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const chipW = 86, chipH = 18;
+  const x = W - chipW - 10;
+  const y = H - chipH - 90; // above the right-side gameplay HUD
+  const cd = Game.arenaTurretCdT || 0;
+  const live = (Game.arenaTurrets || []).length;
+  const ready = cd <= 0 && live < ARENA_TURRET_MAX_LIVE;
+  ctx.fillStyle = 'rgba(20,16,16,0.78)';
+  ctx.fillRect(x, y, chipW, chipH);
+  ctx.strokeStyle = ready ? '#d2ff6f' : '#888';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, chipW - 1, chipH - 1);
+  ctx.fillStyle = ready ? '#d2ff6f' : '#888';
+  ctx.fillText('[E] TURRET ' + live + '/' + ARENA_TURRET_MAX_LIVE, x + 6, y + chipH / 2);
+  if (cd > 0) {
+    ctx.fillStyle = '#3a2418';
+    const k = clamp(cd / ARENA_TURRET_PLACE_CD, 0, 1);
+    ctx.fillRect(x + 1, y + chipH - 3, (chipW - 2) * k, 2);
+  }
+  ctx.restore();
+}
+
+// World-space: elite minion highlight ring drawn before the regular enemy
+// renderer so the marker sits below the chassis.
+function drawArenaEliteRings() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  for (const e of Game.enemies) {
+    if (!e || !e.arenaElite || e.arenaBoss) continue;
+    const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 5);
+    ctx.save();
+    ctx.globalAlpha = 0.35 + pulse * 0.35;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, Math.max(e.w, e.h) * 0.7 + pulse * 3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// World-space: turret bullets get a faint green trail (separate from the
+// normal player bullet renderer because we want a distinct color cue).
+function drawArenaTurretBulletTrails() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.bullets || !Game.bullets.length) return;
+  for (const b of Game.bullets) {
+    if (!b.fromTurret) continue;
+    const sp = Math.hypot(b.vx || 0, b.vy || 0);
+    if (sp < 1) continue;
+    const dx = -(b.vx / sp) * 16, dy = -(b.vy / sp) * 16;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#d2ff6f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x + dx, b.y + dy);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// === END BATCH v4 ===
 // ============================================================
 
 
