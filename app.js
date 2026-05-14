@@ -4601,6 +4601,25 @@ const Game = {
   // Phase 6 — combo system
   arenaCombo: 0,            // current combo counter (kills without taking damage)
   arenaWaveTookDamage: false, // flag: player took damage this wave
+  // === Phase 1-5 refinement pass v2 ===
+  // Dash ability (Phase 1): short burst of speed + i-frames in facing dir.
+  arenaDashCD: 0,           // seconds until dash is ready again
+  arenaDashT: 0,            // seconds of active dash motion remaining
+  arenaInvulnT: 0,          // seconds of invulnerability remaining
+  arenaDashGhosts: [],      // {x,y,facing,life} for dash motion trail
+  // Skid trails (Phase 2): tire scuff marks rendered in world space.
+  arenaSkidTrails: [],
+  // Spawn markers (Phase 3/4): pre-spawn telegraphs so spawns are readable.
+  arenaSpawnMarkers: [],    // {x,y,t,life,kind,...spawnFields}
+  // Barrels (Phase 4): explosive props that chain-react.
+  arenaBarrels: [],
+  // Boss state (Phase 5): track phase transition + charge windups.
+  arenaBossPhase: 0,        // 0 = normal, 1 = enraged (<50% HP)
+  arenaBossChargeT: 0,      // seconds remaining on boss charged-shot windup
+  // Wave intro overlay (Phase 4): banner countdown after a new wave starts.
+  arenaWaveIntroT: 0,
+  arenaWaveIntroLabel: '',
+  arenaWaveIntroAccent: '#ffd86b',
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -5033,6 +5052,35 @@ function beginPlaying() {
     // Phase 6 — combo system
     Game.arenaCombo = 0;
     Game.arenaWaveTookDamage = false;
+    // === Refinement pass v2 — Phase 1-5 init ===
+    Game.arenaDashCD = 0;
+    Game.arenaDashT = 0;
+    Game.arenaInvulnT = 0;
+    Game.arenaDashGhosts = [];
+    Game.arenaSkidTrails = [];
+    Game.arenaSpawnMarkers = [];
+    Game.arenaBarrels = [];
+    for (let bi = 0; bi < ARENA_BARREL_COUNT; bi++) {
+      // place barrels away from spawn so the first wave isn't a minefield
+      let bx = 0, by = 0, attempts = 0;
+      do {
+        bx = rand(120, worldW - 120);
+        by = rand(120, worldH - 120);
+        attempts += 1;
+      } while (Math.hypot(bx - Game.player.x, by - Game.player.y) < 360 && attempts < 8);
+      Game.arenaBarrels.push({
+        x: bx, y: by, w: 22, h: 22,
+        hp: ARENA_BARREL_HP,
+        t: rand(0, Math.PI * 2),       // idle bob phase
+        burnT: 0,                       // burning fuse before explosion
+        dead: false,
+      });
+    }
+    Game.arenaBossPhase = 0;
+    Game.arenaBossChargeT = 0;
+    Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
+    Game.arenaWaveIntroLabel = 'WAVE 1';
+    Game.arenaWaveIntroAccent = '#ffd86b';
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -7138,6 +7186,11 @@ function fireGuns() {
 
 function damagePlayer(amt) {
   if (Game.state !== 'playing') return;
+  // Phase 1 refinement — arena dash i-frames absorb damage entirely.
+  if (Game.mode === 'arena' && (Game.arenaInvulnT || 0) > 0) {
+    shockwave(Game.player.x, Game.player.y, 'rgba(255,220,140,0.45)', 60);
+    return;
+  }
   if (isPowerupActive('shield')) {
     // shield absorbs hit fully — visual cue only
     shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 70);
@@ -16290,6 +16343,10 @@ function updateExtraction(dt) {
 }
 
 function triggerVehicleAbility() {
+  // === Phase 1 refinement — arena hijacks the vehicle-ability key (Q) ===
+  // In arena mode, Q triggers a directional dash with brief i-frames instead
+  // of the legacy per-vehicle special. Legacy modes are unchanged.
+  if (Game.mode === 'arena') { arenaTryDash(); return; }
   if (!Game.vehicle || !Game.activeAbility || Game.activeAbility.cooldown > 0) return;
   const special = vehicleSpecialAbility(Game.vehicle.id);
   if (!special) return;
@@ -17795,6 +17852,46 @@ const ARENA_COMBO_KILLS_PER_TIER  = 5;     // kills needed per multiplier tier
 const ARENA_COMBO_WAVE_CLEAR_BONUS = 8;    // combo points for clearing wave with no damage
 const ARENA_COMBO_MAX             = 50;    // hard cap on combo counter
 
+// === Phase 1-5 refinement pass v2 — extra constants ===
+// Phase 1 — dash ability (Q key in arena replaces vehicle special).
+const ARENA_DASH_DIST            = 280;   // distance traveled during dash
+const ARENA_DASH_DUR             = 0.18;  // seconds of dash motion
+const ARENA_DASH_COOLDOWN        = 3.0;   // seconds before dash is ready again
+const ARENA_DASH_INVULN          = 0.30;  // i-frames during dash + brief recovery
+const ARENA_DASH_GHOST_LIFE      = 0.32;  // motion-trail afterimage life
+const ARENA_DASH_GHOST_INTERVAL  = 0.018; // seconds between afterimages
+
+// Phase 2 — tire skid trails when banking hard.
+const ARENA_SKID_BANK_THRESHOLD  = 0.55;  // |bank| above this to lay a trail
+const ARENA_SKID_SPEED_THRESHOLD = 180;   // px/s above this to lay a trail
+const ARENA_SKID_TRAIL_LIFE      = 2.2;   // seconds before the trail fades
+const ARENA_SKID_TRAIL_MAX       = 90;    // hard cap on trail segments
+const ARENA_SKID_INTERVAL        = 0.05;  // seconds between trail segments
+
+// Phase 3/4 — pre-spawn marker telegraphs.
+const ARENA_SPAWN_MARKER_TIME    = 0.85;  // seconds of warning before an enemy spawns
+const ARENA_SPAWN_MARKER_MAX     = 16;    // hard cap on simultaneous markers
+
+// Phase 4 — explosive barrels scattered through the world.
+const ARENA_BARREL_COUNT         = 14;    // number of barrels placed at run start
+const ARENA_BARREL_HP            = 3;     // bullets to ignite a barrel
+const ARENA_BARREL_BLAST_RADIUS  = 130;   // splash radius on detonation
+const ARENA_BARREL_PLAYER_DMG    = 18;    // dmg to player if inside blast
+const ARENA_BARREL_ENEMY_DMG     = 12;    // dmg to each enemy inside blast
+const ARENA_BARREL_BURN_TIME     = 0.65;  // seconds from ignite to explode
+const ARENA_BARREL_CHAIN_DELAY   = 0.18;  // chained barrels ignite slightly later
+
+// Phase 4 — wave intro banner.
+const ARENA_WAVE_INTRO_TIME      = 1.8;   // seconds of intro overlay
+
+// Phase 5 — boss phase + charged shot telegraph.
+const ARENA_BOSS_ENRAGE_PCT      = 0.5;   // HP fraction at which boss enrages
+const ARENA_BOSS_FIRE_RATE_MUL   = 0.55;  // fire-rate multiplier while enraged
+const ARENA_BOSS_CHARGE_TIME     = 0.7;   // seconds to telegraph a charged shot
+const ARENA_BOSS_CHARGE_RATE     = 4.5;   // every Nth boss shot is a charged shot
+const ARENA_BOSS_CHARGE_DMG_MUL  = 2.0;   // damage multiplier on charged shots
+const ARENA_BOSS_CHARGE_SPEED    = 1.6;   // bullet speed multiplier on charged shots
+
 function arenaCameraTargetX() {
   const p = Game.player;
   return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
@@ -17816,6 +17913,15 @@ function updateArena(dt) {
   Game.shake = Math.max(0, Game.shake - dt * 2.4);
   Game.flash = Math.max(0, Game.flash - dt * 3);
   if (Game.muzzleT > 0) Game.muzzleT -= dt;
+
+  // === Phase 1-5 refinement timers ===
+  arenaUpdateDash(dt);
+  arenaUpdateSkidTrails(dt);
+  arenaUpdateSpawnMarkers(dt);
+  arenaUpdateBarrels(dt);
+  arenaUpdateBossPhase();
+  if (Game.arenaWaveIntroT > 0) Game.arenaWaveIntroT -= dt;
+  if (Game.arenaBossChargeT > 0) Game.arenaBossChargeT = Math.max(0, Game.arenaBossChargeT - dt);
 
   readKbd();
 
@@ -17844,14 +17950,20 @@ function updateArena(dt) {
   // normalize diagonal so 8-way input doesn't out-accelerate cardinal input
   const aMag = Math.hypot(ax, ay);
   if (aMag > 1) { ax /= aMag; ay /= aMag; }
-  if (ax !== 0) p.vx += ax * accel * dt;
-  if (ay !== 0) p.vy += ay * accel * dt;
-  // drag on the unforced axes (and gentle drag overall so the car settles)
-  if (ax === 0) p.vx -= p.vx * Math.min(1, ARENA_PLAYER_DRAG * dt);
-  if (ay === 0) p.vy -= p.vy * Math.min(1, ARENA_PLAYER_DRAG * dt);
-  // clamp total speed
+  // Phase 1 refinement — dash overrides player input/drag so the burst
+  // velocity remains pure for ARENA_DASH_DUR seconds.
+  const dashActive = (Game.arenaDashT || 0) > 0;
+  if (!dashActive) {
+    if (ax !== 0) p.vx += ax * accel * dt;
+    if (ay !== 0) p.vy += ay * accel * dt;
+    // drag on the unforced axes (and gentle drag overall so the car settles)
+    if (ax === 0) p.vx -= p.vx * Math.min(1, ARENA_PLAYER_DRAG * dt);
+    if (ay === 0) p.vy -= p.vy * Math.min(1, ARENA_PLAYER_DRAG * dt);
+  }
+  // clamp total speed (dash bypasses this to deliver its full burst)
   const spd = Math.hypot(p.vx, p.vy);
-  if (spd > maxV) {
+  const dashing = (Game.arenaDashT || 0) > 0;
+  if (!dashing && spd > maxV) {
     const k = maxV / spd;
     p.vx *= k; p.vy *= k;
   }
@@ -17968,9 +18080,15 @@ function updateArena(dt) {
         announceEvent('⚠ BOSS WAVE ' + Game.arenaWave + ' ⚠', '#ff4040');
         SFX.boss();
         Game.shake = Math.max(Game.shake, 0.6);
+        Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
+        Game.arenaWaveIntroLabel = 'BOSS WAVE ' + Game.arenaWave;
+        Game.arenaWaveIntroAccent = '#ff4040';
       } else {
         announceEvent('WAVE ' + Game.arenaWave, '#ffd86b');
         SFX.boss();
+        Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
+        Game.arenaWaveIntroLabel = 'WAVE ' + Game.arenaWave;
+        Game.arenaWaveIntroAccent = '#ffd86b';
       }
     }
   } else {
@@ -18046,14 +18164,47 @@ function updateArena(dt) {
           SFX.mortar();
           e.fireT = ARENA_MORTAR_FIRE_RATE;
         } else if (e.kind === 'tank') {
+          // Phase 5 refinement — boss periodically fires a charged shot
+          // (slow-motion telegraph then a heavy, fast, high-damage bullet).
+          // Non-boss tanks keep the legacy single shot.
+          const enraged = !!(e.arenaBoss && Game.arenaBossPhase === 1);
+          if (e.arenaBoss) {
+            e.arenaBossShotN = (e.arenaBossShotN || 0) + 1;
+            const isCharged = (e.arenaBossShotN % Math.max(2, Math.round(ARENA_BOSS_CHARGE_RATE))) === 0;
+            if (isCharged) {
+              Game.arenaBossChargeT = ARENA_BOSS_CHARGE_TIME;
+              // queue a deferred heavy bullet by stashing the fire angle on
+              // the boss; we fire it when arenaBossChargeT lapses.
+              e._chargeAng = ang;
+              e._chargeReady = true;
+              e.fireT = ARENA_TANK_FIRE_RATE * (enraged ? ARENA_BOSS_FIRE_RATE_MUL : 0.5) + ARENA_BOSS_CHARGE_TIME;
+              continue;
+            }
+          }
+          const bulletSpeed = sp * 1.1 * (enraged ? 1.1 : 1);
           Game.enemyBullets.push({
             x: e.x, y: e.y, w: 8, h: 8,
-            vx: Math.cos(ang) * sp * 1.1, vy: Math.sin(ang) * sp * 1.1,
-            dmg: 18, big: true, src: e,
+            vx: Math.cos(ang) * bulletSpeed, vy: Math.sin(ang) * bulletSpeed,
+            dmg: 18 * (enraged ? 1.15 : 1), big: true, src: e,
           });
           SFX.bigShot();
-          e.fireT = ARENA_TANK_FIRE_RATE;
+          e.fireT = ARENA_TANK_FIRE_RATE * (enraged ? ARENA_BOSS_FIRE_RATE_MUL : 1);
         }
+      }
+      // Phase 5 refinement — when boss charge telegraph completes, fire the
+      // heavy charged shot toward the last latched angle.
+      if (e.arenaBoss && e._chargeReady && Game.arenaBossChargeT <= 0) {
+        e._chargeReady = false;
+        const ang2 = (e._chargeAng !== undefined) ? e._chargeAng : Math.atan2(dyp, dxp);
+        const sp2 = ARENA_ENEMY_BULLET_SPEED * ARENA_BOSS_CHARGE_SPEED;
+        Game.enemyBullets.push({
+          x: e.x, y: e.y, w: 12, h: 12,
+          vx: Math.cos(ang2) * sp2, vy: Math.sin(ang2) * sp2,
+          dmg: 18 * ARENA_BOSS_CHARGE_DMG_MUL, big: true, src: e,
+        });
+        SFX.bigShot();
+        emit(e.x, e.y, 14, { color: '#ff8a3d', speed: 200, life: 0.4, size: 3, spread: Math.PI / 4 });
+        Game.shake = Math.max(Game.shake, 0.25);
       }
     }
 
@@ -18314,6 +18465,311 @@ function fireArenaGuns() {
                     speed: 140, life: 0.2, size: 2, spread: Math.PI / 3 });
 }
 
+// === Phase 1 refinement — dash ability ===
+// Q in arena mode triggers a short, fixed-distance dash in the player's
+// facing direction. Briefly invulnerable + emits a ghost trail and dust
+// shockwave so the action reads clearly even on small screens.
+function arenaTryDash() {
+  if (Game.state !== 'playing' || Game.paused) return;
+  if (Game.mode !== 'arena') return;
+  if ((Game.arenaDashCD || 0) > 0) return;
+  const p = Game.player;
+  if (!p) return;
+  // Dash direction: prefer current input vector so players can dash sideways
+  // even when chassis is facing somewhere else; fall back to facing.
+  let dx = 0, dy = 0;
+  if (input.left)  dx -= 1;
+  if (input.right) dx += 1;
+  if (input.up)    dy -= 1;
+  if (input.down)  dy += 1;
+  if (dx === 0 && dy === 0 && input.touchTargetX !== null && input.touchTargetY !== null && Game.camera) {
+    const tx = clamp(input.touchTargetX, 0, W) + Game.camera.x;
+    const ty = clamp(input.touchTargetY, 0, H) + Game.camera.y;
+    dx = tx - p.x; dy = ty - p.y;
+  }
+  const mag = Math.hypot(dx, dy);
+  let dirX, dirY;
+  if (mag > 0.01) {
+    dirX = dx / mag; dirY = dy / mag;
+  } else {
+    dirX = Math.cos(p.facing); dirY = Math.sin(p.facing);
+  }
+  // Instantly point chassis along dash for a satisfying snap.
+  p.facing = Math.atan2(dirY, dirX);
+  // Set initial dash velocity so updateArena will glide for ARENA_DASH_DUR.
+  const dashSpeed = ARENA_DASH_DIST / ARENA_DASH_DUR;
+  p.vx = dirX * dashSpeed;
+  p.vy = dirY * dashSpeed;
+  Game.arenaDashT = ARENA_DASH_DUR;
+  Game.arenaInvulnT = ARENA_DASH_INVULN + ARENA_DASH_DUR;
+  Game.arenaDashCD = ARENA_DASH_COOLDOWN;
+  Game._arenaDashGhostT = 0;
+  // FX: shockwave puff + audible whoosh + screenshake.
+  shockwave(p.x, p.y, 'rgba(255,210,140,0.55)', 60);
+  emit(p.x, p.y, 10, { color: '#ffd86b', speed: 220, life: 0.32, size: 3, spread: Math.PI * 2 });
+  Game.shake = Math.max(Game.shake, 0.18);
+  if (typeof SFX === 'object' && typeof SFX.nitroOn === 'function') SFX.nitroOn();
+  else if (typeof SFX === 'object' && typeof SFX.click === 'function') SFX.click();
+  addPopup('DASH', p.x, p.y - 36, '#ffd86b', 11);
+}
+
+function arenaUpdateDash(dt) {
+  if (Game.mode !== 'arena') return;
+  Game.arenaDashCD = Math.max(0, (Game.arenaDashCD || 0) - dt);
+  Game.arenaDashT  = Math.max(0, (Game.arenaDashT  || 0) - dt);
+  Game.arenaInvulnT = Math.max(0, (Game.arenaInvulnT || 0) - dt);
+  // Spawn afterimage ghosts at a fixed interval during dash.
+  if (Game.arenaDashT > 0) {
+    Game._arenaDashGhostT = (Game._arenaDashGhostT || 0) - dt;
+    if (Game._arenaDashGhostT <= 0) {
+      const p = Game.player;
+      if (p) {
+        Game.arenaDashGhosts.push({
+          x: p.x, y: p.y, facing: p.facing, life: ARENA_DASH_GHOST_LIFE, max: ARENA_DASH_GHOST_LIFE,
+        });
+        Game._arenaDashGhostT = ARENA_DASH_GHOST_INTERVAL;
+      }
+    }
+  }
+  // Decay ghosts regardless of state (lets them fade out after dash ends).
+  if (Game.arenaDashGhosts && Game.arenaDashGhosts.length) {
+    for (let i = Game.arenaDashGhosts.length - 1; i >= 0; i--) {
+      Game.arenaDashGhosts[i].life -= dt;
+      if (Game.arenaDashGhosts[i].life <= 0) Game.arenaDashGhosts.splice(i, 1);
+    }
+  }
+}
+
+// === Phase 2 refinement — tire skid trails when banking hard at speed. ===
+function arenaUpdateSkidTrails(dt) {
+  if (!Game.arenaSkidTrails) return;
+  // decay
+  for (let i = Game.arenaSkidTrails.length - 1; i >= 0; i--) {
+    Game.arenaSkidTrails[i].life -= dt;
+    if (Game.arenaSkidTrails[i].life <= 0) Game.arenaSkidTrails.splice(i, 1);
+  }
+  // emit new
+  const p = Game.player;
+  if (!p) return;
+  const spd = Math.hypot(p.vx || 0, p.vy || 0);
+  const bank = Math.abs(p.bank || 0);
+  if (spd < ARENA_SKID_SPEED_THRESHOLD || bank < ARENA_SKID_BANK_THRESHOLD) {
+    Game._arenaSkidT = 0;
+    return;
+  }
+  Game._arenaSkidT = (Game._arenaSkidT || 0) - dt;
+  if (Game._arenaSkidT > 0) return;
+  Game._arenaSkidT = ARENA_SKID_INTERVAL;
+  // Tire positions: perpendicular to facing, just behind the chassis.
+  const cs = Math.cos(p.facing), sn = Math.sin(p.facing);
+  const back = -p.h * 0.32;
+  const sideOffset = p.w * 0.32;
+  const bx = p.x + cs * back;
+  const by = p.y + sn * back;
+  const perpX = -sn, perpY = cs;
+  Game.arenaSkidTrails.push({ x: bx + perpX * sideOffset, y: by + perpY * sideOffset,
+                              life: ARENA_SKID_TRAIL_LIFE, max: ARENA_SKID_TRAIL_LIFE,
+                              rot: p.facing });
+  Game.arenaSkidTrails.push({ x: bx - perpX * sideOffset, y: by - perpY * sideOffset,
+                              life: ARENA_SKID_TRAIL_LIFE, max: ARENA_SKID_TRAIL_LIFE,
+                              rot: p.facing });
+  while (Game.arenaSkidTrails.length > ARENA_SKID_TRAIL_MAX) Game.arenaSkidTrails.shift();
+}
+
+// === Phase 3/4 refinement — pre-spawn enemy markers ===
+// Instead of popping enemies into existence, queue a marker that pulses for
+// ARENA_SPAWN_MARKER_TIME at the spawn position. When the marker expires,
+// the actual enemy is created there. Boss spawns skip this telegraph since
+// boss waves are already announced with their own banner.
+function arenaQueueSpawnMarker(spawnArgs) {
+  if (!Game.arenaSpawnMarkers) Game.arenaSpawnMarkers = [];
+  if (Game.arenaSpawnMarkers.length >= ARENA_SPAWN_MARKER_MAX) {
+    // marker queue full — fall through to immediate spawn
+    arenaInstantiateFromArgs(spawnArgs);
+    return;
+  }
+  Game.arenaSpawnMarkers.push(Object.assign({
+    t: 0,
+    life: ARENA_SPAWN_MARKER_TIME,
+  }, spawnArgs));
+}
+
+function arenaUpdateSpawnMarkers(dt) {
+  if (!Game.arenaSpawnMarkers || !Game.arenaSpawnMarkers.length) return;
+  for (let i = Game.arenaSpawnMarkers.length - 1; i >= 0; i--) {
+    const m = Game.arenaSpawnMarkers[i];
+    m.t += dt;
+    m.life -= dt;
+    if (m.life <= 0) {
+      arenaInstantiateFromArgs(m);
+      Game.arenaSpawnMarkers.splice(i, 1);
+    }
+  }
+}
+
+function arenaInstantiateFromArgs(a) {
+  const p = Game.player;
+  Game.enemies.push({
+    kind: a.kind,
+    x: a.x, y: a.y,
+    w: a.w, h: a.h,
+    vx: 0, vy: 0,
+    hp: a.hp, maxHp: a.hp,
+    contact: a.contact,
+    fireT: a.fireT,
+    spawnAnimT: 0.35,
+    hitAnimT: 0,
+    storyAnimT: 0,
+    baseX: a.x, wave: 0, waveSpeed: 0, waveAmp: 0,
+    arenaAng: p ? Math.atan2(p.y - a.y, p.x - a.x) : 0,
+    arenaMaxV: a.maxV,
+    arenaAccel: a.accel,
+    arenaTurn: a.turnR,
+    arenaBoss: !!a.isBoss,
+    // Phase 5 — boss charge counter for periodic charged shots.
+    arenaBossShotN: a.isBoss ? 0 : undefined,
+  });
+  // Spawn arrival FX: small dust shockwave reinforces the telegraph payoff.
+  shockwave(a.x, a.y, 'rgba(255,180,80,0.4)', a.isBoss ? 80 : 36);
+  if (a.isBoss) {
+    emit(a.x, a.y, 18, { color: '#ff4040', speed: 220, life: 0.55, size: 3, spread: Math.PI * 2 });
+  }
+}
+
+// === Phase 4 refinement — explosive barrels ===
+// Barrels are static world-space hazards. Shoot one and it ignites for a brief
+// fuse then detonates in a ARENA_BARREL_BLAST_RADIUS splash that damages
+// enemies and player alike. Adjacent burning barrels ignite each other,
+// rewarding shooting clustered groups for area kills.
+function arenaUpdateBarrels(dt) {
+  if (!Game.arenaBarrels || !Game.arenaBarrels.length) return;
+  const p = Game.player;
+  // bullet hits → ignite (skip already-burning or dead)
+  for (let i = Game.arenaBarrels.length - 1; i >= 0; i--) {
+    const b = Game.arenaBarrels[i];
+    if (b.dead) continue;
+    b.t += dt;
+    if (b.burnT > 0) {
+      b.burnT -= dt;
+      // burning fuse — emit fire particles
+      if (Math.random() < 0.6) {
+        Game.particles.push({
+          x: b.x + rand(-4, 4), y: b.y - 10 + rand(-3, 3),
+          vx: rand(-12, 12), vy: rand(-50, -20),
+          life: 0.45, max: 0.45, size: 3 + (Math.random() * 3 | 0),
+          color: 'rgba(255,140,60,0.85)',
+        });
+      }
+      if (b.burnT <= 0) {
+        arenaDetonateBarrel(b);
+        Game.arenaBarrels.splice(i, 1);
+      }
+      continue;
+    }
+    // player bullet damage
+    for (let j = Game.bullets.length - 1; j >= 0; j--) {
+      const bl = Game.bullets[j];
+      if (bl.owner !== 'p') continue;
+      if (aabb(b, bl)) {
+        b.hp -= (bl.dmg || 1);
+        if (!bl.pierce) Game.bullets.splice(j, 1);
+        emit(bl.x, bl.y, 4, { color:'#ffb36a', speed:160, life:0.25, size:2, spread: Math.PI * 2 });
+        if (b.hp <= 0 && b.burnT <= 0) {
+          b.burnT = ARENA_BARREL_BURN_TIME;
+          SFX.click && SFX.click();
+        }
+        break;
+      }
+    }
+    // enemy bullet damage (a stray rocket / mortar can also light a barrel,
+    // creating delightful environmental kills)
+    for (let j = Game.enemyBullets.length - 1; j >= 0; j--) {
+      const eb = Game.enemyBullets[j];
+      if (aabb(b, eb)) {
+        b.hp -= (eb.dmg || 4) * 0.5;
+        Game.enemyBullets.splice(j, 1);
+        if (b.hp <= 0 && b.burnT <= 0) b.burnT = ARENA_BARREL_BURN_TIME;
+        break;
+      }
+    }
+    // player contact at speed scuffs it (small chip damage) so high-speed
+    // collisions are also threats.
+    if (p && aabb(b, p)) {
+      const psd = Math.hypot(p.vx || 0, p.vy || 0);
+      if (psd > 240) {
+        b.hp -= 1;
+        // bounce player slightly
+        const nx = (p.x - b.x), ny = (p.y - b.y);
+        const nl = Math.max(1, Math.hypot(nx, ny));
+        p.vx = nx / nl * Math.max(psd * 0.5, 180);
+        p.vy = ny / nl * Math.max(psd * 0.5, 180);
+        Game.shake = Math.max(Game.shake, 0.18);
+        if (b.hp <= 0 && b.burnT <= 0) b.burnT = ARENA_BARREL_BURN_TIME;
+      }
+    }
+  }
+}
+
+function arenaDetonateBarrel(b) {
+  SFX.bigBoom && SFX.bigBoom();
+  emit(b.x, b.y, 36, { color:'#ff8a3d', speed:380, life:0.75, size:5, spread: Math.PI * 2 });
+  emit(b.x, b.y, 18, { color:'#ffd86b', speed:260, life:0.55, size:4, spread: Math.PI * 2 });
+  shockwave(b.x, b.y, 'rgba(255,140,60,0.6)', ARENA_BARREL_BLAST_RADIUS * 1.4);
+  Game.shake = Math.max(Game.shake, 0.55);
+  // damage enemies in radius
+  for (let ei = Game.enemies.length - 1; ei >= 0; ei--) {
+    const e = Game.enemies[ei];
+    if (Math.hypot(e.x - b.x, e.y - b.y) <= ARENA_BARREL_BLAST_RADIUS) {
+      e.hp -= ARENA_BARREL_ENEMY_DMG;
+      e.hitAnimT = 0.25;
+      if (e.hp <= 0) {
+        applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
+        arenaEnemyDrop(e.x, e.y);
+        Game.arenaKills += 1;
+        Game.arenaCombo = Math.min((Game.arenaCombo || 0) + 1, ARENA_COMBO_MAX);
+        Game.enemies.splice(ei, 1);
+      }
+    }
+  }
+  // player splash (respects dash i-frames + shield via damagePlayer)
+  if (Game.player && Math.hypot(Game.player.x - b.x, Game.player.y - b.y) <= ARENA_BARREL_BLAST_RADIUS) {
+    damagePlayer(ARENA_BARREL_PLAYER_DMG);
+  }
+  // chain reaction: nearby barrels start burning on a slight delay
+  if (Game.arenaBarrels) {
+    for (const other of Game.arenaBarrels) {
+      if (other.burnT > 0) continue;
+      if (Math.hypot(other.x - b.x, other.y - b.y) <= ARENA_BARREL_BLAST_RADIUS) {
+        other.burnT = ARENA_BARREL_CHAIN_DELAY;
+        other.hp = 0;
+      }
+    }
+  }
+}
+
+// === Phase 5 refinement — boss enrage + charged shot telegraph ===
+function arenaUpdateBossPhase() {
+  if (!Game.enemies || !Game.enemies.length) {
+    if (Game.arenaBossPhase !== 0) Game.arenaBossPhase = 0;
+    return;
+  }
+  const boss = Game.enemies.find(e => e.arenaBoss);
+  if (!boss) {
+    if (Game.arenaBossPhase !== 0) Game.arenaBossPhase = 0;
+    return;
+  }
+  const pct = (boss.hp || 0) / Math.max(1, boss.maxHp || 1);
+  if (Game.arenaBossPhase === 0 && pct <= ARENA_BOSS_ENRAGE_PCT) {
+    Game.arenaBossPhase = 1;
+    boss.arenaTurn *= 1.3;
+    boss.arenaMaxV *= 1.2;
+    announceEvent('BOSS ENRAGED', '#ff4040');
+    SFX.boss && SFX.boss();
+    Game.shake = Math.max(Game.shake, 0.8);
+    shockwave(boss.x, boss.y, 'rgba(255,80,80,0.6)', 180);
+  }
+}
+
 function arenaSpawnPoint() {
   const world = Game.world;
   const p = Game.player;
@@ -18405,27 +18861,15 @@ function spawnArenaEnemy() {
   // Phase 5 — boss fires faster
   if (isBoss) fireT = ARENA_TANK_FIRE_RATE * 0.5;
 
-  Game.enemies.push({
-    kind,
-    x: sx, y: sy,
-    w, h,
-    vx: 0, vy: 0,
-    hp, maxHp: hp,
-    contact,
-    fireT,
-    spawnAnimT: 0.35,
-    hitAnimT: 0,
-    storyAnimT: 0,
-    // legacy fields drawEnemy expects so it doesn't NaN
-    baseX: sx, wave: 0, waveSpeed: 0, waveAmp: 0,
-    // arena AI fields
-    arenaAng: Math.atan2(p.y - sy, p.x - sx),
-    arenaMaxV: maxV,
-    arenaAccel: accel,
-    arenaTurn: turnR,
-    // Phase 5 — boss tag (drives drop bonus + render emphasis)
-    arenaBoss: isBoss,
-  });
+  const args = {
+    kind, x: sx, y: sy, w, h, hp, contact, fireT,
+    maxV, accel, turnR, isBoss,
+  };
+  // Phase 3/4 refinement — non-boss spawns route through a spawn marker
+  // (visible pulse on the world floor) for readability. Bosses spawn
+  // instantly since their wave already gets a separate banner.
+  if (isBoss) arenaInstantiateFromArgs(args);
+  else        arenaQueueSpawnMarker(args);
 }
 
 // Phase 3 — periodically place pickups at random world positions.
@@ -18555,7 +18999,16 @@ function renderArena() {
 
   // particles / shockwaves / pickups / enemies / bullets — reuse legacy
   // primitives now that ctx is in world coordinates.
+  // Phase 2 refinement — skid trails go beneath everything else so they
+  // read as ground markings.
+  drawArenaSkidTrails();
+  // Phase 4 refinement — explosive barrels in the floor layer (below pickups
+  // so a stacked pickup is still grabbable).
+  drawArenaBarrels();
   for (const pk of Game.pickups) drawPickup(pk);
+  // Phase 3/4 refinement — pre-spawn markers above the floor so the warning
+  // is hard to miss.
+  drawArenaSpawnMarkers();
   // Phase 5 — proximity mines (drawn in world space, before enemies)
   if (Game.arenaMines && Game.arenaMines.length) {
     for (const m of Game.arenaMines) {
@@ -18604,6 +19057,12 @@ function renderArena() {
   drawShockwaves();
   drawParticles();
 
+  // Phase 5 refinement — boss charged-shot telegraph laser, drawn before
+  // the player so the line passes under the chassis.
+  drawArenaBossTelegraph();
+  // Phase 1 refinement — dash afterimages: faded chassis silhouettes along
+  // the dash path so the dash motion reads even at low frame rates.
+  drawArenaDashGhosts();
   // player vehicle — rotates to face travel direction using the existing
   // `forcedRot` opt (drawVehicle already supports it). The legacy art
   // points "up" (toward -y), so subtract π/2 to convert a math-angle
@@ -18619,6 +19078,19 @@ function renderArena() {
       bank: p.bank || 0,
       damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
     });
+    // Phase 1 refinement — yellow ring around player while dash i-frames are
+    // active so other players can tell the player is briefly immune.
+    if ((Game.arenaInvulnT || 0) > 0) {
+      const a = clamp(Game.arenaInvulnT / ARENA_DASH_INVULN, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = 0.45 + 0.3 * a;
+      ctx.strokeStyle = '#ffd86b';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(p.w, p.h) * 0.55 + 4 + (1 - a) * 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     if (Game.hitFlash > 0) {
       ctx.save();
       ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
@@ -18666,14 +19138,342 @@ function renderArena() {
     drawPowerupStrip();
     drawComboMeter();
     drawArenaBossBar();
+    // Phase 1 refinement — arena dash cooldown HUD chip.
+    if (Game.mode === 'arena') drawArenaDashHUD();
     // Phase 6 — arena combo display
     if (Game.mode === 'arena') drawArenaCombo();
+    // Phase 5 refinement — offscreen threat indicators (boss + armed mines).
+    if (Game.mode === 'arena') drawArenaOffscreenIndicators();
     drawArenaMinimap();
+    // Phase 4 refinement — wave intro banner overlay.
+    if (Game.mode === 'arena' && (Game.arenaWaveIntroT || 0) > 0) drawArenaWaveIntro();
   }
   if (Game.state === 'playing' && Game.paused) drawPause();
   if (Game.state === 'loading') drawLoadingOverlay();
   if (Game.state === 'dying')   drawDeathOverlay();
 }
+
+// ============================================================
+// === ARENA REFINEMENT RENDERERS (Phase 1-5 v2) ===
+// All renderers below assume the world-space transform is active
+// (i.e. ctx.translate(-cam.x, -cam.y)) unless explicitly noted as
+// screen-space. They cull aggressively against the camera AABB
+// because the arena world can have many invisible entities.
+// ============================================================
+
+// Phase 2 refinement — tire skid trails.
+// Drawn as a stack of small dark dashes rotated to match wheel facing.
+// Each segment fades linearly with remaining life.
+function drawArenaSkidTrails() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSkidTrails || !Game.arenaSkidTrails.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const s of Game.arenaSkidTrails) {
+    // off-camera cull (10px slack)
+    if (s.x < cam.x - 10 || s.x > cam.x + W + 10 ||
+        s.y < cam.y - 10 || s.y > cam.y + H + 10) continue;
+    const a = clamp(s.life / s.max, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = a * 0.5;
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.rot);
+    ctx.fillStyle = '#1a0e08';
+    ctx.fillRect(-5, -1.2, 10, 2.4);
+    ctx.restore();
+  }
+}
+
+// Phase 4 refinement — explosive barrels.
+// Simple top-down disc with hazard chevrons and a rivet ring; when burning,
+// glows orange and emits the fire particles created in arenaUpdateBarrels.
+function drawArenaBarrels() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaBarrels || !Game.arenaBarrels.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const b of Game.arenaBarrels) {
+    if (b.x < cam.x - 30 || b.x > cam.x + W + 30 ||
+        b.y < cam.y - 30 || b.y > cam.y + H + 30) continue;
+    const burning = b.burnT > 0;
+    const pulse = 0.5 + 0.5 * Math.sin(b.t * (burning ? 22 : 4));
+    // ground shadow
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.beginPath();
+    ctx.ellipse(b.x + 3, b.y + 6, 13, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body
+    ctx.fillStyle = burning ? `rgba(${220 + pulse * 30 | 0},${110 + pulse * 60 | 0},${30 + pulse * 10 | 0},1)` : '#a04a18';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 12, 0, Math.PI * 2);
+    ctx.fill();
+    // top inset
+    ctx.fillStyle = burning ? `rgba(${255},${180 + pulse * 60 | 0},${60 + pulse * 40 | 0},1)` : '#6a2a10';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y - 2, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // hazard chevron
+    ctx.fillStyle = burning ? '#fff3b0' : '#ffd86b';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', b.x, b.y - 1);
+    // rivet ring
+    ctx.strokeStyle = burning ? '#fff3b0' : '#3a1a0a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 11.5, 0, Math.PI * 2);
+    ctx.stroke();
+    // burning glow ring
+    if (burning) {
+      ctx.globalAlpha = 0.35 + pulse * 0.35;
+      ctx.strokeStyle = '#ff8a3d';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 16 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      // intent-to-explode blast radius hint (very faint)
+      ctx.globalAlpha = 0.10 + pulse * 0.10;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, ARENA_BARREL_BLAST_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// Phase 3/4 refinement — pre-spawn enemy markers.
+// Pulsing red ring with kind-specific icon; converges as life ticks down
+// so the impending threat reads at a glance.
+function drawArenaSpawnMarkers() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSpawnMarkers || !Game.arenaSpawnMarkers.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const m of Game.arenaSpawnMarkers) {
+    if (m.x < cam.x - 50 || m.x > cam.x + W + 50 ||
+        m.y < cam.y - 50 || m.y > cam.y + H + 50) continue;
+    const k = clamp(m.t / (m.t + m.life || 1), 0, 1);    // 0 → 1 over marker life
+    const ringR = (1 - k) * 36 + 8;
+    const pulse = 0.5 + 0.5 * Math.sin(m.t * 18);
+    ctx.save();
+    // outer red ring contracting toward spawn point
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = '#ff5050';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+    // inner pulsing dot
+    ctx.globalAlpha = 0.65 + pulse * 0.35;
+    ctx.fillStyle = '#ff5050';
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 5 + pulse * 2, 0, Math.PI * 2);
+    ctx.fill();
+    // kind glyph
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = '#fff3b0';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const glyph = m.kind === 'tank' ? 'T' : m.kind === 'mortar' ? 'M' : m.kind === 'drone' ? 'D' : 'B';
+    ctx.fillText(glyph, m.x, m.y - 12 - ringR * 0.4);
+    ctx.restore();
+  }
+}
+
+// Phase 1 refinement — dash afterimage ghosts.
+// Faded yellow silhouettes along the dash path; cheap solid fills, no
+// gradients, so this stays under control on mobile.
+function drawArenaDashGhosts() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaDashGhosts || !Game.arenaDashGhosts.length) return;
+  const p = Game.player;
+  if (!p) return;
+  for (const g of Game.arenaDashGhosts) {
+    const a = clamp(g.life / g.max, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = a * 0.32;
+    ctx.translate(g.x, g.y);
+    ctx.rotate(g.facing + Math.PI / 2);
+    ctx.fillStyle = '#ffd86b';
+    ctx.fillRect(-p.w * 0.4, -p.h * 0.4, p.w * 0.8, p.h * 0.8);
+    ctx.restore();
+  }
+}
+
+// Phase 5 refinement — boss charged-shot telegraph.
+// Draws a red laser line from the boss to the latched fire direction
+// while arenaBossChargeT > 0, pulsing in width to communicate urgency.
+function drawArenaBossTelegraph() {
+  if (Game.mode !== 'arena') return;
+  if ((Game.arenaBossChargeT || 0) <= 0) return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  const boss = Game.enemies.find(e => e.arenaBoss && e._chargeReady);
+  if (!boss) return;
+  const ang = (boss._chargeAng !== undefined) ? boss._chargeAng : 0;
+  const k = clamp(Game.arenaBossChargeT / ARENA_BOSS_CHARGE_TIME, 0, 1);
+  const w = 1.5 + (1 - k) * 6;
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 26);
+  const len = 900;
+  const ex = boss.x + Math.cos(ang) * len;
+  const ey = boss.y + Math.sin(ang) * len;
+  ctx.save();
+  ctx.globalAlpha = 0.35 + pulse * 0.35;
+  ctx.strokeStyle = '#ff4040';
+  ctx.lineWidth = w;
+  ctx.beginPath();
+  ctx.moveTo(boss.x, boss.y);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  // bright core line
+  ctx.globalAlpha = 0.55 + pulse * 0.45;
+  ctx.strokeStyle = '#ffd86b';
+  ctx.lineWidth = Math.max(1, w * 0.35);
+  ctx.beginPath();
+  ctx.moveTo(boss.x, boss.y);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Phase 5 refinement — off-screen threat indicators.
+// Renders chevron arrows on the screen edge pointing toward bosses and
+// armed mines that are currently outside the camera viewport, so players
+// always know where the biggest threats are.
+function drawArenaOffscreenIndicators() {
+  if (Game.mode !== 'arena') return;
+  const cam = Game.camera;
+  if (!cam) return;
+  const targets = [];
+  if (Game.enemies) {
+    for (const e of Game.enemies) {
+      if (!e.arenaBoss) continue;
+      if (e.x >= cam.x && e.x <= cam.x + W && e.y >= cam.y && e.y <= cam.y + H) continue;
+      targets.push({ x: e.x, y: e.y, color: '#ff4040', label: 'BOSS' });
+    }
+  }
+  if (Game.arenaMines) {
+    for (const m of Game.arenaMines) {
+      if (!m.armed) continue;
+      if (m.x >= cam.x && m.x <= cam.x + W && m.y >= cam.y && m.y <= cam.y + H) continue;
+      targets.push({ x: m.x, y: m.y, color: '#ff8a3d', label: 'MINE' });
+    }
+  }
+  if (Game.arenaSpawnMarkers) {
+    for (const sp of Game.arenaSpawnMarkers) {
+      if (sp.x >= cam.x && sp.x <= cam.x + W && sp.y >= cam.y && sp.y <= cam.y + H) continue;
+      targets.push({ x: sp.x, y: sp.y, color: '#ff5050', label: 'SPAWN' });
+    }
+  }
+  if (!targets.length) return;
+  const pad = 28;
+  const cxScr = W / 2, cyScr = H / 2;
+  ctx.save();
+  ctx.font = 'bold 9px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const t of targets) {
+    // direction from camera center to target (in world)
+    const dx = (t.x - (cam.x + W / 2));
+    const dy = (t.y - (cam.y + H / 2));
+    const ang = Math.atan2(dy, dx);
+    // project to screen edge inside the safe-pad rectangle
+    const halfW = W / 2 - pad;
+    const halfH = H / 2 - pad;
+    let scale = Math.min(halfW / Math.max(0.0001, Math.abs(Math.cos(ang))),
+                         halfH / Math.max(0.0001, Math.abs(Math.sin(ang))));
+    const ix = cxScr + Math.cos(ang) * scale;
+    const iy = cyScr + Math.sin(ang) * scale;
+    // arrow body
+    ctx.save();
+    ctx.translate(ix, iy);
+    ctx.rotate(ang);
+    ctx.fillStyle = t.color;
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-6, -7);
+    ctx.lineTo(-2, 0);
+    ctx.lineTo(-6, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // label slightly behind the arrow
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.label, ix - Math.cos(ang) * 14, iy - Math.sin(ang) * 14);
+  }
+  ctx.restore();
+}
+
+// Phase 1 refinement — dash cooldown HUD chip (screen space).
+// Compact pill on the bottom-left showing dash readiness.
+function drawArenaDashHUD() {
+  if (Game.mode !== 'arena') return;
+  const cd = Game.arenaDashCD || 0;
+  const ready = cd <= 0;
+  const padX = 12;
+  const padY = H - 36;
+  const w = 88, h = 22;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(padX - 2, padY - 2, w + 4, h + 4);
+  ctx.fillStyle = 'rgba(60,40,28,0.85)';
+  ctx.fillRect(padX, padY, w, h);
+  // progress fill
+  const fillPct = ready ? 1 : 1 - clamp(cd / ARENA_DASH_COOLDOWN, 0, 1);
+  ctx.fillStyle = ready ? '#d2ff6f' : '#ffb36a';
+  ctx.fillRect(padX, padY, w * fillPct, h);
+  // label
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = ready ? '#1a3a0e' : '#3a1a08';
+  ctx.fillText(ready ? 'DASH (Q)' : 'DASH ' + cd.toFixed(1) + 'S', padX + w / 2, padY + h / 2);
+  // outline
+  ctx.strokeStyle = '#8a5a3a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(padX + 0.5, padY + 0.5, w - 1, h - 1);
+  ctx.restore();
+}
+
+// Phase 4 refinement — wave intro banner overlay.
+// Big text + accent strip with subtle slide-in animation tied to remaining
+// time. Sits centered over the world.
+function drawArenaWaveIntro() {
+  if (Game.mode !== 'arena') return;
+  const t = clamp(Game.arenaWaveIntroT / ARENA_WAVE_INTRO_TIME, 0, 1);
+  // ease: full opacity for the first half, fade for the second
+  const a = t > 0.5 ? 1 : t * 2;
+  const slideX = (1 - t) * -20;
+  const label = Game.arenaWaveIntroLabel || '';
+  const accent = Game.arenaWaveIntroAccent || '#ffd86b';
+  const y = H * 0.32;
+  const fontSize = W < 500 ? 28 : 42;
+  ctx.save();
+  ctx.globalAlpha = a * 0.92;
+  // accent strip
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, y - fontSize * 0.9, W, fontSize * 1.8);
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, y - fontSize * 0.9, W, 3);
+  ctx.fillRect(0, y + fontSize * 0.9 - 3, W, 3);
+  // big label
+  ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#1a0a04';
+  ctx.fillText(label, W / 2 + slideX + 3, y + 3);
+  ctx.fillStyle = accent;
+  ctx.fillText(label, W / 2 + slideX, y);
+  // small subtitle
+  ctx.font = `bold ${Math.round(fontSize * 0.32)}px "Courier New", monospace`;
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('INCOMING', W / 2 + slideX, y + fontSize * 0.65);
+  ctx.restore();
+}
+
 
 function drawArenaBossBar() {
   if (Game.mode !== 'arena' || !Game.enemies || !Game.enemies.length) return;
