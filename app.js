@@ -3241,7 +3241,8 @@ function resize() {
   cvs.width  = Math.floor(W * DPR);
   cvs.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   rebuildGradients();
   if (Game.player) {
     const py = Game.player.y || (H - 110);
@@ -9380,12 +9381,14 @@ function drawBullets() {
   for (const b of Game.bullets) {
     if (b.big) {
       ctx.fillStyle = 'rgba(255,180,80,0.3)';
-      ctx.fillRect(b.x - b.w, b.y - b.h, b.w * 2, b.h * 2);
+      ctx.beginPath(); ctx.ellipse(b.x, b.y, b.w * 1.1, b.h * 1.1, 0, 0, Math.PI * 2); ctx.fill();
     }
     ctx.fillStyle = b.homing ? '#ffaaff' : '#fff3b0';
-    ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+    pathRoundRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, b.w / 2);
+    ctx.fill();
     ctx.fillStyle = b.homing ? 'rgba(255,100,255,0.5)' : 'rgba(255,180,80,0.5)';
-    ctx.fillRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4);
+    pathRoundRect(b.x - b.w/2 - 1, b.y - b.h/2 - 4, b.w + 2, 4, 1);
+    ctx.fill();
   }
   // Enemy bullets — same additive halo trick, tinted red so threats remain
   // easy to read against the player's warm tracers.
@@ -9435,7 +9438,8 @@ function drawBullets() {
       ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI*2); ctx.fill();
     }
     ctx.fillStyle = '#ff5050';
-    ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+    pathRoundRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, b.w / 2);
+    ctx.fill();
     ctx.fillStyle = 'rgba(255,80,80,0.5)';
     ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill();
   }
@@ -9490,10 +9494,12 @@ function drawSkidMarks() {
     const rot = Math.atan2(s.vy || 1, (s.vx || 0.001)) * SKID_ROTATION_FACTOR;
     ctx.rotate(rot);
     ctx.fillStyle = `rgba(20,12,6,${a})`;
-    ctx.fillRect(-s.w/2, -s.h/2, s.w, s.h);
+    pathRoundRect(-s.w/2, -s.h/2, s.w, s.h, 1);
+    ctx.fill();
     if (detail >= 1) {
       ctx.fillStyle = `rgba(60,46,30,${a * 0.5})`;
-      ctx.fillRect(-s.w/2 + 1, -s.h/2 + 0.5, s.w - 2, Math.max(0.8, s.h * 0.4));
+      pathRoundRect(-s.w/2 + 1, -s.h/2 + 0.5, s.w - 2, Math.max(0.8, s.h * 0.4), 0.5);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -9657,7 +9663,8 @@ function drawPlayerNitroTrail() {
     // cheaper than re-drawing the full vehicle each frame and reads as a
     // motion smear instead of a duplicate sprite.
     ctx.fillStyle = 'rgba(122,240,255,0.75)';
-    ctx.fillRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h);
+    pathRoundRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h, 4);
+    ctx.fill();
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -10567,7 +10574,8 @@ function renderVehiclePreview(canvas, vehicleId, cosmetics = null, opts = {}) {
   const cw = canvas.width = size.w;
   const ch = canvas.height = size.h;
   const bay = opts.bay !== undefined ? !!opts.bay : (size.w > 80 || size.h > 90);
-  c.imageSmoothingEnabled = false;
+  c.imageSmoothingEnabled = true;
+  c.imageSmoothingQuality = 'high';
   c.clearRect(0, 0, cw, ch);
   const pt = (Game.animT || Game.t || 0) + (v.id.length * 0.31);
   const prev = ctx;
