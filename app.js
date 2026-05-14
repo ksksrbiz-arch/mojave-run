@@ -17708,6 +17708,8 @@ const ARENA_ENEMY_FIRE_RANGE   = 380;   // px — enemies only shoot within this
 const ARENA_DRONE_FIRE_RATE    = 1.8;   // seconds between drone shots
 const ARENA_MORTAR_FIRE_RATE   = 3.0;   // seconds between mortar lobs
 const ARENA_TANK_FIRE_RATE     = 2.2;   // seconds between tank shots
+// Enemy bullets are deliberately slower than player bullets (820) so the
+// player has time to react and dodge — this is the primary skill check.
 const ARENA_ENEMY_BULLET_SPEED = 320;
 const ARENA_DECOR_COUNT        = 40;    // scattered rocks/ruins in world
 
