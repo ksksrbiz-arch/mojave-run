@@ -2417,6 +2417,8 @@ const Profile = {
         if (!Array.isArray(p.milestonesClaimed)) { p.milestonesClaimed = []; dirty = true; }
         // Phase 5 — arena best wave tracking
         if (typeof p.bestArenaWave !== 'number') { p.bestArenaWave = 0; dirty = true; }
+        // Batch v3 — arena leaderboard (top runs)
+        if (!Array.isArray(p.arenaLeaderboard)) { p.arenaLeaderboard = []; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2505,6 +2507,7 @@ const Profile = {
       loginStreak: 0,              // consecutive daily login count
       milestonesClaimed: [],       // run-count milestones already rewarded (e.g. [10, 25, 50])
       bestArenaWave: 0,            // Phase 5: highest arena wave reached
+      arenaLeaderboard: [],        // Batch v3: top runs [{wave,score,kills,when}]
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -2693,6 +2696,20 @@ const Profile = {
     if (result.mode === 'ironthrone' && result.score > (p.bestIronThrone || 0)) p.bestIronThrone = result.score;
     // Phase 5 — arena best wave
     if (result.mode === 'arena' && (result.arenaWave || 0) > (p.bestArenaWave || 0)) p.bestArenaWave = result.arenaWave;
+    // Batch v3 — arena leaderboard insert (top ARENA_LEADERBOARD_MAX rows by score)
+    if (result.mode === 'arena') {
+      if (!Array.isArray(p.arenaLeaderboard)) p.arenaLeaderboard = [];
+      p.arenaLeaderboard.push({
+        wave:  result.arenaWave  || 0,
+        score: result.score      || 0,
+        kills: result.arenaKills || 0,
+        when:  Date.now(),
+      });
+      p.arenaLeaderboard.sort((a, b) => (b.score || 0) - (a.score || 0));
+      if (p.arenaLeaderboard.length > ARENA_LEADERBOARD_MAX) {
+        p.arenaLeaderboard.length = ARENA_LEADERBOARD_MAX;
+      }
+    }
     if (result.mode === 'ironthrone' && result.victory && result.ironThroneStage) {
       if (!p.ironThroneCleared) p.ironThroneCleared = [];
       if (!p.ironThroneCleared.includes(result.ironThroneStage)) {
@@ -4102,11 +4119,15 @@ function updatePowerups(dt) {
 
 // Magnet: pull pickups toward player when active
 function applyMagnet(dt) {
-  const hasMagnetEffect = isPowerupActive('magnet') || !!(Game.branchState && Game.branchState.pickupRadius > 0);
+  const inArena = (Game.mode === 'arena');
+  const arenaMul = inArena ? (Game.arenaMagnetMul || 1) : 1;
+  const hasMagnetEffect = isPowerupActive('magnet') || !!(Game.branchState && Game.branchState.pickupRadius > 0)
+    || (inArena && arenaMul > 1); // arena magnet perk extends pull even without powerup
   if (!hasMagnetEffect) return;
   const p = Game.player;
   const bonus = (Game.branchState && Game.branchState.pickupRadius) || 0;
-  const range = (240 + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0)) * (Game.magnetRangeMul || 1);
+  const baseR = (isPowerupActive('magnet') || (Game.branchState && Game.branchState.pickupRadius > 0)) ? 240 : 120;
+  const range = (baseR + bonus + (isPowerupActive('salvage') ? SALVAGE_MAGNET_BONUS : 0)) * (Game.magnetRangeMul || 1) * arenaMul;
   for (const pk of Game.pickups) {
     const dx = p.x - pk.x, dy = p.y - pk.y;
     const d = Math.hypot(dx, dy);
@@ -4272,6 +4293,33 @@ window.addEventListener('keydown', e => {
     setControlHintMode('keyboard');
   }
   ensureAudio();
+  // Batch v3 — arena perk-select keyboard input. Intercept 1/2/3 + arrows +
+  // Enter before any other handler so the picker is reliably navigable.
+  if (Game.mode === 'arena' && Game.state === 'playing' && Game.arenaPerkChoosing) {
+    if (key === '1' || key === '2' || key === '3') {
+      const idx = parseInt(key, 10) - 1;
+      if (idx >= 0 && idx < (Game.arenaPerkChoices || []).length) {
+        arenaApplyPerkByIndex(idx);
+        e.preventDefault();
+        return;
+      }
+    }
+    if (key === 'arrowleft' || key === 'a') {
+      Game.arenaPerkSelectedIdx = Math.max(0, (Game.arenaPerkSelectedIdx || 0) - 1);
+      e.preventDefault();
+      return;
+    }
+    if (key === 'arrowright' || key === 'd') {
+      Game.arenaPerkSelectedIdx = Math.min((Game.arenaPerkChoices.length - 1), (Game.arenaPerkSelectedIdx || 0) + 1);
+      e.preventDefault();
+      return;
+    }
+    if (key === 'enter' || key === ' ') {
+      arenaApplyPerkByIndex(Game.arenaPerkSelectedIdx || 0);
+      e.preventDefault();
+      return;
+    }
+  }
   // Versus end: any key returns to menu
   if (Game.state === 'versus-end' && Versus.endData) {
     Versus.active = false;
@@ -4620,6 +4668,25 @@ const Game = {
   arenaWaveIntroT: 0,
   arenaWaveIntroLabel: '',
   arenaWaveIntroAccent: '#ffd86b',
+  // === Batch v3 — content & atmosphere state ===
+  arenaTarPatches: [],         // [{x,y,r,t}] terrain hazards (filled at run start)
+  arenaSupplies: [],           // [{x,y,phase:'descend'|'landed',t,life,heading}]
+  arenaSupplyT: 0,             // seconds until next supply-drop attempt
+  arenaDayT: 0,                // 0..ARENA_DAY_LENGTH cycle clock
+  arenaLightningT: 0,          // seconds until next lightning strike (when night)
+  arenaLightningFlash: 0,      // remaining flash overlay time
+  arenaPerks: [],              // applied perk ids this run (allows duplicates)
+  arenaPerkChoosing: false,    // true while perk-select modal is up between waves
+  arenaPerkChoices: [],        // [perkDef, perkDef, perkDef] current options
+  arenaPerkSelectedIdx: 0,     // keyboard cursor for perk-select
+  // Stat-mod buckets applied by perks (consumed by gameplay code).
+  arenaFireRateMul: 1,         // <1 means faster firing
+  arenaDmgMul: 1,              // bullet damage multiplier
+  arenaCritChance: 0,          // 0..1 chance any bullet deals 2x damage
+  arenaSpeedMul: 1,            // top-speed multiplier
+  arenaMagnetMul: 1,           // magnet radius multiplier
+  arenaDashCDMul: 1,           // dash cooldown multiplier (<1 = faster)
+  arenaDmgTakenMul: 1,         // multiplier on incoming damage (<1 = tougher)
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -5081,6 +5148,45 @@ function beginPlaying() {
     Game.arenaWaveIntroT = ARENA_WAVE_INTRO_TIME;
     Game.arenaWaveIntroLabel = 'WAVE 1';
     Game.arenaWaveIntroAccent = '#ffd86b';
+    // === Batch v3 init ===
+    // Tar patches: scattered terrain hazards. Placed away from spawn so the
+    // first second of play doesn't trap the player.
+    Game.arenaTarPatches = [];
+    for (let ti = 0; ti < ARENA_TAR_COUNT; ti++) {
+      let tx = 0, ty = 0, tr = 0, attempts = 0;
+      do {
+        tx = rand(160, worldW - 160);
+        ty = rand(160, worldH - 160);
+        tr = rand(ARENA_TAR_RADIUS_MIN, ARENA_TAR_RADIUS_MAX);
+        attempts += 1;
+      } while (Math.hypot(tx - Game.player.x, ty - Game.player.y) < 480 && attempts < 8);
+      Game.arenaTarPatches.push({
+        x: tx, y: ty, r: tr,
+        t: rand(0, Math.PI * 2),    // shimmer phase
+        // Pre-baked irregular silhouette so each patch renders with a unique
+        // blob outline without re-randomizing every frame.
+        blobs: Array.from({ length: 7 }, (_, k) => ({
+          ang: (k / 7) * Math.PI * 2 + rand(-0.25, 0.25),
+          dr:  rand(0.78, 1.18),
+        })),
+      });
+    }
+    Game.arenaSupplies = [];
+    Game.arenaSupplyT = ARENA_SUPPLY_INTERVAL * 0.6; // first drop a bit sooner
+    Game.arenaDayT = ARENA_DAY_LENGTH * 0.15;        // start late-morning
+    Game.arenaLightningT = rand(ARENA_LIGHTNING_MIN_GAP, ARENA_LIGHTNING_MAX_GAP);
+    Game.arenaLightningFlash = 0;
+    Game.arenaPerks = [];
+    Game.arenaPerkChoosing = false;
+    Game.arenaPerkChoices = [];
+    Game.arenaPerkSelectedIdx = 0;
+    Game.arenaFireRateMul   = 1;
+    Game.arenaDmgMul        = 1;
+    Game.arenaCritChance    = 0;
+    Game.arenaSpeedMul      = 1;
+    Game.arenaMagnetMul     = 1;
+    Game.arenaDashCDMul     = 1;
+    Game.arenaDmgTakenMul   = 1;
     // Speed is unused for scrolling in arena, but other systems still read
     // it (e.g. cinematic, audio mix). Keep it modest so they don't think
     // we're in a chase.
@@ -5223,6 +5329,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     ironThroneStage: Game.mode === 'ironthrone' ? ironThroneStagesCleared() : 0,
     // Phase 5 — arena wave reached (max wave number entered)
     arenaWave: Game.mode === 'arena' ? (Game.arenaWave || 0) : 0,
+    // Batch v3 — arena kills for leaderboard rows
+    arenaKills: Game.mode === 'arena' ? (Game.arenaKills || 0) : 0,
   };
   Profile.recordRunResult(runResult);
   // === STRATEGY v3.1: detect new personal best after recording ===
@@ -7199,6 +7307,8 @@ function damagePlayer(amt) {
   amt *= Game.damageTakenMul;
   // Armor plating absorbs half of incoming damage
   if (isPowerupActive('armor')) amt *= 0.5;
+  // Batch v3 — arena perk: flat reduction in damage taken.
+  if (Game.mode === 'arena' && Game.arenaDmgTakenMul) amt *= Game.arenaDmgTakenMul;
   if (Settings.damageNumbers) addPopup('-' + Math.ceil(amt), Game.player.x, Game.player.y - 36, '#ff8a8a', 12);
   Game.health -= amt;
   Game.flash = 1;
@@ -9025,6 +9135,94 @@ function arenaEnemyTopDownOpts(e) {
   return { topDown: true, forcedRot: e.arenaAng + Math.PI / 2 };
 }
 
+// Batch v3 — sniper render: chassis with a long fixed barrel oriented along
+// the aim angle (or facing while not aiming). Includes a small scope glint.
+function drawArenaSniper(e) {
+  const ang = (e._sniperFiring && e._sniperAimAng !== undefined) ? e._sniperAimAng
+            : (e.arenaAng !== undefined ? e.arenaAng : 0);
+  ctx.save();
+  // shadow
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(e.x + 3, e.y + 6, e.w * 0.55, e.h * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  // chassis
+  ctx.translate(e.x, e.y);
+  ctx.rotate(ang);
+  ctx.fillStyle = e.hitAnimT > 0 ? '#ff8080' : '#5a1818';
+  ctx.fillRect(-e.h * 0.5, -e.w * 0.5, e.h, e.w);
+  ctx.strokeStyle = '#240808';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-e.h * 0.5 + 0.5, -e.w * 0.5 + 0.5, e.h - 1, e.w - 1);
+  // turret base
+  ctx.fillStyle = '#3a1010';
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.min(e.w, e.h) * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  // long barrel
+  ctx.fillStyle = '#1a0808';
+  ctx.fillRect(0, -2, e.h * 0.85, 4);
+  // scope glint
+  ctx.fillStyle = e._sniperFiring ? '#ff4040' : '#ffd86b';
+  ctx.beginPath();
+  ctx.arc(-2, 0, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // HP bar
+  if (e.hp < (e.maxHp || ARENA_SNIPER_HP)) {
+    const w = Math.max(20, e.w);
+    const k = clamp(e.hp / Math.max(1, e.maxHp || ARENA_SNIPER_HP), 0, 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(e.x - w / 2, e.y - e.h / 2 - 8, w, 3);
+    ctx.fillStyle = k > 0.5 ? '#d2ff6f' : k > 0.25 ? '#ffd86b' : '#ff4040';
+    ctx.fillRect(e.x - w / 2, e.y - e.h / 2 - 8, w * k, 3);
+  }
+}
+
+// Batch v3 — kamikaze render: angular spiked chassis with a pulsing red core.
+function drawArenaKamikaze(e) {
+  const ang = e.arenaAng !== undefined ? e.arenaAng : 0;
+  const p = Game.player;
+  const close = p ? clamp(1 - Math.hypot(e.x - p.x, e.y - p.y) / ARENA_KAMI_PRIME_RADIUS, 0, 1) : 0;
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * (4 + close * 12));
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(e.x + 2, e.y + 4, e.w * 0.55, e.h * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.translate(e.x, e.y);
+  ctx.rotate(ang);
+  // spikes
+  ctx.fillStyle = '#3a1a08';
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const r1 = Math.min(e.w, e.h) * 0.55;
+    const r2 = r1 + 5;
+    const aw = 0.32;
+    ctx.moveTo(Math.cos(a - aw) * r1, Math.sin(a - aw) * r1);
+    ctx.lineTo(Math.cos(a) * r2,       Math.sin(a) * r2);
+    ctx.lineTo(Math.cos(a + aw) * r1, Math.sin(a + aw) * r1);
+    ctx.closePath();
+  }
+  ctx.fill();
+  // chassis
+  ctx.fillStyle = e.hitAnimT > 0 ? '#fff3b0' : '#a04a18';
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.min(e.w, e.h) * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+  // pulsing core
+  ctx.fillStyle = `rgba(${255}, ${80 - close * 60 | 0}, ${30 + pulse * 40 | 0}, 1)`;
+  ctx.beginPath();
+  ctx.arc(0, 0, 4 + pulse * 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawEnemy(e) {
   const anim = enemyAnimState(e);
   if (e.kind === 'bike')   { drawBike(e);   return; }
@@ -9032,6 +9230,11 @@ function drawEnemy(e) {
   if (e.kind === 'zombie') { drawZombie(e); return; }
   if (e.kind === 'drone')  { drawDrone(e);  return; }
   if (e.kind === 'tank')   { drawTank(e);   return; }
+  // Batch v3 — sniper: compact gunner silhouette with a long barrel that
+  // points along the aim angle. Chassis tinted darker red for readability.
+  if (e.kind === 'sniper') { drawArenaSniper(e); return; }
+  // Batch v3 — kamikaze: small spiked chassis tinted yellow-orange.
+  if (e.kind === 'kamikaze') { drawArenaKamikaze(e); return; }
   const rv = {
     id: 'enemy_buggy',
     color: { body:'#7a1a1a', hood:'#4a1010', cab:'#240808', windshield:'#ff8080', glow:'#ff4a4a' },
@@ -10691,6 +10894,13 @@ function drawDeathOverlay() {
       ctx.font = `bold ${W < 500 ? 11 : 13}px "Courier New", monospace`;
       ctx.fillStyle = comboNum > 20 ? '#ff6f9f' : comboNum > 10 ? '#ffb36a' : '#d2ff6f';
       ctx.fillText('COMBO ' + comboNum + ' · ' + comboMul + ' SCRAP', W/2, H * 0.65);
+      // Batch v3 — perks acquired this run
+      const perkCount = (Game.arenaPerks || []).length;
+      if (perkCount > 0) {
+        ctx.font = `bold ${W < 500 ? 10 : 12}px "Courier New", monospace`;
+        ctx.fillStyle = '#c0b0ff';
+        ctx.fillText('PERKS x' + perkCount + ' · KILLS ' + (Game.arenaKills || 0), W/2, H * 0.70);
+      }
     }
   }
   ctx.restore();
@@ -17892,6 +18102,60 @@ const ARENA_BOSS_CHARGE_RATE     = 4.5;   // every Nth boss shot is a charged sh
 const ARENA_BOSS_CHARGE_DMG_MUL  = 2.0;   // damage multiplier on charged shots
 const ARENA_BOSS_CHARGE_SPEED    = 1.6;   // bullet speed multiplier on charged shots
 
+// === Batch v3 — Arena content & atmosphere ===
+// Sniper enemy: stationary high-damage shooter with a laser-sight telegraph.
+const ARENA_SNIPER_HP            = 4;
+const ARENA_SNIPER_FIRE_RATE     = 3.4;   // seconds between shots
+const ARENA_SNIPER_TELEGRAPH     = 0.85;  // seconds the laser sight tracks before firing
+const ARENA_SNIPER_RANGE         = 760;
+const ARENA_SNIPER_BULLET_SPEED  = 760;
+const ARENA_SNIPER_BULLET_DMG    = 20;
+const ARENA_SNIPER_MIN_KILLS     = 12;    // unlocks after this many kills
+const ARENA_SNIPER_ROLL_PCT      = 0.16;
+// Kamikaze enemy: very fast, low-HP rusher that explodes on contact or death.
+const ARENA_KAMI_HP              = 2;
+const ARENA_KAMI_BLAST_RADIUS    = 96;
+const ARENA_KAMI_PLAYER_DMG      = 22;
+const ARENA_KAMI_ENEMY_DMG       = 18;
+const ARENA_KAMI_BLINK_RATE      = 6.5;   // pulses-per-second of the warning blink while close
+const ARENA_KAMI_PRIME_RADIUS    = 180;   // distance from player at which it starts blinking
+const ARENA_KAMI_MIN_KILLS       = 5;
+const ARENA_KAMI_ROLL_PCT        = 0.18;
+// Tar patches: terrain hazards that slow the player while overlapping.
+const ARENA_TAR_COUNT            = 7;
+const ARENA_TAR_RADIUS_MIN       = 70;
+const ARENA_TAR_RADIUS_MAX       = 130;
+const ARENA_TAR_SLOW_MUL         = 0.45;  // player max-velocity multiplier inside tar
+const ARENA_TAR_DRAG_MUL         = 2.4;   // extra drag multiplier inside tar
+// Supply drops: parachuted crates that grant scrap + health on collect.
+const ARENA_SUPPLY_INTERVAL      = 36;    // seconds between drop attempts
+const ARENA_SUPPLY_DESCEND_TIME  = 3.2;   // seconds for the chute to land
+const ARENA_SUPPLY_LIFE_AFTER    = 24;    // seconds the crate persists on the ground
+const ARENA_SUPPLY_SCRAP_REWARD  = 60;    // scrap awarded on pickup
+const ARENA_SUPPLY_HEAL_REWARD   = 25;    // hp restored on pickup
+const ARENA_SUPPLY_MAX_LIVE      = 2;
+// Day/night cycle: a slow global tint with rare lightning flashes during night.
+const ARENA_DAY_LENGTH           = 90;    // seconds per full day-night loop
+const ARENA_NIGHT_TINT_ALPHA     = 0.42;  // peak darkness alpha at midnight
+const ARENA_LIGHTNING_MIN_GAP    = 6.5;   // minimum seconds between lightning strikes during night
+const ARENA_LIGHTNING_MAX_GAP    = 14;
+const ARENA_LIGHTNING_FLASH      = 0.42;  // seconds the flash overlay decays over
+// Inter-wave perks: 3 choices offered between waves (skipped on boss-wave breaks).
+const ARENA_PERK_OPTIONS         = 3;
+const ARENA_PERK_HOLD_MAX        = 12;    // perks accumulated this run (storage cap)
+const ARENA_PERKS = [
+  { id: 'hp_up',       name: '+25 MAX HP',     desc: 'Raise max HP by 25 and heal to full.', color: '#ff6f9f' },
+  { id: 'dmg_up',      name: '+15% DAMAGE',    desc: 'All bullets deal 15% more damage.',    color: '#ffd86b' },
+  { id: 'fire_up',     name: '+20% FIRE RATE', desc: 'Guns fire 20% faster.',                color: '#ff8a3d' },
+  { id: 'speed_up',    name: '+15% TOP SPEED', desc: 'Increase max velocity by 15%.',        color: '#40d8ff' },
+  { id: 'dash_cd',     name: '-35% DASH CD',   desc: 'Dash recharges 35% faster.',           color: '#d2ff6f' },
+  { id: 'magnet',      name: '+50% MAGNET',    desc: 'Pickups travel to you from 50% further.', color: '#c0b0ff' },
+  { id: 'armor',       name: '-12% DMG TAKEN', desc: 'Reduce damage taken by 12%.',          color: '#7aaaff' },
+  { id: 'crit',        name: '+15% CRIT',      desc: 'Adds a 15% chance to crit for 2x dmg.', color: '#ff4040' },
+];
+// Arena leaderboard: top-N rows of {wave, score, kills, when} per profile.
+const ARENA_LEADERBOARD_MAX      = 10;
+
 function arenaCameraTargetX() {
   const p = Game.player;
   return p.x + p.vx * ARENA_CAMERA_LOOKAHEAD - W * 0.5;
@@ -17920,6 +18184,10 @@ function updateArena(dt) {
   arenaUpdateSpawnMarkers(dt);
   arenaUpdateBarrels(dt);
   arenaUpdateBossPhase();
+  // === Batch v3 timers ===
+  arenaUpdateAtmosphere(dt);
+  arenaUpdateSupplies(dt);
+  arenaUpdateTarPatches(dt);
   if (Game.arenaWaveIntroT > 0) Game.arenaWaveIntroT -= dt;
   if (Game.arenaBossChargeT > 0) Game.arenaBossChargeT = Math.max(0, Game.arenaBossChargeT - dt);
 
@@ -17927,8 +18195,11 @@ function updateArena(dt) {
 
   // ---- player movement (4-directional) ----
   const stats = Game.vehicleStats || { accel: 1100, maxV: 420 };
+  // Batch v3: apply speed perk + tar slow to the effective max velocity.
+  const speedPerkMul = Game.arenaSpeedMul || 1;
+  const tarSlow = arenaPlayerInTar() ? ARENA_TAR_SLOW_MUL : 1;
   const accel = stats.accel * ARENA_ACCEL_MUL;
-  const maxV  = stats.maxV  * ARENA_MAX_SPEED_MUL;
+  const maxV  = stats.maxV  * ARENA_MAX_SPEED_MUL * speedPerkMul * tarSlow;
   let ax = 0, ay = 0;
   if (input.left)  ax -= 1;
   if (input.right) ax += 1;
@@ -17957,8 +18228,10 @@ function updateArena(dt) {
     if (ax !== 0) p.vx += ax * accel * dt;
     if (ay !== 0) p.vy += ay * accel * dt;
     // drag on the unforced axes (and gentle drag overall so the car settles)
-    if (ax === 0) p.vx -= p.vx * Math.min(1, ARENA_PLAYER_DRAG * dt);
-    if (ay === 0) p.vy -= p.vy * Math.min(1, ARENA_PLAYER_DRAG * dt);
+    // Batch v3: tar increases drag noticeably, making it sticky.
+    const tarDragMul = arenaPlayerInTar() ? ARENA_TAR_DRAG_MUL : 1;
+    if (ax === 0) p.vx -= p.vx * Math.min(1, ARENA_PLAYER_DRAG * tarDragMul * dt);
+    if (ay === 0) p.vy -= p.vy * Math.min(1, ARENA_PLAYER_DRAG * tarDragMul * dt);
   }
   // clamp total speed (dash bypasses this to deliver its full burst)
   const spd = Math.hypot(p.vx, p.vy);
@@ -18025,7 +18298,8 @@ function updateArena(dt) {
     fireArenaGuns();
     const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
     const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
-    Game.fireCooldown = (stats.fireRate || 0.18) * rapidMul * overdriveMul;
+    const arenaPerkMul = Game.arenaFireRateMul || 1;
+    Game.fireCooldown = (stats.fireRate || 0.18) * rapidMul * overdriveMul * arenaPerkMul;
   }
 
   // ---- player bullets ----
@@ -18062,6 +18336,20 @@ function updateArena(dt) {
   }
 
   // ---- Phase 4: wave-based enemy spawning ----
+  // Batch v3: pause all wave progression while the perk-select modal is open.
+  if (Game.arenaPerkChoosing) {
+    // While the player is choosing a perk we still want the world to feel
+    // alive (cycle, particles, etc.) but enemies/bullets pause. Skip to the
+    // tail of updateArena so existing entities sit still.
+    arenaUpdateAtmosphere(dt);
+    arenaUpdateSupplies(dt);
+    // keep the camera centered on the player without lookahead
+    cam.x += (p.x - W / 2 - cam.x) * Math.min(1, dt * 4);
+    cam.y += (p.y - H / 2 - cam.y) * Math.min(1, dt * 4);
+    cam.x = clamp(cam.x, 0, world.w - W);
+    cam.y = clamp(cam.y, 0, world.h - H);
+    return;
+  }
   if (Game.arenaWaveBreak > 0) {
     Game.arenaWaveBreak -= dt;
     if (Game.arenaWaveBreak <= 0) {
@@ -18113,6 +18401,12 @@ function updateArena(dt) {
       }
       Game.arenaWaveTookDamage = false;
       SFX.victory();
+      // Batch v3 — offer a perk choice between waves (skip on boss-wave breaks
+      // because the upcoming boss wave already gets its own intro).
+      const nextIsBoss = ((Game.arenaWave + 1) % ARENA_BOSS_WAVE_EVERY) === 0;
+      if (!nextIsBoss && Game.arenaPerks.length < ARENA_PERK_HOLD_MAX) {
+        arenaOpenPerkPicker();
+      }
     }
   }
 
@@ -18189,6 +18483,45 @@ function updateArena(dt) {
           });
           SFX.bigShot();
           e.fireT = ARENA_TANK_FIRE_RATE * (enraged ? ARENA_BOSS_FIRE_RATE_MUL : 1);
+        } else if (e.kind === 'sniper') {
+          // Batch v3 — sniper: latch a telegraph angle, draw a laser sight
+          // for ARENA_SNIPER_TELEGRAPH seconds, then fire a fast piercing
+          // bullet. Telegraph timing exposed via e._sniperAimT for the renderer.
+          if (e._sniperAimT === undefined || e._sniperAimT <= 0) {
+            e._sniperAimT = ARENA_SNIPER_TELEGRAPH;
+            e._sniperAimAng = ang;
+            e._sniperFiring = true;
+            // hold fireT so we don't re-enter until aim window expires
+            e.fireT = ARENA_SNIPER_TELEGRAPH + 0.05;
+          }
+        }
+      }
+      // Sniper post-telegraph fire (independent of fireT path so the bullet
+      // is locked to the telegraphed angle).
+      if (e.kind === 'sniper' && e._sniperFiring) {
+        e._sniperAimT -= dt;
+        // track player slowly during telegraph so a moving player can still
+        // dodge — but the line visibly drifts so it's readable
+        if (e._sniperAimT > 0) {
+          const wantAng = Math.atan2(dyp, dxp);
+          let dAa = wantAng - e._sniperAimAng;
+          while (dAa >  Math.PI) dAa -= 2 * Math.PI;
+          while (dAa < -Math.PI) dAa += 2 * Math.PI;
+          e._sniperAimAng += clamp(dAa, -1.2 * dt, 1.2 * dt);
+        } else {
+          // fire!
+          const ang3 = e._sniperAimAng;
+          Game.enemyBullets.push({
+            x: e.x, y: e.y, w: 6, h: 6,
+            vx: Math.cos(ang3) * ARENA_SNIPER_BULLET_SPEED,
+            vy: Math.sin(ang3) * ARENA_SNIPER_BULLET_SPEED,
+            dmg: ARENA_SNIPER_BULLET_DMG, big: true, src: e, pierce: true,
+            sniper: true,
+          });
+          SFX.bigShot();
+          emit(e.x, e.y, 10, { color: '#ff4040', speed: 220, life: 0.35, size: 2, spread: Math.PI / 6 });
+          e._sniperFiring = false;
+          e.fireT = ARENA_SNIPER_FIRE_RATE * (0.6 + Math.random() * 0.5);
         }
       }
       // Phase 5 refinement — when boss charge telegraph completes, fire the
@@ -18233,6 +18566,11 @@ function updateArena(dt) {
             Game.pickups.push({ kind:'scrap', x:e.x+30, y:e.y, w:22, h:22, t:0 });
             Game.pickups.push({ kind:'scrap', x:e.x-30, y:e.y, w:22, h:22, t:0 });
             addPopup('BOSS DOWN', e.x, e.y - 30, '#ff4040', 16);
+          } else if (e.kind === 'kamikaze') {
+            // Batch v3 — kamikaze killed by a bullet still detonates so it
+            // rewards aggressive AOE clears without trivializing the threat.
+            arenaDetonateKamikaze(e);
+            applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 200);
           } else {
             SFX.explode();
             emit(e.x, e.y, 18, { color:'#ff8a3d', speed:280, life:0.55, size:4, spread: Math.PI * 2 });
@@ -18252,6 +18590,14 @@ function updateArena(dt) {
 
     // contact damage to player
     if (aabb(e, p)) {
+      // Batch v3 — kamikaze detonates on contact instead of doing simple
+      // contact damage (the splash also chains barrels and damages enemies).
+      if (e.kind === 'kamikaze') {
+        arenaDetonateKamikaze(e);
+        Game.enemies.splice(i, 1);
+        Game.arenaKills += 1;
+        continue;
+      }
       damagePlayer(e.contact || 14);
       // knockback the enemy off the player so we don't multi-hit per frame
       const nx = (e.x - p.x) / distp;
@@ -18432,6 +18778,11 @@ function fireArenaGuns() {
   const stats = Game.vehicleStats || { dmg: 14 };
   const overdriveMul = isPowerupActive('overdrive') ? 1.2 : 1;
   const triple = isPowerupActive('triple');
+  // Batch v3 — arena damage + crit + fire-rate perks.
+  const dmgPerkMul   = Game.arenaDmgMul || 1;
+  const critChance   = Game.arenaCritChance || 0;
+  const critRoll     = (critChance > 0 && Math.random() < critChance);
+  const critMul      = critRoll ? 2 : 1;
   const fa = p.facing;
   const cs = Math.cos(fa), sn = Math.sin(fa);
   const sp = ARENA_BULLET_SPEED;
@@ -18446,10 +18797,11 @@ function fireArenaGuns() {
       owner: 'p',
       x: nx, y: ny, w, h,
       vx, vy,
-      dmg: (stats.dmg || 14) * overdriveMul * (dmgScale || 1),
+      dmg: (stats.dmg || 14) * overdriveMul * (dmgScale || 1) * dmgPerkMul * critMul,
       homing: isPowerupActive('homing') || false,
       hitIds: [],
       life: 1.6,
+      crit: critRoll,
     });
   };
   Game.muzzleT = 0.08;
@@ -18462,7 +18814,8 @@ function fireArenaGuns() {
   }
   SFX.shoot();
   emit(nx, ny, 3, { color: (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#ffe07a',
-                    speed: 140, life: 0.2, size: 2, spread: Math.PI / 3 });
+                    speed: 140, life: 0.2, size: critRoll ? 3 : 2, spread: Math.PI / 3 });
+  if (critRoll) addPopup('CRIT', p.x, p.y - 28, '#ff4040', 12);
 }
 
 // === Phase 1 refinement — dash ability ===
@@ -18502,7 +18855,7 @@ function arenaTryDash() {
   p.vy = dirY * dashSpeed;
   Game.arenaDashT = ARENA_DASH_DUR;
   Game.arenaInvulnT = ARENA_DASH_INVULN + ARENA_DASH_DUR;
-  Game.arenaDashCD = ARENA_DASH_COOLDOWN;
+  Game.arenaDashCD = ARENA_DASH_COOLDOWN * (Game.arenaDashCDMul || 1);
   Game._arenaDashGhostT = 0;
   // FX: shockwave puff + audible whoosh + screenshake.
   shockwave(p.x, p.y, 'rgba(255,210,140,0.55)', 60);
@@ -18770,6 +19123,219 @@ function arenaUpdateBossPhase() {
   }
 }
 
+function arenaUpdateAtmosphere(dt) {
+  if (Game.mode !== 'arena') return;
+  // Day-night clock advances always (even during perk picker so the world
+  // visually breathes while paused).
+  Game.arenaDayT = ((Game.arenaDayT || 0) + dt) % ARENA_DAY_LENGTH;
+  // Night-only lightning: when we're past the midpoint of the cycle, count
+  // down toward the next strike.
+  const nightAmt = arenaNightAmount(); // 0..1
+  if (nightAmt > 0.35) {
+    Game.arenaLightningT = (Game.arenaLightningT || 0) - dt;
+    if (Game.arenaLightningT <= 0) {
+      arenaTriggerLightning();
+      Game.arenaLightningT = rand(ARENA_LIGHTNING_MIN_GAP, ARENA_LIGHTNING_MAX_GAP);
+    }
+  }
+  if (Game.arenaLightningFlash > 0) {
+    Game.arenaLightningFlash = Math.max(0, Game.arenaLightningFlash - dt);
+  }
+}
+function arenaNightAmount() {
+  // Returns a 0..1 darkness factor: 0 at noon, 1 at midnight, sinusoidal.
+  const phase = ((Game.arenaDayT || 0) / ARENA_DAY_LENGTH) * Math.PI * 2;
+  // shift so 0 is noon
+  return 0.5 - 0.5 * Math.cos(phase);
+}
+function arenaTriggerLightning() {
+  Game.arenaLightningFlash = ARENA_LIGHTNING_FLASH;
+  SFX.lightning && SFX.lightning();
+  Game.shake = Math.max(Game.shake, 0.25);
+}
+
+// Supply drops: a parachute that descends from above the camera, then lands
+// as a collectible crate. On pickup it grants scrap + heals the player.
+function arenaUpdateSupplies(dt) {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSupplies) Game.arenaSupplies = [];
+  // schedule next drop
+  Game.arenaSupplyT = (Game.arenaSupplyT || 0) - dt;
+  if (Game.arenaSupplyT <= 0 && Game.arenaSupplies.length < ARENA_SUPPLY_MAX_LIVE) {
+    arenaSpawnSupplyDrop();
+    Game.arenaSupplyT = ARENA_SUPPLY_INTERVAL * (0.85 + Math.random() * 0.3);
+  }
+  // tick existing drops
+  for (let i = Game.arenaSupplies.length - 1; i >= 0; i--) {
+    const s = Game.arenaSupplies[i];
+    s.t += dt;
+    if (s.phase === 'descend') {
+      // approach landing position via interp on s.t / ARENA_SUPPLY_DESCEND_TIME
+      const k = clamp(s.t / ARENA_SUPPLY_DESCEND_TIME, 0, 1);
+      s.descendK = k;
+      if (k >= 1) {
+        s.phase = 'landed';
+        s.life = ARENA_SUPPLY_LIFE_AFTER;
+        SFX.click && SFX.click();
+        emit(s.x, s.y, 14, { color: '#d2ff6f', speed: 200, life: 0.4, size: 3, spread: Math.PI * 2 });
+        shockwave(s.x, s.y, 'rgba(210,255,111,0.45)', 60);
+      }
+    } else if (s.phase === 'landed') {
+      s.life -= dt;
+      if (Game.player && Math.hypot(Game.player.x - s.x, Game.player.y - s.y) < (Game.player.w + 28) * 0.6) {
+        arenaCollectSupply(s);
+        Game.arenaSupplies.splice(i, 1);
+        continue;
+      }
+      if (s.life <= 0) {
+        // expire silently
+        emit(s.x, s.y, 6, { color:'#888', speed:60, life:0.4, size:2, spread:Math.PI*2 });
+        Game.arenaSupplies.splice(i, 1);
+      }
+    }
+  }
+}
+function arenaSpawnSupplyDrop() {
+  const world = Game.world;
+  const p = Game.player;
+  const cam = Game.camera;
+  if (!world || !p || !cam) return;
+  // Drop somewhere visible-ish but not on top of the player so it pulls the
+  // player out of cover.
+  const ang = Math.random() * Math.PI * 2;
+  const dist = rand(180, 360);
+  const lx = clamp(p.x + Math.cos(ang) * dist, 80, world.w - 80);
+  const ly = clamp(p.y + Math.sin(ang) * dist, 80, world.h - 80);
+  Game.arenaSupplies.push({
+    x: lx, y: ly, landX: lx, landY: ly,
+    phase: 'descend', t: 0, descendK: 0,
+    life: 0,
+    rot: 0,
+  });
+  announceEvent('SUPPLY DROP', '#d2ff6f');
+}
+function arenaCollectSupply(s) {
+  if (Game.player) addPopup('SUPPLY +' + ARENA_SUPPLY_SCRAP_REWARD + ' / +' + ARENA_SUPPLY_HEAL_REWARD + ' HP', s.x, s.y - 26, '#d2ff6f', 13);
+  Game.scrapEarned = (Game.scrapEarned || 0) + ARENA_SUPPLY_SCRAP_REWARD;
+  Game.health = Math.min(Game.maxHealth || 100, (Game.health || 0) + ARENA_SUPPLY_HEAL_REWARD);
+  shockwave(s.x, s.y, 'rgba(210,255,111,0.45)', 80);
+  emit(s.x, s.y, 22, { color: '#d2ff6f', speed: 260, life: 0.5, size: 3, spread: Math.PI * 2 });
+  SFX.pickup && SFX.pickup();
+}
+
+// Tar patches: terrain hazards. arenaPlayerInTar is the hot-path check used
+// inside player movement.
+function arenaPlayerInTar() {
+  if (Game.mode !== 'arena') return false;
+  const p = Game.player;
+  const patches = Game.arenaTarPatches;
+  if (!p || !patches || !patches.length) return false;
+  for (const t of patches) {
+    if (Math.hypot(p.x - t.x, p.y - t.y) <= t.r) return true;
+  }
+  return false;
+}
+function arenaUpdateTarPatches(dt) {
+  if (Game.mode !== 'arena') return;
+  const patches = Game.arenaTarPatches;
+  if (!patches || !patches.length) return;
+  // advance shimmer phase + lightly slow enemies that touch tar so they
+  // don't trivialize the player slow.
+  for (const t of patches) {
+    t.t += dt;
+    for (const e of Game.enemies) {
+      if (!e || e.arenaBoss) continue;
+      if (Math.hypot(e.x - t.x, e.y - t.y) < t.r) {
+        e.vx *= Math.pow(0.6, dt);
+        e.vy *= Math.pow(0.6, dt);
+      }
+    }
+  }
+}
+
+// Kamikaze detonation: damages enemies and player in radius and ignites any
+// barrels caught in the blast for satisfying chain combos.
+function arenaDetonateKamikaze(k) {
+  SFX.bigBoom && SFX.bigBoom();
+  emit(k.x, k.y, 28, { color:'#ff8a3d', speed:320, life:0.55, size:4, spread: Math.PI * 2 });
+  emit(k.x, k.y, 14, { color:'#ffd86b', speed:220, life:0.45, size:3, spread: Math.PI * 2 });
+  shockwave(k.x, k.y, 'rgba(255,140,60,0.55)', ARENA_KAMI_BLAST_RADIUS * 1.4);
+  Game.shake = Math.max(Game.shake, 0.45);
+  // enemies in radius
+  for (let ei = Game.enemies.length - 1; ei >= 0; ei--) {
+    const oth = Game.enemies[ei];
+    if (oth === k) continue;
+    if (Math.hypot(oth.x - k.x, oth.y - k.y) <= ARENA_KAMI_BLAST_RADIUS) {
+      oth.hp -= ARENA_KAMI_ENEMY_DMG;
+      oth.hitAnimT = 0.25;
+      if (oth.hp <= 0) {
+        applyKill(oth.x, oth.y, ENEMY_SCORE[oth.kind] || 200);
+        arenaEnemyDrop(oth.x, oth.y);
+        Game.arenaKills += 1;
+        Game.arenaCombo = Math.min((Game.arenaCombo || 0) + 1, ARENA_COMBO_MAX);
+        Game.enemies.splice(ei, 1);
+      }
+    }
+  }
+  // player splash
+  if (Game.player && Math.hypot(Game.player.x - k.x, Game.player.y - k.y) <= ARENA_KAMI_BLAST_RADIUS) {
+    damagePlayer(ARENA_KAMI_PLAYER_DMG);
+  }
+  // chain barrels
+  if (Game.arenaBarrels) {
+    for (const b of Game.arenaBarrels) {
+      if (b.burnT > 0) continue;
+      if (Math.hypot(b.x - k.x, b.y - k.y) <= ARENA_KAMI_BLAST_RADIUS) {
+        b.burnT = ARENA_BARREL_CHAIN_DELAY;
+        b.hp = 0;
+      }
+    }
+  }
+}
+
+// Perk selection: open a modal with N random perk choices. The first applied
+// perk this run is logged for the death overlay's "perks" line.
+function arenaOpenPerkPicker() {
+  // build a random subset of distinct perk ids
+  const pool = ARENA_PERKS.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }
+  Game.arenaPerkChoices = pool.slice(0, Math.min(ARENA_PERK_OPTIONS, pool.length));
+  Game.arenaPerkSelectedIdx = 0;
+  Game.arenaPerkChoosing = true;
+  SFX.powerUp && SFX.powerUp();
+}
+function arenaApplyPerkByIndex(idx) {
+  const choices = Game.arenaPerkChoices || [];
+  const perk = choices[idx];
+  if (!perk) return;
+  arenaApplyPerk(perk.id);
+  Game.arenaPerks.push(perk.id);
+  addPopup('PERK: ' + perk.name, (Game.player && Game.player.x) || W / 2, (Game.player && Game.player.y - 40) || H / 2, perk.color || '#ffd86b', 14);
+  announceEvent('PERK ACQUIRED', perk.color || '#ffd86b');
+  SFX.levelUp && SFX.levelUp();
+  Game.arenaPerkChoosing = false;
+  Game.arenaPerkChoices = [];
+}
+function arenaApplyPerk(id) {
+  switch (id) {
+    case 'hp_up':
+      Game.maxHealth = (Game.maxHealth || 100) + 25;
+      Game.health    = Game.maxHealth;
+      break;
+    case 'dmg_up':   Game.arenaDmgMul      *= 1.15; break;
+    case 'fire_up':  Game.arenaFireRateMul *= 0.80; break; // 20% faster
+    case 'speed_up': Game.arenaSpeedMul    *= 1.15; break;
+    case 'dash_cd':  Game.arenaDashCDMul   *= 0.65; break; // 35% faster cd
+    case 'magnet':   Game.arenaMagnetMul   *= 1.5;  break;
+    case 'armor':    Game.arenaDmgTakenMul *= 0.88; break; // 12% less damage taken
+    case 'crit':     Game.arenaCritChance   = Math.min(0.85, (Game.arenaCritChance || 0) + 0.15); break;
+  }
+}
+
+
 function arenaSpawnPoint() {
   const world = Game.world;
   const p = Game.player;
@@ -18843,6 +19409,16 @@ function spawnArenaEnemy() {
   } else if (kills >= 15 && roll < 0.22) {
     kind = 'mortar'; w = 34; h = 44; hp = Math.ceil(6 * diff);
     contact = 18; maxV = 160 + Math.min(100, kills * 2); accel = 360; turnR = 1.8;
+  } else if (kills >= ARENA_SNIPER_MIN_KILLS && roll < 0.22 + ARENA_SNIPER_ROLL_PCT) {
+    // Batch v3 — sniper: slow, stationary-ish, telegraphs a laser-sight then
+    // fires a fast piercing hitscan-style bullet.
+    kind = 'sniper'; w = 30; h = 38; hp = Math.ceil(ARENA_SNIPER_HP * diff);
+    contact = 12; maxV = 70 + Math.min(40, kills * 0.5); accel = 220; turnR = 1.4;
+  } else if (kills >= ARENA_KAMI_MIN_KILLS && roll < 0.40 + ARENA_KAMI_ROLL_PCT) {
+    // Batch v3 — kamikaze: fast, low-HP, explodes on contact.
+    kind = 'kamikaze'; w = 22; h = 30; hp = Math.ceil(ARENA_KAMI_HP * diff);
+    contact = 0; // damage comes from the explosion, not contact
+    maxV = 320 + Math.min(220, kills * 3.2); accel = 720; turnR = 4.0;
   } else if (kills >= 8 && roll < 0.38) {
     kind = 'drone';  w = 26; h = 30; hp = Math.ceil(2 * diff);
     contact = 10; maxV = 260 + Math.min(200, kills * 3); accel = 600; turnR = 3.2;
@@ -18857,6 +19433,7 @@ function spawnArenaEnemy() {
   if (kind === 'drone')  fireT = ARENA_DRONE_FIRE_RATE * (0.5 + Math.random());
   if (kind === 'mortar') fireT = ARENA_MORTAR_FIRE_RATE * (0.5 + Math.random());
   if (kind === 'tank')   fireT = ARENA_TANK_FIRE_RATE * (0.5 + Math.random());
+  if (kind === 'sniper') fireT = ARENA_SNIPER_FIRE_RATE * (0.6 + Math.random() * 0.6);
 
   // Phase 5 — boss fires faster
   if (isBoss) fireT = ARENA_TANK_FIRE_RATE * 0.5;
@@ -18999,6 +19576,8 @@ function renderArena() {
 
   // particles / shockwaves / pickups / enemies / bullets — reuse legacy
   // primitives now that ctx is in world coordinates.
+  // Batch v3 — tar patches sit at the bottom of the floor stack.
+  drawArenaTarPatches();
   // Phase 2 refinement — skid trails go beneath everything else so they
   // read as ground markings.
   drawArenaSkidTrails();
@@ -19006,6 +19585,8 @@ function renderArena() {
   // so a stacked pickup is still grabbable).
   drawArenaBarrels();
   for (const pk of Game.pickups) drawPickup(pk);
+  // Batch v3 — supply drop crates with parachute markers.
+  drawArenaSupplies();
   // Phase 3/4 refinement — pre-spawn markers above the floor so the warning
   // is hard to miss.
   drawArenaSpawnMarkers();
@@ -19060,6 +19641,10 @@ function renderArena() {
   // Phase 5 refinement — boss charged-shot telegraph laser, drawn before
   // the player so the line passes under the chassis.
   drawArenaBossTelegraph();
+  // Batch v3 — sniper laser-sight telegraphs for any aiming sniper.
+  drawArenaSniperSights();
+  // Batch v3 — kamikaze priming pulses near the player.
+  drawArenaKamikazePulses();
   // Phase 1 refinement — dash afterimages: faded chassis silhouettes along
   // the dash path so the dash motion reads even at low frame rates.
   drawArenaDashGhosts();
@@ -19128,6 +19713,13 @@ function renderArena() {
 
   ctx.restore(); // end shake save
 
+  // Batch v3 — day/night tint sits between gameplay and vignette so the
+  // vignette darken still reads. Lightning flash overlays on top.
+  if (Game.mode === 'arena') {
+    drawArenaNightTint();
+    drawArenaLightningFlash();
+  }
+
   // vignette
   ctx.fillStyle = VIGNETTE_PLAY;
   ctx.fillRect(0, 0, W, H);
@@ -19147,6 +19739,8 @@ function renderArena() {
     drawArenaMinimap();
     // Phase 4 refinement — wave intro banner overlay.
     if (Game.mode === 'arena' && (Game.arenaWaveIntroT || 0) > 0) drawArenaWaveIntro();
+    // Batch v3 — perk-select modal sits above the minimap/HUD when active.
+    if (Game.mode === 'arena' && Game.arenaPerkChoosing) drawArenaPerkPicker();
   }
   if (Game.state === 'playing' && Game.paused) drawPause();
   if (Game.state === 'loading') drawLoadingOverlay();
@@ -19613,6 +20207,390 @@ function drawArenaMinimap() {
 // ============================================================
 // === END PHASE 1 ARENA MODE ===
 // ============================================================
+
+// ============================================================
+// === BATCH v3 ARENA RENDERERS ===
+// Tar patches, supply drops, sniper sights, kamikaze pulses,
+// night tint, lightning flash, perk picker. All assume the
+// world-space transform is active unless noted as screen-space.
+// ============================================================
+
+// Tar patches: irregular dark blobs with a faint shimmer. Pre-baked blob
+// outline (set up in beginPlaying) keeps per-frame work bounded.
+function drawArenaTarPatches() {
+  if (Game.mode !== 'arena') return;
+  const patches = Game.arenaTarPatches;
+  if (!patches || !patches.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const t of patches) {
+    // cull off-camera (with margin = patch radius)
+    if (t.x + t.r < cam.x || t.x - t.r > cam.x + W ||
+        t.y + t.r < cam.y || t.y - t.r > cam.y + H) continue;
+    ctx.save();
+    // base blob outline
+    ctx.beginPath();
+    const segs = t.blobs || [];
+    for (let i = 0; i < segs.length; i++) {
+      const b = segs[i];
+      const r = t.r * b.dr;
+      const x = t.x + Math.cos(b.ang) * r;
+      const y = t.y + Math.sin(b.ang) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else         ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#0a0604';
+    ctx.fill();
+    // glossy highlight ring — slowly rotates via t.t for a subtle shimmer
+    ctx.globalAlpha = 0.18 + 0.12 * Math.sin(t.t * 1.8);
+    ctx.strokeStyle = '#5a3a18';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // hazard ring
+    ctx.globalAlpha = 0.35;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#3a1a08';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Supply drop crates with descending parachute marker. While 'descend' we
+// draw a chute + descent shadow growing on the ground. Landed crates pulse
+// to draw the player's eye.
+function drawArenaSupplies() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.arenaSupplies || !Game.arenaSupplies.length) return;
+  const cam = Game.camera;
+  if (!cam) return;
+  for (const s of Game.arenaSupplies) {
+    if (s.x < cam.x - 80 || s.x > cam.x + W + 80 ||
+        s.y < cam.y - 80 || s.y > cam.y + H + 80) continue;
+    if (s.phase === 'descend') {
+      const k = s.descendK || 0;
+      // landing shadow grows
+      ctx.save();
+      ctx.globalAlpha = 0.18 + 0.22 * k;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(s.landX, s.landY + 4, 18 - k * 4, 9 - k * 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // landing reticle
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = '#d2ff6f';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.arc(s.landX, s.landY, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      // parachute drifts down toward landX/landY
+      const ay = s.landY - (1 - k) * 110;       // 110px above landing
+      const ax = s.landX + Math.sin(s.t * 1.4) * 6;  // slight sway
+      ctx.save();
+      // chute canopy
+      ctx.fillStyle = '#d2ff6f';
+      ctx.beginPath();
+      ctx.moveTo(ax - 18, ay - 4);
+      ctx.quadraticCurveTo(ax, ay - 22, ax + 18, ay - 4);
+      ctx.lineTo(ax + 14, ay - 4);
+      ctx.lineTo(ax, ay - 12);
+      ctx.lineTo(ax - 14, ay - 4);
+      ctx.closePath();
+      ctx.fill();
+      // chute cords
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ax - 14, ay - 4); ctx.lineTo(ax - 6, ay + 6);
+      ctx.moveTo(ax, ay - 12);     ctx.lineTo(ax, ay + 6);
+      ctx.moveTo(ax + 14, ay - 4); ctx.lineTo(ax + 6, ay + 6);
+      ctx.stroke();
+      // crate
+      ctx.fillStyle = '#8a5a20';
+      ctx.fillRect(ax - 8, ay + 6, 16, 14);
+      ctx.strokeStyle = '#3a1a08';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ax - 7.5, ay + 6.5, 15, 13);
+      ctx.fillStyle = '#d2ff6f';
+      ctx.font = 'bold 8px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+', ax, ay + 13);
+      ctx.restore();
+    } else {
+      // landed: pulse
+      const pulse = 0.5 + 0.5 * Math.sin(s.t * 4.5);
+      ctx.save();
+      ctx.globalAlpha = 0.45 + pulse * 0.35;
+      ctx.strokeStyle = '#d2ff6f';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 22 + pulse * 5, 0, Math.PI * 2);
+      ctx.stroke();
+      // crate body
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#8a5a20';
+      ctx.fillRect(s.x - 10, s.y - 8, 20, 18);
+      ctx.strokeStyle = '#3a1a08';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(s.x - 9.5, s.y - 7.5, 19, 17);
+      ctx.fillStyle = '#d2ff6f';
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+', s.x, s.y + 1);
+      // life-left chip (subtle)
+      const lifeK = clamp(s.life / ARENA_SUPPLY_LIFE_AFTER, 0, 1);
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = '#d2ff6f';
+      ctx.fillRect(s.x - 10, s.y + 11, 20 * lifeK, 2);
+      ctx.restore();
+    }
+  }
+}
+
+// Sniper laser-sight telegraphs: short red line from sniper toward latched
+// aim direction, intensifying as the shot nears.
+function drawArenaSniperSights() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  for (const e of Game.enemies) {
+    if (e.kind !== 'sniper' || !e._sniperFiring) continue;
+    const aim = e._sniperAimAng;
+    if (aim === undefined) continue;
+    const k = clamp(e._sniperAimT / ARENA_SNIPER_TELEGRAPH, 0, 1);
+    const lineW = 1 + (1 - k) * 4;
+    const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 22);
+    const length = ARENA_SNIPER_RANGE;
+    const ex = e.x + Math.cos(aim) * length;
+    const ey = e.y + Math.sin(aim) * length;
+    ctx.save();
+    ctx.globalAlpha = 0.35 + pulse * 0.25 + (1 - k) * 0.25;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = lineW;
+    ctx.beginPath();
+    ctx.moveTo(e.x, e.y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    // bright dot at the aim origin
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#ffd86b';
+    ctx.beginPath();
+    ctx.arc(e.x + Math.cos(aim) * (e.h * 0.5 + 4),
+            e.y + Math.sin(aim) * (e.h * 0.5 + 4), 3 + (1 - k) * 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// Kamikaze priming pulses: when a kamikaze gets close to the player, render
+// a red blink ring around it to signal incoming detonation.
+function drawArenaKamikazePulses() {
+  if (Game.mode !== 'arena') return;
+  if (!Game.enemies || !Game.enemies.length) return;
+  const p = Game.player;
+  if (!p) return;
+  for (const e of Game.enemies) {
+    if (e.kind !== 'kamikaze') continue;
+    const d = Math.hypot(e.x - p.x, e.y - p.y);
+    if (d > ARENA_KAMI_PRIME_RADIUS) continue;
+    const close = clamp(1 - d / ARENA_KAMI_PRIME_RADIUS, 0, 1);
+    const blink = 0.5 + 0.5 * Math.sin((Game.t || 0) * ARENA_KAMI_BLINK_RATE * Math.PI);
+    ctx.save();
+    ctx.globalAlpha = 0.3 + blink * 0.5 * close;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, 14 + blink * 6, 0, Math.PI * 2);
+    ctx.stroke();
+    // optional warning bracket
+    ctx.globalAlpha = 0.5 * close;
+    ctx.fillStyle = '#ff4040';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!!', e.x, e.y - 18);
+    ctx.restore();
+  }
+}
+
+// Screen-space night tint: a dark blue overlay that grows with the night-amount.
+function drawArenaNightTint() {
+  if (Game.mode !== 'arena') return;
+  const n = arenaNightAmount();
+  if (n <= 0.02) return;
+  const a = n * ARENA_NIGHT_TINT_ALPHA;
+  ctx.save();
+  ctx.globalAlpha = a;
+  // cool blue grade
+  ctx.fillStyle = '#0a0e22';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+// Screen-space lightning flash: full-screen white pulse that fades over
+// ARENA_LIGHTNING_FLASH seconds.
+function drawArenaLightningFlash() {
+  if (Game.mode !== 'arena') return;
+  const t = Game.arenaLightningFlash || 0;
+  if (t <= 0) return;
+  const k = clamp(t / ARENA_LIGHTNING_FLASH, 0, 1);
+  // fast initial peak then taper
+  const a = Math.min(0.8, k * 0.8);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  // brief bolt-like streaks
+  if (k > 0.5) {
+    ctx.globalAlpha = (k - 0.5) * 1.4;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const sx = rand(W * 0.2, W * 0.8);
+      let cx = sx, cy = 0;
+      ctx.moveTo(cx, cy);
+      while (cy < H * 0.55) {
+        cy += rand(20, 50);
+        cx += rand(-30, 30);
+        ctx.lineTo(cx, cy);
+      }
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Perk picker modal (screen space). 3 cards laid out across the middle of
+// the screen with keyboard hint and selection highlight.
+function drawArenaPerkPicker() {
+  if (Game.mode !== 'arena' || !Game.arenaPerkChoosing) return;
+  const choices = Game.arenaPerkChoices || [];
+  if (!choices.length) return;
+  // dim background
+  ctx.save();
+  ctx.globalAlpha = 0.75;
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  // title
+  ctx.save();
+  ctx.font = 'bold ' + (W < 500 ? 22 : 32) + 'px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('CHOOSE A PERK', W / 2, H * 0.22);
+  ctx.font = 'bold ' + (W < 500 ? 11 : 13) + 'px "Courier New", monospace';
+  ctx.fillStyle = '#d2ff6f';
+  ctx.fillText('1 / 2 / 3 or ← → + ENTER', W / 2, H * 0.22 + 26);
+  ctx.restore();
+  // card layout
+  const cardW = Math.min(220, (W - 80) / choices.length - 16);
+  const cardH = 170;
+  const gap = 16;
+  const totalW = cardW * choices.length + gap * (choices.length - 1);
+  let x0 = (W - totalW) / 2;
+  const y0 = H * 0.36;
+  const selIdx = Game.arenaPerkSelectedIdx || 0;
+  for (let i = 0; i < choices.length; i++) {
+    const c = choices[i];
+    const cx = x0 + i * (cardW + gap);
+    const selected = (i === selIdx);
+    ctx.save();
+    // card body
+    ctx.fillStyle = selected ? '#3a2418' : '#1a1410';
+    ctx.fillRect(cx, y0, cardW, cardH);
+    ctx.strokeStyle = c.color || '#ffd86b';
+    ctx.lineWidth = selected ? 3 : 1.5;
+    ctx.strokeRect(cx + 0.5, y0 + 0.5, cardW - 1, cardH - 1);
+    // accent strip
+    ctx.fillStyle = c.color || '#ffd86b';
+    ctx.fillRect(cx, y0, cardW, 6);
+    // index badge
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx + 8, y0 + 14, 22, 22);
+    ctx.strokeStyle = c.color || '#ffd86b';
+    ctx.strokeRect(cx + 8.5, y0 + 14.5, 21, 21);
+    ctx.fillStyle = c.color || '#ffd86b';
+    ctx.font = 'bold 14px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), cx + 19, y0 + 25);
+    // perk name
+    ctx.fillStyle = '#ffd86b';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    wrapTextSimple(c.name, cx + 38, y0 + 25, cardW - 46, 16);
+    // perk desc
+    ctx.font = '11px "Courier New", monospace';
+    ctx.fillStyle = '#d2ff6f';
+    ctx.textBaseline = 'top';
+    wrapTextSimple(c.desc, cx + 12, y0 + 56, cardW - 24, 14);
+    // already-owned indicator
+    const owned = (Game.arenaPerks || []).filter(p => p === c.id).length;
+    if (owned > 0) {
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillStyle = '#ff8a3d';
+      ctx.textAlign = 'right';
+      ctx.fillText('OWNED x' + owned, cx + cardW - 8, y0 + cardH - 14);
+    }
+    // selection arrow
+    if (selected) {
+      ctx.fillStyle = c.color || '#ffd86b';
+      ctx.font = 'bold 18px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('▼', cx + cardW / 2, y0 - 16);
+    }
+    ctx.restore();
+  }
+  // mouse / touch selection
+  if (input && (input.mouseX !== undefined) && (input.mouseY !== undefined)) {
+    const mx = input.mouseX, my = input.mouseY;
+    for (let i = 0; i < choices.length; i++) {
+      const cx = x0 + i * (cardW + gap);
+      if (mx >= cx && mx <= cx + cardW && my >= y0 && my <= y0 + cardH) {
+        Game.arenaPerkSelectedIdx = i;
+        if (input.fire || input.tap) {
+          // single-shot apply on tap/fire-press
+          arenaApplyPerkByIndex(i);
+        }
+        break;
+      }
+    }
+  }
+}
+
+// Helper — simple word-wrap that draws to the current ctx at (x, y) with a
+// fixed line height; trims at maxWidth measured via measureText.
+function wrapTextSimple(text, x, y, maxWidth, lineH) {
+  if (!text) return;
+  const words = String(text).split(/\s+/);
+  let line = '';
+  let yy = y;
+  for (let i = 0; i < words.length; i++) {
+    const test = line ? line + ' ' + words[i] : words[i];
+    const w = ctx.measureText(test).width;
+    if (w > maxWidth && line) {
+      ctx.fillText(line, x, yy);
+      yy += lineH;
+      line = words[i];
+    } else {
+      line = test;
+    }
+  }
+  if (line) ctx.fillText(line, x, yy);
+}
+
+boot_v3_done: { /* sentinel label kept as a no-op block to mark end of batch v3 renderers */ break boot_v3_done; }
+
 
 boot();
 
