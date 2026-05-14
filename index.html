@@ -1425,58 +1425,157 @@
     .mp-peer.self{border-color:var(--gold)}
 
     /* ============================================================
-       WASTELAND CINEMATIC v2.1 — additive HUD/menu chrome.
+       WASTELAND CINEMATIC v2.1 — premium additive visual shell.
        Activated by body.cinematic-on (set when Settings.cinematic is true).
-       Pure CSS, no DOM/layout changes, no impact on hit areas or buttons.
+       No DOM/layout changes; hit areas remain unchanged.
        ============================================================ */
+    @keyframes cine-screen-pan{
+      0%{transform:translate3d(0,0,0)}
+      50%{transform:translate3d(0,-8px,0)}
+      100%{transform:translate3d(0,0,0)}
+    }
+    @keyframes cine-screen-scan{
+      0%{background-position:0 0,0 0,0 0}
+      100%{background-position:0 38px,220px 0,0 0}
+    }
+    @keyframes cine-glint{
+      0%,60%,100%{transform:translateX(-130%)}
+      72%{transform:translateX(130%)}
+    }
+
+    body.cinematic-on .screen.active::before{
+      background:
+        radial-gradient(130% 70% at 50% -10%, rgba(255,175,90,.16) 0%, rgba(255,175,90,0) 60%),
+        radial-gradient(110% 90% at 50% 120%, rgba(190,90,36,.16) 0%, rgba(190,90,36,0) 64%),
+        linear-gradient(180deg, rgba(255,140,80,.04), rgba(0,0,0,0));
+      animation:cine-screen-pan 8s ease-in-out infinite;
+    }
+    body.cinematic-on .screen.active::after{
+      background:
+        repeating-linear-gradient(0deg, rgba(255,170,80,.024) 0px, rgba(255,170,80,.024) 1px, transparent 1px, transparent 3px),
+        linear-gradient(120deg, rgba(255,210,130,0) 0%, rgba(255,210,130,.06) 48%, rgba(255,210,130,0) 100%),
+        radial-gradient(100% 80% at 0% 0%, rgba(255,140,80,.08), rgba(255,140,80,0) 50%);
+      animation:cine-screen-scan 3.8s linear infinite;
+    }
+
+    body.cinematic-on .screen .inner{
+      border-color:rgba(255,195,110,.42);
+      background:
+        linear-gradient(180deg, rgba(26,17,10,.86) 0%, rgba(8,6,4,.88) 100%),
+        radial-gradient(130% 80% at 50% -20%, rgba(255,170,80,.14), rgba(255,170,80,0) 58%);
+      box-shadow:
+        0 24px 60px rgba(0,0,0,.48),
+        0 0 0 1px rgba(255,170,80,.12),
+        inset 0 1px 0 rgba(255,220,150,.18),
+        inset 0 -20px 40px rgba(0,0,0,.22);
+    }
     body.cinematic-on .screen .inner h1{
+      color:#ffd998;
       text-shadow:
-        0 0 12px rgba(255,170,80,.55),
-        0 0 30px rgba(255,80,40,.25),
-        0 2px 0 rgba(0,0,0,.85);
+        0 0 12px rgba(255,170,80,.62),
+        0 0 34px rgba(255,80,40,.28),
+        0 2px 0 rgba(0,0,0,.86);
       letter-spacing:3px;
     }
     body.cinematic-on .screen .inner h2{
-      text-shadow:0 0 8px rgba(255,170,80,.4);
+      color:#ffcf8a;
+      text-shadow:0 0 9px rgba(255,170,80,.46);
       letter-spacing:2.5px;
+      border-bottom-color:rgba(255,185,95,.35);
     }
-    body.cinematic-on .btn.primary{
+
+    body.cinematic-on .btn{
+      position:relative;
+      overflow:hidden;
+      border-radius:6px;
+      border-color:rgba(255,195,110,.28);
+      background:linear-gradient(180deg, rgba(18,12,8,.78), rgba(6,4,3,.76));
       box-shadow:
-        0 0 0 1px rgba(255,200,100,.55) inset,
-        0 0 14px rgba(255,140,40,.45),
-        0 0 28px rgba(255,80,40,.18);
+        inset 0 1px 0 rgba(255,215,145,.08),
+        0 8px 20px rgba(0,0,0,.3);
+      transition:transform .16s ease, border-color .16s ease, box-shadow .2s ease, background .2s ease;
     }
-    body.cinematic-on .btn:not(.primary):not(.danger){
-      box-shadow:0 0 10px rgba(255,170,80,.12);
-    }
-    body.cinematic-on .btn:hover,
-    body.cinematic-on .btn:focus{
-      text-shadow:0 0 6px rgba(255,200,100,.6);
-    }
-    /* Subtle scanline veil across menu screens — non-interactive overlay so
-       all clicks/taps still hit underlying buttons. Only visible on the
-       active .screen.show so it doesn't double-stack. */
-    body.cinematic-on .screen.show::before{
+    body.cinematic-on .btn::after{
       content:"";
       position:absolute;
       inset:0;
       pointer-events:none;
-      background:
-        repeating-linear-gradient(
-          0deg,
-          rgba(255,170,80,.025) 0px,
-          rgba(255,170,80,.025) 1px,
-          transparent 1px,
-          transparent 3px
-        );
-      mix-blend-mode:overlay;
-      z-index:1;
+      background:linear-gradient(105deg, transparent 32%, rgba(255,225,165,.18) 48%, transparent 62%);
+      transform:translateX(-130%);
     }
-    body.cinematic-on .screen.show .inner{position:relative;z-index:2}
-    /* Photo Mode button — make it pop on results screen. */
+    body.cinematic-on .btn:hover,
+    body.cinematic-on .btn:focus{
+      text-shadow:0 0 7px rgba(255,205,125,.7);
+      border-color:rgba(255,210,140,.58);
+      transform:translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255,225,165,.16),
+        0 10px 24px rgba(0,0,0,.42),
+        0 0 16px rgba(255,160,80,.2);
+    }
+    body.cinematic-on .btn:hover::after,
+    body.cinematic-on .btn:focus::after{animation:cine-glint .95s ease-out 1}
+    body.cinematic-on .btn.primary{
+      color:#2b1709;
+      border-color:rgba(255,210,125,.92);
+      background:linear-gradient(180deg, #ffd98f 0%, #f4b25b 100%);
+      box-shadow:
+        0 0 0 1px rgba(255,220,140,.55) inset,
+        0 0 16px rgba(255,145,45,.46),
+        0 0 34px rgba(255,90,40,.2),
+        0 10px 24px rgba(0,0,0,.38);
+    }
+    body.cinematic-on .btn.danger{
+      border-color:rgba(255,95,95,.56);
+      box-shadow:0 0 13px rgba(255,80,80,.2), inset 0 1px 0 rgba(255,170,170,.1);
+    }
+
+    body.cinematic-on .profile-bar,
+    body.cinematic-on .set-row,
+    body.cinematic-on .up-row,
+    body.cinematic-on .vehicle-tile,
+    body.cinematic-on .mode-tile,
+    body.cinematic-on .level-tile,
+    body.cinematic-on .camp-level-tile,
+    body.cinematic-on .ach-card,
+    body.cinematic-on .mp-peer{
+      border-color:rgba(255,195,110,.32);
+      background:linear-gradient(180deg, rgba(16,10,6,.7), rgba(5,3,2,.62));
+      box-shadow:inset 0 1px 0 rgba(255,220,150,.08), 0 8px 16px rgba(0,0,0,.22);
+    }
+
+    body.cinematic-on #pauseBtn,
+    body.cinematic-on #fsBtn,
+    body.cinematic-on #hint,
+    body.cinematic-on #toast,
+    body.cinematic-on #photo-capture-btn{
+      border-color:rgba(255,200,120,.55);
+      background:linear-gradient(180deg, rgba(14,9,6,.82), rgba(7,5,3,.78));
+      box-shadow:
+        inset 0 1px 0 rgba(255,220,150,.12),
+        0 8px 20px rgba(0,0,0,.36),
+        0 0 14px rgba(255,145,70,.18);
+      text-shadow:0 0 6px rgba(255,220,150,.25);
+    }
+    body.cinematic-on #pauseBtn:hover,
+    body.cinematic-on #fsBtn:hover,
+    body.cinematic-on #photo-capture-btn:hover{
+      border-color:rgba(255,220,150,.82);
+      box-shadow:
+        inset 0 1px 0 rgba(255,230,170,.2),
+        0 10px 24px rgba(0,0,0,.45),
+        0 0 22px rgba(255,165,80,.3);
+    }
+
     body.cinematic-on #screen-results .btn[data-act="res-photo"]{
-      border-color:rgba(255,180,90,.6);
-      text-shadow:0 0 8px rgba(255,180,90,.55);
+      border-color:rgba(255,180,90,.65);
+      text-shadow:0 0 10px rgba(255,180,90,.62);
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      body.cinematic-on .screen.active::before,
+      body.cinematic-on .screen.active::after,
+      body.cinematic-on .btn::after{animation:none !important}
     }
   </style>
 

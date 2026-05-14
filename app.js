@@ -10262,15 +10262,38 @@ function drawNitroOverlay() {
 function drawHUD() {
   const hudH = W < 500 ? 48 : 56;
   const fs = W < 500 ? 13 : 16;
-  ctx.fillStyle = Settings.hudContrast ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)';
-  ctx.fillRect(0, 0, W, hudH);
+  const cineHud = !!Settings.cinematic;
+  if (cineHud) {
+    const g = ctx.createLinearGradient(0, 0, 0, hudH);
+    g.addColorStop(0, Settings.hudContrast ? 'rgba(6,4,3,0.95)' : 'rgba(8,6,4,0.9)');
+    g.addColorStop(1, Settings.hudContrast ? 'rgba(0,0,0,0.86)' : 'rgba(0,0,0,0.7)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, hudH);
+    const glow = ctx.createLinearGradient(0, 0, 0, hudH);
+    glow.addColorStop(0, 'rgba(255,175,95,0.14)');
+    glow.addColorStop(1, 'rgba(255,175,95,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, hudH);
+    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    ctx.fillRect(8, 6, Math.max(110, W * 0.36), hudH - 12);
+    ctx.fillRect(W - Math.max(110, W * 0.36) - 8, 6, Math.max(110, W * 0.36), hudH - 12);
+    ctx.fillStyle = 'rgba(255,190,110,0.42)';
+    ctx.fillRect(0, hudH - 1, W, 1);
+  } else {
+    ctx.fillStyle = Settings.hudContrast ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, hudH);
+  }
 
-  ctx.fillStyle = Settings.hudContrast ? '#fff3b0' : '#f5d76e';
+  ctx.fillStyle = Settings.hudContrast ? '#fff3b0' : (cineHud ? '#ffd998' : '#f5d76e');
   ctx.font = `bold ${fs}px "Courier New", monospace`;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  if (cineHud) {
+    ctx.shadowColor = 'rgba(255,170,80,0.42)';
+    ctx.shadowBlur = 10;
+  }
   // left: score (and pause btn space, so offset by 50)
   ctx.fillText('SCORE  ' + String(Math.floor(Game.score)).padStart(6, '0'), 50, hudH * 0.32);
-  ctx.fillStyle = 'rgba(245,215,110,0.7)';
+  ctx.fillStyle = cineHud ? 'rgba(255,210,150,0.78)' : 'rgba(245,215,110,0.7)';
   ctx.font = `bold ${fs - 2}px "Courier New", monospace`;
   // mode-specific subtitle
   let subL = '';
@@ -10303,7 +10326,7 @@ function drawHUD() {
 
   // right
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#f5d76e';
+  ctx.fillStyle = cineHud ? '#ffd998' : '#f5d76e';
   ctx.font = `bold ${fs}px "Courier New", monospace`;
   let mainR = '';
   if (Game.mode === 'classic') {
@@ -10346,9 +10369,12 @@ function drawHUD() {
     }
   }
   ctx.fillText(mainR, W - 50, hudH * 0.32);
-  ctx.fillStyle = 'rgba(245,215,110,0.7)';
+  ctx.fillStyle = cineHud ? 'rgba(255,210,150,0.78)' : 'rgba(245,215,110,0.7)';
   ctx.font = `bold ${fs - 2}px "Courier New", monospace`;
   ctx.fillText('+' + Math.floor(Game.score / 10) + ' SCRAP', W - 50, hudH * 0.72);
+  if (cineHud) {
+    ctx.shadowBlur = 0;
+  }
 
   if (Game.mode === 'wastelandrun' && Game.runMutators && Game.runMutators.length) {
     ctx.textAlign = 'center';
@@ -10394,17 +10420,43 @@ function drawHUD() {
     ctx.fillRect(0, H - H * 0.12, W, H * 0.12);
     ctx.restore();
   }
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(hbX - 2, hbY - 2, hbW + 4, hbH + 4);
-  ctx.fillStyle = '#3a1a0a';
-  ctx.fillRect(hbX, hbY, hbW, hbH);
+  ctx.fillStyle = cineHud ? 'rgba(0,0,0,0.72)' : 'rgba(0,0,0,0.6)';
+  pathRoundRect(hbX - 2, hbY - 2, hbW + 4, hbH + 4, 3);
+  ctx.fill();
+  if (cineHud) {
+    const hbG = ctx.createLinearGradient(hbX, hbY, hbX, hbY + hbH);
+    hbG.addColorStop(0, 'rgba(80,46,28,0.95)');
+    hbG.addColorStop(1, 'rgba(38,22,14,0.95)');
+    ctx.fillStyle = hbG;
+  } else {
+    ctx.fillStyle = '#3a1a0a';
+  }
+  pathRoundRect(hbX, hbY, hbW, hbH, 2);
+  ctx.fill();
   const col = pct > 0.5 ? '#7af07a' : pct > 0.25 ? '#f5d76e' : '#ff5050';
-  ctx.fillStyle = col;
-  ctx.fillRect(hbX, hbY, hbW * pct, hbH);
-  ctx.strokeStyle = '#f5d76e'; ctx.lineWidth = 1;
-  ctx.strokeRect(hbX, hbY, hbW, hbH);
+  if (cineHud) {
+    const fg = ctx.createLinearGradient(hbX, hbY, hbX, hbY + hbH);
+    if (pct > 0.5) {
+      fg.addColorStop(0, '#9bff9b');
+      fg.addColorStop(1, '#51c751');
+    } else if (pct > 0.25) {
+      fg.addColorStop(0, '#ffe49b');
+      fg.addColorStop(1, '#f2bd5a');
+    } else {
+      fg.addColorStop(0, '#ff8f8f');
+      fg.addColorStop(1, '#ff4a4a');
+    }
+    ctx.fillStyle = fg;
+  } else {
+    ctx.fillStyle = col;
+  }
+  pathRoundRect(hbX, hbY, hbW * pct, hbH, 2);
+  ctx.fill();
+  ctx.strokeStyle = cineHud ? 'rgba(255,205,130,0.92)' : '#f5d76e'; ctx.lineWidth = 1;
+  pathRoundRect(hbX, hbY, hbW, hbH, 2);
+  ctx.stroke();
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#fff3b0';
+  ctx.fillStyle = cineHud ? '#ffe6ad' : '#fff3b0';
   ctx.font = 'bold 9px "Courier New", monospace';
   ctx.fillText('HULL ' + Math.ceil(Game.health) + '/' + Game.maxHealth, W/2, hbY + hbH + 10);
 
