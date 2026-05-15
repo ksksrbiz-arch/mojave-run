@@ -3857,6 +3857,27 @@ function applyKill(x, y, baseScore) {
   addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
 }
 
+// ── Phase 4C: cinematic enemy explosion — multi-ring shockwaves + spark streaks + smoke puffs
+function emitExplosion(x, y, scale) {
+  scale = scale || 1;
+  if (!PerfMon || PerfMon.quality < 0.2) {
+    emit(x, y, 10, { color: '#ff7a28', speed: 300, life: 0.65, size: 4, spread: Math.PI * 2 });
+    shockwave(x, y, 'rgba(255,180,80,0.6)', 60 * scale);
+    return;
+  }
+  const q = PerfMon.quality;
+  emit(x, y, Math.round(20 * q * scale), { color: '#ff7a28', speed: 340 * scale, life: 0.75, size: 5 * scale, shape: 'spark', spread: Math.PI * 2 });
+  emit(x, y, Math.round(10 * q * scale), { color: '#ffe07a', speed: 200 * scale, life: 0.55, size: 3 * scale, shape: 'spark', spread: Math.PI * 2 });
+  if (q > 0.4) {
+    emit(x, y, Math.round(8 * q * scale), { color: 'rgba(80,70,60,0.6)', speed: 90 * scale, life: 0.9, size: 10 * scale, shape: 'smoke', spread: Math.PI * 2 });
+    emit(x, y, Math.round(4 * q * scale), { color: 'rgba(50,44,36,0.45)', speed: 55 * scale, life: 1.1, size: 14 * scale, shape: 'smoke', spread: Math.PI * 2 });
+  }
+  emit(x, y, Math.round(7 * q * scale), { color: '#7a5028', speed: 280 * scale, life: 0.6, size: 6 * scale, shape: 'rect', spread: Math.PI * 2 });
+  shockwave(x, y, 'rgba(255,180,80,0.65)', 70 * scale);
+  if (q > 0.5) shockwave(x, y, 'rgba(255,220,130,0.35)', 45 * scale);
+  if (q > 0.7 && scale >= 1) shockwave(x, y, 'rgba(255,140,50,0.22)', 110 * scale);
+}
+
 function applyCivilianPenalty(x, y, kind) {
   const penalty = CIVILIAN_PENALTY;
   Game.civiliansHit = (Game.civiliansHit || 0) + 1;
@@ -6054,9 +6075,8 @@ function updateBoss(dt) {
       emit(bu.x, bu.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
       if (b.hp <= 0) {
         SFX.bigBoom();
-        emit(hitBody.x, hitBody.y, 60, { color:'#ff6a2b', speed:480, life:1.0, size:5 });
-        emit(hitBody.x, hitBody.y, 30, { color:'#ffd86b', speed:360, life:0.8, size:4 });
-        shockwave(hitBody.x, hitBody.y, 'rgba(255,180,80,0.7)', 200);
+        emitExplosion(hitBody.x, hitBody.y, 2.2);
+        emit(hitBody.x, hitBody.y, 30, { color: '#ffd86b', speed: 360, life: 0.8, size: 4, shape: 'spark', spread: Math.PI * 2 });
         Game.shake = 1.4;
         const bossScore = 1500 * (Game.levelData ? Game.levelData.diff : 1);
         applyKill(hitBody.x, hitBody.y - 20, Math.floor(bossScore));
@@ -7008,9 +7028,12 @@ function update(dt) {
             Game.shake = Math.max(Game.shake, 0.35);
           } else {
             const bigExplosion = isMortar || isTank;
-            emit(e.x, e.y, bigExplosion ? 40 : isDrone ? 18 : 28, { color: isDrone ? '#c87af0' : '#ff6a2b', speed:360, life:0.8, size: isDrone ? 3 : 4 });
-            emit(e.x, e.y, 14, { color:'#ffe07a', speed:240, life:0.6, size:3 });
-            shockwave(e.x, e.y, isDrone ? 'rgba(200,122,240,0.4)' : 'rgba(255,140,60,0.4)', bigExplosion ? 120 : isDrone ? 50 : 70);
+            const explScale = isTank ? 1.5 : isMortar ? 1.3 : isDrone ? 0.85 : 1.0;
+            emitExplosion(e.x, e.y, explScale);
+            if (isDrone) {
+              // extra purple sparks for drone
+              emit(e.x, e.y, 10, { color:'#c87af0', speed:280, life:0.6, size:3, shape:'spark', spread: Math.PI * 2 });
+            }
             if (bigExplosion) Game.shake = Math.max(Game.shake, 0.7);
             else Game.shake = Math.max(Game.shake, 0.5);
           }
@@ -7428,7 +7451,7 @@ function splashDamage(x, y, r, dmg) {
       e.hp -= dmg;
       if (e.hp <= 0) {
         SFX.explode();
-        emit(e.x, e.y, 22, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
+        emitExplosion(e.x, e.y, 0.9);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 120);
         Game.enemies.splice(i,1);
         clearEnemyShotsFrom(e);
@@ -7909,6 +7932,72 @@ function drawRoad() {
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = glareG;
     ctx.fillRect(vpX - H * 0.20, horizonY - H * 0.06, H * 0.40, H * 0.26);
+    ctx.restore();
+  }
+
+  // ── Phase 1C: Heat shimmer — animated wavy stripes just above the horizon
+  if (!Game.isNight && !Game.isStorm && PerfMon.quality > 0.35) {
+    const shimT   = (Game.t || 0) * 1.8;
+    const shimBands = Math.round(3 + PerfMon.quality * 3);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let si = 0; si < shimBands; si++) {
+      const sy = horizonY + H * 0.012 * si;
+      const sw = x1bot - x0bot;   // road width at this depth
+      const sAlpha = (0.04 - si * 0.006) * PerfMon.quality;
+      if (sAlpha <= 0) continue;
+      ctx.beginPath();
+      const pts = 18;
+      for (let pi = 0; pi <= pts; pi++) {
+        const fx = x0bot + (x1bot - x0bot) * (pi / pts);
+        const fy = sy + Math.sin(shimT + pi * 0.9 + si * 2.1) * (1.4 - si * 0.18);
+        pi === 0 ? ctx.moveTo(fx, fy) : ctx.lineTo(fx, fy);
+      }
+      ctx.lineTo(x1bot, sy + H * 0.012);
+      ctx.lineTo(x0bot, sy + H * 0.012);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(255,220,130,${sAlpha})`;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ── Phase 1D: Road surface detail — oil slick iridescence + asphalt texture
+  if (PerfMon.quality > 0.45) {
+    const oilSeed = Math.floor((Game.laneOffset || 0) * 0.7);
+    for (let oi = 0; oi < 4; oi++) {
+      const tFrac = clamp(((oi * 97 + oilSeed) % 100) / 100, 0.12, 0.95);
+      const oy    = horizonY + tFrac * (H - horizonY);
+      const ohw   = (x1bot - x0bot) * tFrac * 0.5;
+      const ox    = vpX + ((oi * 61 + oilSeed * 3) % Math.max(1, Math.round(ohw * 1.6))) - ohw * 0.8;
+      const oR    = Math.max(6, ohw * 0.07);
+      const hueShift = ((oi * 47 + oilSeed) % 360);
+      ctx.save();
+      ctx.globalAlpha = 0.07 + tFrac * 0.04;
+      const og = ctx.createRadialGradient(ox, oy, 0, ox, oy, oR * 2.2);
+      og.addColorStop(0,   `hsla(${hueShift},90%,65%,1)`);
+      og.addColorStop(0.4, `hsla(${(hueShift+80)%360},85%,55%,0.7)`);
+      og.addColorStop(1,   `hsla(${(hueShift+200)%360},70%,40%,0)`);
+      ctx.fillStyle = og;
+      ctx.beginPath();
+      ctx.ellipse(ox, oy, oR * 2.2, oR * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // Asphalt patches — dark rectangular overlays
+    const patchSeed = Math.floor((Game.laneOffset || 0) * 0.3);
+    ctx.save();
+    for (let pi = 0; pi < 5; pi++) {
+      const tFrac = clamp(((pi * 83 + patchSeed) % 100) / 100, 0.10, 0.98);
+      const py2   = horizonY + tFrac * (H - horizonY);
+      const phw   = (x1bot - x0bot) * tFrac * 0.5;
+      const pw    = Math.max(4, phw * 0.09);
+      const ph    = Math.max(2, tFrac * 4);
+      const px2   = vpX + ((pi * 53 + patchSeed * 7) % Math.max(1, Math.round(phw * 1.4))) - phw * 0.7;
+      ctx.globalAlpha = 0.055 + tFrac * 0.03;
+      ctx.fillStyle = '#1a1208';
+      ctx.fillRect(px2, py2, pw, ph);
+    }
     ctx.restore();
   }
 }
@@ -8850,6 +8939,62 @@ function drawVehicleLightsAndFx(w, h, c, detail, speedN, t, opts, visual, upgrad
     ctx.beginPath();
     ctx.ellipse(0, h * 0.18, w * 0.7, h * 0.42, 0, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // ── Phase 4B: Muzzle flash — radial white-core burst + streak at barrel tip
+  if (opts.muzzleT > 0 && detail >= 1) {
+    const mA = clamp(opts.muzzleT / 0.10, 0, 1);
+    const mY = -h * 0.56;
+    const mCol = c.glow || '#fff3b0';
+    // Left barrel flash
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // white core
+    ctx.globalAlpha = mA * 0.95;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(-w * 0.28, mY, w * 0.09, 0, Math.PI * 2); ctx.fill();
+    // coloured halo
+    ctx.globalAlpha = mA * 0.55;
+    const mG1 = ctx.createRadialGradient(-w * 0.28, mY, 0, -w * 0.28, mY, w * 0.28);
+    mG1.addColorStop(0, mCol);
+    mG1.addColorStop(1, 'rgba(255,200,80,0)');
+    ctx.fillStyle = mG1;
+    ctx.beginPath(); ctx.arc(-w * 0.28, mY, w * 0.28, 0, Math.PI * 2); ctx.fill();
+    // upward streak
+    ctx.globalAlpha = mA * 0.5;
+    ctx.strokeStyle = mCol;
+    ctx.lineWidth = Math.max(1, w * 0.03);
+    ctx.beginPath(); ctx.moveTo(-w * 0.28, mY); ctx.lineTo(-w * 0.28, mY - h * 0.28 * mA); ctx.stroke();
+    // Right barrel flash
+    ctx.globalAlpha = mA * 0.95;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(w * 0.28, mY, w * 0.09, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = mA * 0.55;
+    const mG2 = ctx.createRadialGradient(w * 0.28, mY, 0, w * 0.28, mY, w * 0.28);
+    mG2.addColorStop(0, mCol);
+    mG2.addColorStop(1, 'rgba(255,200,80,0)');
+    ctx.fillStyle = mG2;
+    ctx.beginPath(); ctx.arc(w * 0.28, mY, w * 0.28, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = mA * 0.5;
+    ctx.beginPath(); ctx.moveTo(w * 0.28, mY); ctx.lineTo(w * 0.28, mY - h * 0.28 * mA); ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Phase 5B: Wide night headlight cone + ground puddle glow
+  if (detail >= 1 && isDark) {
+    // Ground puddle glow — ellipse on the road surface in front of the car
+    const pudY = -h * 0.7;
+    const pudW = w * (1.1 + speedN * 0.6), pudH = h * 0.28;
+    const pudG = ctx.createRadialGradient(0, pudY, 0, 0, pudY, pudW);
+    pudG.addColorStop(0,   `rgba(255,248,220,${0.16 * headA})`);
+    pudG.addColorStop(0.6, `rgba(255,235,170,${0.07 * headA})`);
+    pudG.addColorStop(1,   'rgba(255,235,170,0)');
+    ctx.save();
+    ctx.fillStyle = pudG;
+    ctx.beginPath();
+    ctx.ellipse(0, pudY, pudW, pudH, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -10017,11 +10162,50 @@ function drawBoss() {
     });
     ctx.save();
     ctx.translate(x, y);
+
+    // ── Phase 3E: Boss chrome overlay + armour bolts
+    if (visualQualityLevel() >= 1) {
+      // Chrome side-panels
+      const chromeA = 0.18 + 0.08 * Math.sin(auraT * 3.4 + x * 0.01);
+      ctx.globalAlpha = chromeA;
+      const cg = ctx.createLinearGradient(-b.w * 0.5, -b.h * 0.5, b.w * 0.5, b.h * 0.5);
+      cg.addColorStop(0,   'rgba(255,255,255,0.7)');
+      cg.addColorStop(0.4, 'rgba(200,200,220,0.3)');
+      cg.addColorStop(0.7, 'rgba(140,140,160,0.1)');
+      cg.addColorStop(1,   'rgba(80,80,100,0)');
+      ctx.fillStyle = cg;
+      ctx.fillRect(-b.w * 0.5, -b.h * 0.5, b.w, b.h);
+      ctx.globalAlpha = 1;
+      // Armour bolts — small metallic squares at corners
+      const boltColor = b.enrage ? '#ff9a3d' : '#c0c0d8';
+      ctx.fillStyle = boltColor;
+      const boltOff = 4;
+      [[-b.w * 0.4, -b.h * 0.38], [b.w * 0.4, -b.h * 0.38],
+       [-b.w * 0.4,  b.h * 0.38], [b.w * 0.4,  b.h * 0.38]].forEach(([bx2, by2]) => {
+        ctx.fillRect(bx2 - 2, by2 - 2, 4, 4);
+      });
+    }
+
+    // Threat ring — pulsing ring on the ground under the boss
+    if (visualQualityLevel() >= 1) {
+      const ringT = (auraT * (b.enrage ? 2.2 : 1.4)) % 1;
+      const ringR = b.w * (0.6 + ringT * 0.55);
+      ctx.globalAlpha = (1 - ringT) * (b.enrage ? 0.55 : 0.30);
+      ctx.strokeStyle = b.enrage ? '#ff4422' : '#cc2222';
+      ctx.lineWidth = b.enrage ? 3 : 2;
+      ctx.beginPath();
+      ctx.ellipse(0, b.h * 0.32, ringR, ringR * 0.38, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Spikes on underside
     ctx.fillStyle = b.enrage ? '#ff4422' : '#8a2a2a';
     for (let i = -3; i <= 3; i++) {
       const spikeH = b.enrage ? 16 : 11;
       ctx.fillRect(i * (b.w * 0.1), b.h/2 - 6, 4, spikeH);
     }
+    // Damage cracks when low HP
     if (b.enrage || hpN < 0.4) {
       ctx.strokeStyle = `rgba(255,${Math.round(100 + 80 * (1 - hpN))},40,${0.45 + 0.25 * enr})`;
       ctx.lineWidth = 1.8;
@@ -10405,7 +10589,6 @@ function drawParticles() {
   for (const pr of Game.particles) {
     const a = Math.max(0, pr.life / pr.max);
     ctx.globalAlpha = a;
-    ctx.fillStyle = pr.color;
     if (pr.shape === 'rect') {
       // Rectangular spark/debris particle — rotates as it flies
       const rot = (pr.rot || 0) + (pr.vx || 0) * (pr.max - pr.life) * 0.04;
@@ -10413,9 +10596,44 @@ function drawParticles() {
       ctx.translate(pr.x, pr.y);
       ctx.rotate(rot);
       const rw = pr.size * 0.6, rh = pr.size * 0.25;
+      ctx.fillStyle = pr.color;
       ctx.fillRect(-rw/2, -rh/2, rw, rh);
       ctx.restore();
+    } else if (pr.shape === 'spark') {
+      // Spark streak — draw as a short line along velocity direction
+      ctx.save();
+      ctx.translate(pr.x, pr.y);
+      const spd = Math.hypot(pr.vx || 0, pr.vy || 0);
+      if (spd > 5) {
+        const ang = Math.atan2(pr.vy || 0, pr.vx || 0);
+        const len = Math.min(pr.size * 2.5, spd * 0.06);
+        ctx.rotate(ang);
+        const sg = ctx.createLinearGradient(-len, 0, len * 0.3, 0);
+        sg.addColorStop(0, 'rgba(255,255,255,0)');
+        sg.addColorStop(0.5, pr.color || '#ffe07a');
+        sg.addColorStop(1, 'rgba(255,200,80,0)');
+        ctx.strokeStyle = sg;
+        ctx.lineWidth = Math.max(1, pr.size * 0.28);
+        ctx.beginPath(); ctx.moveTo(-len, 0); ctx.lineTo(len * 0.3, 0); ctx.stroke();
+      } else {
+        ctx.fillStyle = pr.color;
+        ctx.beginPath(); ctx.arc(0, 0, pr.size / 2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    } else if (pr.shape === 'smoke') {
+      // Smoke puff — radial gradient disc growing outward
+      const growR = pr.size * (1 + (1 - a) * 1.4);
+      ctx.save();
+      ctx.translate(pr.x, pr.y);
+      const smkG = ctx.createRadialGradient(0, 0, 0, 0, 0, growR);
+      smkG.addColorStop(0,   pr.color || 'rgba(120,110,100,0.6)');
+      smkG.addColorStop(0.6, pr.color ? pr.color.replace(/[\d.]+\)$/, `${a * 0.35})`) : 'rgba(120,110,100,0.15)');
+      smkG.addColorStop(1,   'rgba(80,80,80,0)');
+      ctx.fillStyle = smkG;
+      ctx.beginPath(); ctx.arc(0, 0, growR, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     } else {
+      ctx.fillStyle = pr.color;
       ctx.beginPath();
       ctx.arc(pr.x, pr.y, pr.size / 2, 0, Math.PI * 2);
       ctx.fill();
@@ -11576,6 +11794,7 @@ function render() {
             ghost: false,
             cloak: isCloakActive,
             storyAnimT: Game.storyBeatT || 0,
+            muzzleT: Game.muzzleT || 0,
           }
         ));
       if (isChargeActive && Math.random() < 0.35 && visualQualityLevel() >= 1) {
@@ -11588,25 +11807,31 @@ function render() {
       }
       if (Game.hitFlash > 0) {
         ctx.save();
-        ctx.globalAlpha = clamp(Game.hitFlash / 0.35, 0, 1) * 0.55;
-        ctx.fillStyle = '#fff3b0';
-        ctx.fillRect(Game.player.x - Game.player.w/2 - 2, Game.player.y - Game.player.h/2 - 2,
-                     Game.player.w + 4, Game.player.h + 4);
+        const hfA = clamp(Game.hitFlash / 0.35, 0, 1);
+        // White core flash
+        ctx.globalAlpha = hfA * 0.60;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(Game.player.x - Game.player.w/2 - 3, Game.player.y - Game.player.h/2 - 3,
+                     Game.player.w + 6, Game.player.h + 6);
+        // Coloured damage tint
+        ctx.globalAlpha = hfA * 0.40;
+        ctx.fillStyle = '#ff5a5a';
+        ctx.fillRect(Game.player.x - Game.player.w/2 - 1, Game.player.y - Game.player.h/2 - 1,
+                     Game.player.w + 2, Game.player.h + 2);
+        // Damage spark ring
+        if (visualQualityLevel() >= 1 && hfA > 0.55) {
+          ctx.globalAlpha = hfA * 0.55;
+          ctx.strokeStyle = '#ffb36a';
+          ctx.lineWidth = 2;
+          const rr = (Game.player.w * 0.7) + (1 - hfA) * 16;
+          ctx.beginPath();
+          ctx.arc(Game.player.x, Game.player.y, rr, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.restore();
       }
       drawShield();
-      // muzzle flash glow on barrel
-      if (Game.muzzleT > 0) {
-        const a = clamp(Game.muzzleT / 0.08, 0, 1);
-        ctx.save();
-        ctx.globalAlpha = a * 0.7;
-        ctx.fillStyle = (Game.vehicle && Game.vehicle.color && Game.vehicle.color.glow) || '#fff3b0';
-        ctx.beginPath();
-        ctx.arc(Game.player.x, Game.player.y - Game.player.h/2 - 6, 12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        ctx.globalAlpha = 1;
-      }
+      // muzzle flash — now handled inside drawVehicleLightsAndFx via opts.muzzleT
     }
     if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
       SplitScreen.drawCoopPlayers(ctx);
