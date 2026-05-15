@@ -15295,19 +15295,6 @@ function checkWeeklyChallenge(result) {
   }
   return null;
 }
-function claimWeeklyReward() {
-  const p = Profile.active(); if (!p) return false;
-  const wc = getWeeklyChallenge();
-  const key = wc.weekKey;
-  p.weeklyProgress = p.weeklyProgress || {};
-  const entry = p.weeklyProgress[key];
-  if (!entry || !entry.progress || entry.claimed) return false;
-  entry.claimed = true;
-  p.scrap = (p.scrap || 0) + wc.reward;
-  p.lifetimeScrap = (p.lifetimeScrap || 0) + wc.reward;
-  Profile.save();
-  return true;
-}
 
 // === IN-BROWSER LEVEL EDITOR ===
 // Generates shareable base64 codes encoding custom level parameters.
