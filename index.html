@@ -1572,6 +1572,119 @@
       text-shadow:0 0 10px rgba(255,180,90,.62);
     }
 
+    /* Title screen: make first impression feel like a premium arcade cabinet. */
+    body.cinematic-on #screen-title .inner{
+      max-width:520px;
+      padding:24px 18px 28px;
+      overflow:hidden;
+    }
+    body.cinematic-on #screen-title .inner::before{
+      content:"";
+      position:absolute;
+      inset:-35% -20% auto;
+      height:58%;
+      pointer-events:none;
+      background:
+        radial-gradient(ellipse at 50% 35%, rgba(255,210,140,.28), rgba(255,130,65,.1) 36%, transparent 68%),
+        repeating-linear-gradient(90deg, rgba(255,210,140,.1) 0 1px, transparent 1px 18px);
+      opacity:.72;
+      transform:perspective(340px) rotateX(58deg);
+    }
+    body.cinematic-on #screen-title .inner h1{
+      font-size:clamp(42px,11vw,68px) !important;
+      margin-top:6px;
+      line-height:.95;
+      text-transform:uppercase;
+    }
+    body.cinematic-on #screen-title .subtitle::before,
+    body.cinematic-on #screen-title .subtitle::after{
+      content:"";
+      display:inline-block;
+      width:34px;height:1px;
+      margin:0 10px 3px;
+      background:linear-gradient(90deg, transparent, rgba(255,210,140,.74), transparent);
+    }
+
+    /* Mode select: each card becomes a lit arcade marquee with icon + metadata. */
+    body.cinematic-on .mode-tile{
+      position:relative;
+      padding:18px 16px 16px 72px;
+      min-height:92px;
+      overflow:hidden;
+      border-radius:10px;
+    }
+    body.cinematic-on .mode-tile::before{
+      content:attr(data-icon);
+      position:absolute;
+      left:16px;top:18px;
+      width:40px;height:40px;
+      display:flex;align-items:center;justify-content:center;
+      border:1px solid rgba(255,210,140,.34);
+      border-radius:50%;
+      background:radial-gradient(circle at 50% 35%, rgba(255,215,145,.22), rgba(0,0,0,.42));
+      box-shadow:0 0 18px rgba(255,160,80,.18), inset 0 1px 0 rgba(255,230,170,.18);
+      font-size:20px;
+    }
+    body.cinematic-on .mode-tile::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      background:
+        linear-gradient(90deg, rgba(255,170,80,.12), transparent 34%),
+        radial-gradient(70% 110% at 100% 0%, rgba(255,110,60,.1), transparent 58%);
+      opacity:.8;
+    }
+    body.cinematic-on .mode-tile > *{position:relative;z-index:1}
+    body.cinematic-on .mode-tile:hover{
+      transform:translateY(-2px) scale(1.006);
+      box-shadow:0 16px 28px rgba(0,0,0,.42), 0 0 24px rgba(255,150,70,.22), inset 0 1px 0 rgba(255,230,170,.14);
+    }
+    body.cinematic-on .mode-tile .mt-name{
+      color:#ffe0a6;
+      font-size:17px;
+      text-shadow:0 0 12px rgba(255,170,80,.32);
+    }
+    body.cinematic-on .mode-tile .mt-kicker{
+      font-size:9px;
+      letter-spacing:2px;
+      color:rgba(255,210,150,.62);
+      margin-bottom:4px;
+    }
+    body.cinematic-on .mode-tile .mt-desc{color:rgba(255,225,170,.72)}
+    body.cinematic-on .mode-tile.locked{
+      filter:saturate(.75);
+      opacity:.62;
+    }
+
+    /* Results: stats read like a high-end arcade scorecard. */
+    body.cinematic-on #screen-results .inner{
+      overflow:hidden;
+    }
+    body.cinematic-on #res-title{
+      font-size:clamp(38px,9vw,58px) !important;
+      margin-top:8px;
+    }
+    body.cinematic-on #res-title.victory{color:#9dff88;text-shadow:0 0 18px rgba(122,255,90,.45), 0 0 36px rgba(122,255,90,.18)}
+    body.cinematic-on #res-title.defeat{color:#ff7474;text-shadow:0 0 18px rgba(255,80,80,.45), 0 0 36px rgba(255,80,80,.16)}
+    body.cinematic-on #res-rows{
+      gap:6px;
+    }
+    body.cinematic-on .res-row{
+      padding:11px 12px;
+      border:1px solid rgba(255,195,110,.18);
+      border-radius:6px;
+      background:linear-gradient(90deg, rgba(255,175,90,.075), rgba(0,0,0,.28));
+      box-shadow:inset 0 1px 0 rgba(255,220,150,.08);
+    }
+    body.cinematic-on .res-row.big{
+      border-color:rgba(255,215,130,.4);
+      background:linear-gradient(90deg, rgba(255,190,95,.15), rgba(0,0,0,.3));
+      box-shadow:0 0 18px rgba(255,160,70,.16), inset 0 1px 0 rgba(255,230,170,.13);
+    }
+    body.cinematic-on .res-row .lbl{color:rgba(255,225,175,.62)}
+    body.cinematic-on .res-row .val{color:#ffe0a6;text-shadow:0 0 8px rgba(255,170,80,.22)}
+
     @media (prefers-reduced-motion: reduce){
       body.cinematic-on .screen.active::before,
       body.cinematic-on .screen.active::after,

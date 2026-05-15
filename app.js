@@ -10748,6 +10748,7 @@ function drawLoadingOverlay() {
   const alpha = k < 0.85 ? 1 : 1 - (k - 0.85) / 0.15;
   ctx.save();
   ctx.globalAlpha = alpha;
+  const cine = !!Settings.cinematic;
 
   // Cinematic letterbox bars — slide in from top and bottom at run start
   const barSlide = k < 0.25 ? k / 0.25 : 1;
@@ -10756,16 +10757,45 @@ function drawLoadingOverlay() {
   ctx.fillRect(0, 0, W, lboxH);
   ctx.fillRect(0, H - lboxH, W, lboxH);
   // Gold accent lines at inner bar edges
-  ctx.fillStyle = 'rgba(245,215,110,0.55)';
+  ctx.fillStyle = cine ? 'rgba(255,205,130,0.68)' : 'rgba(245,215,110,0.55)';
   ctx.fillRect(0, lboxH, W, 1);
   ctx.fillRect(0, H - lboxH - 1, W, 1);
 
   // dark band across center
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(0, H * 0.30, W, H * 0.22);
-  ctx.fillStyle = 'rgba(245,215,110,0.5)';
-  ctx.fillRect(0, H * 0.30, W, 1);
-  ctx.fillRect(0, H * 0.52 - 1, W, 1);
+  if (cine) {
+    const cardX = Math.max(16, W * 0.08);
+    const cardY = H * 0.29;
+    const cardW = W - cardX * 2;
+    const cardH = H * 0.25;
+    const cardG = ctx.createLinearGradient(0, cardY, 0, cardY + cardH);
+    cardG.addColorStop(0, 'rgba(23,15,9,0.82)');
+    cardG.addColorStop(1, 'rgba(0,0,0,0.72)');
+    ctx.fillStyle = cardG;
+    pathRoundRect(cardX, cardY, cardW, cardH, 10);
+    ctx.fill();
+    const sweepX = cardX + (cardW + 90) * k - 90;
+    const sweep = ctx.createLinearGradient(sweepX - 70, 0, sweepX + 70, 0);
+    sweep.addColorStop(0, 'rgba(255,210,140,0)');
+    sweep.addColorStop(0.5, 'rgba(255,210,140,0.10)');
+    sweep.addColorStop(1, 'rgba(255,210,140,0)');
+    ctx.fillStyle = sweep;
+    pathRoundRect(cardX, cardY, cardW, cardH, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,205,130,0.46)';
+    ctx.lineWidth = 1;
+    pathRoundRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1, 10);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,170,80,0.035)';
+    for (let sy = cardY + 6 + ((Game.animT || 0) * 18 % 4); sy < cardY + cardH; sy += 4) {
+      ctx.fillRect(cardX + 8, sy, cardW - 16, 1);
+    }
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, H * 0.30, W, H * 0.22);
+    ctx.fillStyle = 'rgba(245,215,110,0.5)';
+    ctx.fillRect(0, H * 0.30, W, 1);
+    ctx.fillRect(0, H * 0.52 - 1, W, 1);
+  }
 
   // big title
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -10799,22 +10829,39 @@ function drawLoadingOverlay() {
   // typewriter wipe
   const reveal = clamp(k * 1.6, 0, 1);
   const chars = Math.ceil(title.length * reveal);
+  if (cine) {
+    ctx.shadowColor = 'rgba(255,150,70,0.48)';
+    ctx.shadowBlur = 16;
+  }
   ctx.fillText(title.slice(0, chars), W/2, H * 0.38);
+  ctx.shadowBlur = 0;
 
   // subtitle
   ctx.font = `bold ${W < 500 ? 11 : 13}px "Courier New", monospace`;
-  ctx.fillStyle = 'rgba(245,215,110,0.85)';
+  ctx.fillStyle = cine ? 'rgba(255,225,170,0.88)' : 'rgba(245,215,110,0.85)';
   ctx.fillText(sub, W/2, H * 0.46);
 
   // progress bar
-  const barW = Math.min(280, W * 0.6), barH = 6;
+  const barW = Math.min(cine ? 320 : 280, W * 0.68), barH = cine ? 8 : 6;
   const bx = (W - barW) / 2, by = H * 0.50;
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
-  ctx.fillStyle = 'rgba(245,215,110,0.25)';
-  ctx.fillRect(bx, by, barW, barH);
-  ctx.fillStyle = '#f5d76e';
-  ctx.fillRect(bx, by, barW * k, barH);
+  ctx.fillStyle = 'rgba(0,0,0,0.58)';
+  pathRoundRect(bx - 2, by - 2, barW + 4, barH + 4, 4);
+  ctx.fill();
+  ctx.fillStyle = cine ? 'rgba(255,190,110,0.22)' : 'rgba(245,215,110,0.25)';
+  pathRoundRect(bx, by, barW, barH, 3);
+  ctx.fill();
+  const pg = ctx.createLinearGradient(bx, by, bx + barW, by);
+  pg.addColorStop(0, cine ? '#ff9d4d' : '#f5d76e');
+  pg.addColorStop(0.55, '#ffe6a6');
+  pg.addColorStop(1, cine ? '#ff6a3d' : '#f5d76e');
+  ctx.fillStyle = pg;
+  pathRoundRect(bx, by, barW * k, barH, 3);
+  ctx.fill();
+  if (cine) {
+    ctx.strokeStyle = 'rgba(255,215,145,0.55)';
+    pathRoundRect(bx + 0.5, by + 0.5, barW - 1, barH - 1, 3);
+    ctx.stroke();
+  }
 
   // boss-level warning beneath
   if (Game.levelData && Game.levelData.obj === 'boss') {
@@ -11872,6 +11919,15 @@ const UI = {
     const zombieUnlocked = Profile.isZombieModeUnlocked();
     const masteryUnlocked = Profile.isFullMasteryUnlocked();
     const campaignCleared = Profile.campaignLevelsCleared();
+    const modeIcons = {
+      classic: '🏜', winding: '〰', gauntlet: '◆', timeattack: '⏱', zombie: '☣', bossrush: '☠', daily: '☀',
+      ironthrone: '👑', wastelandrun: '✦', extraction: '⛟', custom: '⚙', arena: '◎'
+    };
+    const modeKickers = {
+      classic: 'ENDLESS HIGHWAY', winding: 'CURVE MASTER', gauntlet: 'SECTOR LADDER', timeattack: 'SIXTY SECOND SPRINT',
+      zombie: 'HORDE SURVIVAL', bossrush: 'BOSS CHAIN', daily: 'SHARED SEED', ironthrone: 'WARLORD CAMPAIGN',
+      wastelandrun: 'ROGUELITE RUN', extraction: 'CONVOY ESCORT', custom: 'PLAYER-BUILT', arena: 'WAVE COMBAT'
+    };
     document.getElementById('mode-vehicle').textContent = v.name;
     const list = document.getElementById('mode-list');
     list.innerHTML = '';
@@ -11896,9 +11952,11 @@ const UI = {
       } else if (ironThroneLocked) {
         lockLine = `<div class="mt-lock">👑 REQUIRES FULL MASTERY — CLEAR ALL CAMPAIGN + ALL GAUNTLET</div>`;
       }
-      tile.className = 'mode-tile' + (isLocked ? ' locked' : '');
+      tile.className = 'mode-tile mode-' + m.id + (isLocked ? ' locked' : '');
       tile.dataset.mid = m.id;
+      tile.dataset.icon = modeIcons[m.id] || '◇';
       tile.innerHTML = `
+        <div class="mt-kicker">${modeKickers[m.id] || 'MOJAVE PROTOCOL'}</div>
         <div class="mt-name">${m.name}</div>
         <div class="mt-desc">${desc}</div>
         ${lockLine}
