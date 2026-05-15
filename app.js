@@ -3648,6 +3648,7 @@ const SFX = {
 const rand = (a,b) => a + Math.random() * (b - a);
 const irand = (a,b) => Math.floor(rand(a,b+1));
 const clamp = (v,lo,hi) => v < lo ? lo : v > hi ? hi : v;
+const expEase = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
 const PARTICLE_SCALE = IS_MOBILE ? 0.65 : 1;
 const WINDING_MAX_PACE_BONUS = 1.35;
 const WINDING_PACE_DISTANCE = 4500;
@@ -5098,6 +5099,7 @@ function startRun(mode, level) {
   if (Game.weaponSpecState && Game.weaponSpecState.drones) spawnDroneSwarm(Game.weaponSpecState.drones);
   Game.player = {
     x: W * 0.5, y: H + 100, w: 42, h: 64, vx: 0,  // start offscreen — drives in during loading
+    steerSmooth: 0,
     // Arena-mode fields. Harmless in legacy modes (they never read vy/facing).
     vy: 0,
     facing: -Math.PI / 2,  // -π/2 = up. Matches the legacy "vehicle points up" art.
@@ -6730,7 +6732,7 @@ function update(dt) {
   } else if (Game.levelData) {
     Game.targetSpeed = 280 * (0.85 + Game.levelData.diff * 0.15);
   }
-  Game.speed += (Game.targetSpeed - Game.speed) * Math.min(1, dt * 0.8);
+  Game.speed = expEase(Game.speed, Game.targetSpeed, 0.8, dt);
 
   readKbd();
 
@@ -6775,28 +6777,44 @@ function update(dt) {
     const accel = stats.accel;
     const maxV = stats.maxV;
     const drag = 6.5;
-    if (input.left)  p.vx -= accel * dt;
-    if (input.right) p.vx += accel * dt;
-    if (!input.left && !input.right) {
+    const keyAxis = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    if (keyAxis !== 0) {
+      p.steerSmooth = expEase(p.steerSmooth || 0, keyAxis, 20, dt);
+      p.vx += p.steerSmooth * accel * dt;
+    } else {
       if (input.touchTargetX !== null) {
         const target = clamp(input.touchTargetX, 0, W);
         const dx = target - p.x;
         // Dead zone: ±16px around current position to prevent micro-jitter
         if (Math.abs(dx) > 16) {
-          const desiredV = clamp(dx * 14, -maxV, maxV);
+          const steerTarget = clamp((dx * 14) / maxV, -1, 1);
+          p.steerSmooth = expEase(p.steerSmooth || 0, steerTarget, 18, dt);
+          const desiredV = p.steerSmooth * maxV;
           p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
         } else {
+          p.steerSmooth = expEase(p.steerSmooth || 0, 0, 18, dt);
           p.vx -= p.vx * Math.min(1, drag * dt);
         }
       } else {
+        p.steerSmooth = expEase(p.steerSmooth || 0, 0, 14, dt);
         p.vx -= p.vx * Math.min(1, drag * dt);
       }
     }
     p.vx = clamp(p.vx, -maxV, maxV);
     p.x += p.vx * dt;
     const { x0, x1 } = roadBounds();
-    if (p.x - p.w/2 < x0 + 4) { p.x = x0 + 4 + p.w/2; p.vx *= -0.4; }
-    if (p.x + p.w/2 > x1 - 4) { p.x = x1 - 4 - p.w/2; p.vx *= -0.4; }
+    if (p.x - p.w/2 < x0 + 4) {
+      p.x = x0 + 4 + p.w/2;
+      p.vx = Math.max(0, p.vx * 0.18);
+      p.steerSmooth = Math.max(0, (p.steerSmooth || 0) * 0.35);
+      Game.shake = Math.max(Game.shake, 0.08);
+    }
+    if (p.x + p.w/2 > x1 - 4) {
+      p.x = x1 - 4 - p.w/2;
+      p.vx = Math.min(0, p.vx * 0.18);
+      p.steerSmooth = Math.min(0, (p.steerSmooth || 0) * 0.35);
+      Game.shake = Math.max(Game.shake, 0.08);
+    }
     p.y = H - 110;
   }
 
@@ -16160,7 +16178,7 @@ function boot() {
   Settings.applyBodyClass();
   Profile.load();
   // seed decor for menu backdrop
-  Game.player = { x: W * 0.5, y: H - 110, w: 42, h: 64, vx: 0 };
+  Game.player = { x: W * 0.5, y: H - 110, w: 42, h: 64, vx: 0, steerSmooth: 0 };
   for (let i = 0; i < 36; i++) Game.decor.push(makeDecor(Math.random() * H));
 
   // PWA shortcut deep-links: `?mode=daily` jumps straight into the daily run,
@@ -17864,7 +17882,7 @@ function startReplayPlayback(rp, returnScreen) {
   Game.replayReturnScreen = returnScreen || 'platform';
   Game.vehicle = VEHICLE_BY_ID[meta.vehicle] || VEHICLES[0];
   Game.vehicleStats = Profile.effectiveStats(Game.vehicle.id) || Object.assign({}, Game.vehicle.base);
-  Game.player = { x: W * 0.5, y: H - 110, w:42, h:64, vx:0 };
+  Game.player = { x: W * 0.5, y: H - 110, w:42, h:64, vx:0, steerSmooth:0 };
   Game.score = 0; Game.kills = 0; Game.health = Game.maxHealth = Math.round(Game.vehicleStats.maxHp || 100);
   Game.biome = 'wastes'; Game.isNight = false; Game.isStorm = false;
   Game.bullets.length = Game.enemies.length = Game.obstacles.length = Game.pickups.length = Game.enemyBullets.length = 0;
