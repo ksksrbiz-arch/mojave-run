@@ -4651,6 +4651,7 @@ const Game = {
   distance: 0,
   kills: 0,
   civiliansHit: 0,
+  nearMisses: 0,
   speed: 280,
   targetSpeed: 280,
   health: 100,
