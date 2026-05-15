@@ -3953,6 +3953,12 @@ function applyCivilianPenalty(x, y, kind) {
   if (Game.civiliansHit === CIVILIAN_WARNING_HITS) UI.toast('RADIO: THOSE WERE CIVILIANS', 2200);
   else if (Game.civiliansHit === CIVILIAN_MANHUNT_HITS) UI.toast('NCR DISPATCH: YOU ARE NOW THE STORY', 2500);
   else if (Game.civiliansHit === CIVILIAN_INFAMY_HITS) UI.toast('EVEN THE RAIDERS THINK THIS IS MESSED UP', 2800);
+  // HEADHUNTER mutator: any civilian strike ends the run.
+  if (Game.runMutators && Game.runMutators.some(m => m.id === 'headhunter')) {
+    UI.toast('HEADHUNTER PACT BROKEN', 2400);
+    Game.health = 0;
+    triggerPlayerDeath();
+  }
 }
 
 // Spinout sequence — triggered when the player car hits a hitchhiker on the
@@ -6885,7 +6891,11 @@ function update(dt) {
     const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
     const siegeMul = isPowerupActive('siege') ? 0.45 : 1;
     const specFireMul = Game.weaponSpecState && Game.weaponSpecState.fireRateMul ? Game.weaponSpecState.fireRateMul : 1;
-    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul * siegeMul * specFireMul;
+    // Combo OVERHEAT: at combo >= 5 fire rate tightens by up to 30% as the
+    // combo climbs (caps at combo 12). Pure positive feedback — no penalty.
+    const comboHeat = Math.max(0, Math.min(7, (Game.combo || 0) - 5));
+    const comboFireMul = 1 - (comboHeat / 7) * 0.30;
+    Game.fireCooldown = stats.fireRate * rapidMul * overdriveMul * siegeMul * specFireMul * comboFireMul;
   }
   if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) {
     SplitScreen.update(dt);
@@ -7550,6 +7560,21 @@ function damagePlayer(amt) {
   Game.bountyStreak = 0;
   Game.bountyMul = 1;
   Game.comboT = 0;
+  // Auto-Adrenaline: if HP just crossed below 20%, grant a brief score/fire
+  // boost (reuses the adrenaline powerup) with a 30s internal cooldown.
+  if (Game.health > 0) {
+    const hpFrac = Game.health / Math.max(1, Game.maxHealth);
+    const now = Game.t || 0;
+    if (hpFrac <= 0.20 && (now - (Game._lastAutoAdrenT || -99)) > 30) {
+      Game._lastAutoAdrenT = now;
+      if (POWERUPS.adrenaline) {
+        activatePowerup('adrenaline', 'auto');
+      }
+      addPopup('ADRENALINE!', Game.player.x, Game.player.y - 60, '#ff6fff', 18);
+      Game.shake = Math.max(Game.shake, 0.4);
+      Haptics.combo(3);
+    }
+  }
   // Phase 6 — reset arena combo on damage
   if (Game.mode === 'arena') {
     Game.arenaCombo = 0;
