@@ -3676,6 +3676,16 @@ function roadBounds() {
   return { x0, x1, w: roadW };
 }
 
+// Returns a visual-only scale factor for objects at screen-Y `y` in forward-scrolling
+// road modes. Near the horizon objects appear small; at the player's row they are ~1.
+// Arena and winding mode always return 1 (they have their own depth handling).
+function perspectiveScale(y) {
+  if (!Game || Game.mode === 'arena' || Game.mode === 'winding') return 1;
+  const horizonY = H * 0.42;
+  const t = clamp((y - horizonY) / Math.max(1, H - horizonY), 0, 1);
+  return 0.48 + 0.52 * Math.pow(t, 0.7);
+}
+
 function getWindingRoadShift(y = H * 0.5) {
   if (!Game || Game.mode !== 'winding' || !Game.windingRoad) return 0;
   const wr = Game.windingRoad;
@@ -7740,46 +7750,166 @@ function drawRoad() {
     return;
   }
 
-  // shoulder
+  // ─────────────────────────────────────────────────────────────────
+  // Classic mode — OutRun-style perspective road
+  // ─────────────────────────────────────────────────────────────────
+  const horizonY = H * 0.42;
+
+  // Vanishing point drifts slightly with player steering for a subtle banking feel
+  const playerLean = (Game.player && Game.mode !== 'winding')
+    ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
+  const vpX = W * 0.5 - playerLean * W * 0.055;
+
+  // Full ground fill from horizon to bottom (shoulder colour)
   ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
-  ctx.fillRect(0, 0, x0, H);
-  ctx.fillRect(x1, 0, W - x1, H);
+  ctx.fillRect(0, horizonY, W, H - horizonY);
 
-  // road (cached gradient — keyed on road bounds + isNight)
-  ctx.fillStyle = getRoadGradient(x0, x1);
-  ctx.fillRect(x0, 0, w, H);
+  // Road surface trapezoid — converges to VP at horizon, full road width at bottom
+  const x0bot = vpX - w / 2;
+  const x1bot = vpX + w / 2;
+  const roadSurfGrad = ctx.createLinearGradient(vpX, horizonY, vpX, H);
+  if (Game.isNight) {
+    roadSurfGrad.addColorStop(0,   shade(t.roadNightB, 18));
+    roadSurfGrad.addColorStop(0.5, t.roadNightB);
+    roadSurfGrad.addColorStop(1,   t.roadNightA);
+  } else {
+    roadSurfGrad.addColorStop(0,   shade(t.roadDayB, 26));
+    roadSurfGrad.addColorStop(0.55, t.roadDayB);
+    roadSurfGrad.addColorStop(1,   t.roadDayA);
+  }
+  ctx.fillStyle = roadSurfGrad;
+  ctx.beginPath();
+  ctx.moveTo(vpX,   horizonY);
+  ctx.lineTo(x1bot, H);
+  ctx.lineTo(x0bot, H);
+  ctx.closePath();
+  ctx.fill();
 
-  // road texture cracks (subtle)
-  ctx.fillStyle = Game.isNight ? t.crackNight : t.crackDay;
-  const crackSeed = Math.floor(Game.laneOffset * 4);
-  for (let i = 0; i < 12; i++) {
-    const cy = ((i * 73 + crackSeed) % (H + 60)) - 30;
-    const cx = x0 + ((i * 37) % w);
-    ctx.fillRect(cx, cy, 24, 2);
+  // Alternating perspective stripe bands — distance depth cue (quality-gated)
+  if (PerfMon.quality > 0.45) {
+    const SBAND = 34;
+    const sbH = (H - horizonY) / SBAND;
+    ctx.fillStyle = Game.isNight ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.08)';
+    ctx.beginPath();
+    for (let si = 0; si < SBAND; si++) {
+      const tFrac = (si + 0.5) / SBAND;
+      const dist  = 1.0 / Math.max(0.001, tFrac);
+      if (Math.floor(dist * 7.0 + Game.laneOffset * 0.022) % 2 !== 1) continue;
+      const tTop = si / SBAND, tBot = (si + 1) / SBAND;
+      const y = horizonY + si * sbH;
+      ctx.moveTo(vpX - w * tTop / 2, y);
+      ctx.lineTo(vpX + w * tTop / 2, y);
+      ctx.lineTo(vpX + w * tBot / 2, y + sbH);
+      ctx.lineTo(vpX - w * tBot / 2, y + sbH);
+      ctx.closePath();
+    }
+    ctx.fill();
   }
 
-  // edges
-  ctx.fillStyle = '#f5d76e';
-  ctx.fillRect(x0 - 2, 0, 3, H);
-  ctx.fillRect(x1 - 1, 0, 3, H);
-
-  // dashed center line
-  ctx.fillStyle = Game.isNight ? t.lineNight : t.lineDay;
-  const cx = (x0 + x1) / 2;
-  const dashH = 28, gap = 32;
-  for (let y = -gap + Game.laneOffset; y < H + gap; y += dashH + gap) {
-    ctx.fillRect(cx - 3, y, 6, dashH);
+  // Rumble strips — red / white alternating at road edges (OutRun style)
+  {
+    const RS = 28, rsH = (H - horizonY) / RS;
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.fillStyle = pass === 0 ? '#b01818' : '#d4d4d4';
+      ctx.beginPath();
+      for (let ri = 0; ri < RS; ri++) {
+        const tFrac = (ri + 0.5) / RS;
+        const dist  = 1.0 / Math.max(0.001, tFrac);
+        if (Math.floor(dist * 5.2 + Game.laneOffset * 0.028) % 2 !== pass) continue;
+        const tTop = ri / RS, tBot = (ri + 1) / RS;
+        const hw0 = w * tTop / 2, hw1 = w * tBot / 2;
+        const rT = Math.max(0.5, hw0 * 0.044), rB = Math.max(0.5, hw1 * 0.044);
+        const y = horizonY + ri * rsH;
+        // left strip
+        ctx.moveTo(vpX - hw0,      y);       ctx.lineTo(vpX - hw0 + rT, y);
+        ctx.lineTo(vpX - hw1 + rB, y + rsH); ctx.lineTo(vpX - hw1,      y + rsH);
+        ctx.closePath();
+        // right strip
+        ctx.moveTo(vpX + hw0 - rT, y);       ctx.lineTo(vpX + hw0,      y);
+        ctx.lineTo(vpX + hw1,      y + rsH); ctx.lineTo(vpX + hw1 - rB, y + rsH);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
   }
 
-  // secondary lane guides — thinner dashes at ⅓ and ⅔ road width
-  const lineAlpha = Game.isNight ? 0.30 : 0.18;
-  ctx.fillStyle = `rgba(245,215,110,${lineAlpha})`;
-  const lane1x = x0 + w / 3;
-  const lane2x = x0 + (2 * w) / 3;
-  const dashH2 = 14, gap2 = 46;
-  for (let y = -gap2 + Game.laneOffset * 0.7; y < H + gap2; y += dashH2 + gap2) {
-    ctx.fillRect(lane1x - 1, y, 2, dashH2);
-    ctx.fillRect(lane2x - 1, y, 2, dashH2);
+  // Road surface cracks — perspective-scaled
+  {
+    const crackSeed = Math.floor(Game.laneOffset * 4);
+    ctx.fillStyle = Game.isNight ? t.crackNight : t.crackDay;
+    for (let i = 0; i < 10; i++) {
+      const tFrac = clamp(((i * 73 + crackSeed) % Math.max(1, Math.round(H - horizonY))) / (H - horizonY), 0.06, 1);
+      const cy    = horizonY + tFrac * (H - horizonY);
+      const hw    = w * tFrac / 2;
+      const crackW = Math.max(6, w * tFrac * 0.065);
+      const cx2   = vpX + ((i * 37) % Math.max(1, Math.round(hw * 1.6))) - hw * 0.8;
+      ctx.fillRect(cx2, cy, crackW, Math.max(1, tFrac * 3));
+    }
+  }
+
+  // Yellow road edge lines converging on the vanishing point
+  ctx.strokeStyle = '#f5d76e';
+  ctx.lineWidth = Math.max(1.5, w * 0.0052);
+  ctx.beginPath();
+  ctx.moveTo(vpX, horizonY); ctx.lineTo(x0bot - 1, H);
+  ctx.moveTo(vpX, horizonY); ctx.lineTo(x1bot + 1, H);
+  ctx.stroke();
+
+  // Dashed centre line — perspective accurate
+  {
+    const CDS = 28, cdH = (H - horizonY) / CDS;
+    ctx.fillStyle = Game.isNight ? t.lineNight : t.lineDay;
+    for (let ci = 0; ci < CDS; ci++) {
+      const tFrac = (ci + 0.5) / CDS;
+      const dist  = 1.0 / Math.max(0.001, tFrac);
+      if ((dist * 5.8 + Game.laneOffset * 0.02) % 1 > 0.52) continue;
+      const y     = horizonY + ci * cdH;
+      const dashW = Math.max(1, w * tFrac * 0.012);
+      ctx.fillRect(vpX - dashW / 2, y, dashW, cdH);
+    }
+  }
+
+  // Lane guide dashes at ⅓ and ⅔ — thinner, alpha-blended
+  {
+    const LGS = 24, lgH = (H - horizonY) / LGS;
+    const lineAlpha = Game.isNight ? 0.30 : 0.18;
+    ctx.fillStyle = `rgba(245,215,110,${lineAlpha})`;
+    for (let li = 0; li < LGS; li++) {
+      const tFrac = (li + 0.5) / LGS;
+      const dist  = 1.0 / Math.max(0.001, tFrac);
+      if ((dist * 4.8 + Game.laneOffset * 0.015) % 1 > 0.38) continue;
+      const y    = horizonY + li * lgH;
+      const hw   = w * tFrac / 2;
+      const lw   = Math.max(0.5, hw * 0.008);
+      ctx.fillRect(vpX - hw / 3 - lw / 2, y, lw, lgH);
+      ctx.fillRect(vpX + hw / 3 - lw / 2, y, lw, lgH);
+    }
+  }
+
+  // Atmospheric haze band — blends road surface into the sky at the horizon
+  {
+    const hazeG  = ctx.createLinearGradient(vpX, horizonY - 6, vpX, horizonY + H * 0.10);
+    const fogClr = Game.isNight
+      ? (t.fogNight || 'rgba(12,10,20,0.45)')
+      : (t.fogDay   || 'rgba(200,160,100,0.38)');
+    hazeG.addColorStop(0,    'rgba(0,0,0,0)');
+    hazeG.addColorStop(0.55, fogClr);
+    hazeG.addColorStop(1,    'rgba(0,0,0,0)');
+    ctx.fillStyle = hazeG;
+    ctx.fillRect(0, horizonY - 6, W, H * 0.10 + 6);
+  }
+
+  // Sun / VP glare bloom at the vanishing point (quality-gated, day only)
+  if (PerfMon.quality > 0.55 && !Game.isNight && !Game.isStorm) {
+    const glareG = ctx.createRadialGradient(vpX, horizonY, 0, vpX, horizonY, H * 0.20);
+    glareG.addColorStop(0,    'rgba(255,245,210,0.26)');
+    glareG.addColorStop(0.45, 'rgba(255,225,155,0.09)');
+    glareG.addColorStop(1,    'rgba(255,200,100,0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = glareG;
+    ctx.fillRect(vpX - H * 0.20, horizonY - H * 0.06, H * 0.40, H * 0.26);
+    ctx.restore();
   }
 }
 
