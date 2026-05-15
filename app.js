@@ -2886,8 +2886,8 @@ const Settings = {
   haptics: true,
   // 1.5x hit areas for menu buttons (accessibility)
   bigButtons: false,
-  // always fire while driving (assist)
-  autoFire: false,
+  // always fire while driving (assist — defaults on for touch devices)
+  autoFire: IS_TOUCH,
   // show incoming/outgoing damage numbers
   damageNumbers: true,
   // darker HUD backing + brighter labels for readability
@@ -3035,12 +3035,14 @@ const Haptics = {
     try { navigator.vibrate(pattern); } catch (_) {}
   },
   hit()      { this.vibrate(40); },         // player took damage
-  kill()     { this.vibrate(15); },         // small confirmation
+  kill()     { this.vibrate(15); },         // enemy killed (light confirmation)
+  fire()     { this.vibrate(6); },          // weapon fired (very light, only called on manual tap)
   pickup()   { this.vibrate([0, 12, 18, 12]); },
   scrap()    { this.vibrate(10); },
   death()    { this.vibrate([0, 80, 60, 120, 60, 200]); },
   bossWarn() { this.vibrate([0, 60, 40, 60, 40, 60]); },
   victory()  { this.vibrate([0, 30, 30, 30, 30, 80]); },
+  combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12); },
 };
 
 // ============================================================
@@ -3853,11 +3855,13 @@ function applyKill(x, y, baseScore) {
   // tier-up effects
   if (mult > prev) {
     SFX.combo(mult);
+    Haptics.combo(mult);
     addPopup('×' + mult + ' COMBO!', W * 0.5, H * 0.32, '#ffe07a', 22);
     Game.shake = Math.max(Game.shake, 0.4);
   }
   const label = (x2 > 1 ? 'x2 ' : '') + '+' + score + (mult > 1 ? ' ×' + mult : '');
   addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
+  Haptics.kill();
 }
 
 // ── Phase 4C: cinematic enemy explosion — multi-ring shockwaves + spark streaks + smoke puffs
@@ -4447,17 +4451,46 @@ function onPointerEnd(e) {
   activePointers.delete(e.pointerId);
   syncTouchInput();
 }
+// Touch control state — split-zone dual-thumb model
+// steerPt: {x, y} of the steering touch (left zone or solo touch)
+// fireActive: true when a fire touch is active (right zone or any second touch)
+let touchSteerPt  = null; // { x, y, id }
+let touchFireActive = false;
+
 function syncTouchInput() {
   if (activePointers.size === 0) {
     input.touchTargetX = null;
     input.touchTargetY = null;
     input.touchFire = false;
-  } else {
-    const pts = [...activePointers.values()];
-    const p = pts[pts.length - 1];
+    touchSteerPt = null;
+    touchFireActive = false;
+    return;
+  }
+
+  const pts = [...activePointers.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y }));
+
+  if (pts.length === 1) {
+    // Single touch → steer + fire (backward-compatible)
+    const p = pts[0];
+    touchSteerPt = p;
+    touchFireActive = true;
     input.touchTargetX = p.x;
     input.touchTargetY = p.y;
     input.touchFire = true;
+  } else {
+    // Multi-touch → split by screen half
+    const leftPts  = pts.filter(p => p.x < W * 0.5);
+    const rightPts = pts.filter(p => p.x >= W * 0.5);
+
+    const steerPt = leftPts.length  > 0 ? leftPts[leftPts.length - 1]   : pts[0];
+    touchSteerPt  = steerPt;
+    touchFireActive = rightPts.length > 0;
+
+    input.touchTargetX = steerPt.x;
+    input.touchTargetY = steerPt.y;
+    // In split mode, fire is handled by right zone; left zone only steers
+    // (autoFire covers continuous fire; right-zone touch adds explicit fire)
+    input.touchFire = touchFireActive;
   }
 }
 
@@ -5132,6 +5165,10 @@ function startRun(mode, level) {
   });
   SFX.start();
   requestWakeLock();
+  // Lock to landscape on mobile devices that support it (e.g. Android Chrome)
+  if (IS_MOBILE && screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
   pauseBtn.classList.remove('show');
   fsBtn.classList.add('hidden');
   UI.hideAllScreens();
@@ -5347,6 +5384,10 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   // into menus, garage previews, or subsequent non-daily runs.
   restoreRng();
   releaseWakeLock();
+  // Release orientation lock on run end
+  if (IS_MOBILE && screen.orientation && screen.orientation.unlock) {
+    try { screen.orientation.unlock(); } catch (_) {}
+  }
   pauseBtn.classList.remove('show');
   fsBtn.classList.remove('hidden');
   // award scrap (10% of score)
@@ -6721,8 +6762,13 @@ function update(dt) {
       if (input.touchTargetX !== null) {
         const target = clamp(input.touchTargetX, 0, W);
         const dx = target - p.x;
-        const desiredV = clamp(dx * 14, -maxV, maxV);
-        p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
+        // Dead zone: ±16px around current position to prevent micro-jitter
+        if (Math.abs(dx) > 16) {
+          const desiredV = clamp(dx * 14, -maxV, maxV);
+          p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
+        } else {
+          p.vx -= p.vx * Math.min(1, drag * dt);
+        }
       } else {
         p.vx -= p.vx * Math.min(1, drag * dt);
       }
@@ -6740,6 +6786,8 @@ function update(dt) {
   const wantsFire = input.fire || Settings.autoFire;
   if (!Game.spinout && wantsFire && Game.fireCooldown <= 0) {
     fireGuns();
+    // Light haptic on manual touch fire (not spammed on autoFire)
+    if (IS_TOUCH && input.touchFire && !Settings.autoFire) Haptics.fire();
     const rapidMul = isPowerupActive('rapid') ? 0.5 : 1;
     const overdriveMul = isPowerupActive('overdrive') ? 0.78 : 1;
     const siegeMul = isPowerupActive('siege') ? 0.45 : 1;
@@ -11269,11 +11317,99 @@ function drawHUD() {
   }
 }
 
-function drawPause() {
-  ctx.fillStyle = 'rgba(0,0,0,0.65)';
-  ctx.fillRect(0, 0, W, H);
+// ── Mobile on-canvas touch control overlay ──────────────────────────────────
+// Draws semi-transparent steering cursor + fire button for touch devices.
+// Only visible during active gameplay (called from render loop when IS_TOUCH).
+function drawTouchOverlay() {
+  if (!IS_TOUCH) return;
+  const t = Game.t || 0;
+  ctx.save();
+
+  // ── Left zone: steering cursor at active touch position ──
+  if (touchSteerPt !== null) {
+    const tx = clamp(touchSteerPt.x, 0, W * 0.55);
+    const ty = clamp(touchSteerPt.y, H * 0.25, H * 0.92);
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(tx, ty, 28, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(245,215,110,0.55)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Inner dot
+    ctx.beginPath();
+    ctx.arc(tx, ty, 7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(245,215,110,0.75)';
+    ctx.fill();
+    // Direction arrow toward player position
+    if (Game.player) {
+      const px = Game.player.x;
+      const dx = px - tx;
+      const ang = Math.atan2(0, dx); // horizontal only
+      ctx.strokeStyle = 'rgba(245,215,110,0.45)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(tx + Math.cos(ang) * 12, ty + Math.sin(ang) * 12);
+      ctx.lineTo(tx + Math.cos(ang) * 24, ty + Math.sin(ang) * 24);
+      ctx.stroke();
+    }
+  } else {
+    // Idle steering zone hint (fades in after first launch, stays subtle)
+    const hintA = 0.10 + 0.04 * Math.sin(t * 1.4);
+    const hx = W * 0.22, hy = H * 0.78;
+    ctx.strokeStyle = `rgba(245,215,110,${hintA})`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 8]);
+    ctx.beginPath();
+    ctx.arc(hx, hy, 32, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(245,215,110,${hintA * 0.8})`;
+    ctx.font = `bold 9px "Courier New", monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('STEER', hx, hy);
+  }
+
+  // ── Right zone: fire button (bottom-right quadrant) ──
+  const fireX = W * 0.82, fireY = H * 0.78;
+  const fireR = IS_MOBILE ? 30 : 26;
+  const fireActive = touchFireActive || (input.touchFire && activePointers.size === 1);
+  if (fireActive) {
+    // Active — bright pulse ring
+    const pulseR = fireR + 6 + 3 * Math.sin(t * 18);
+    ctx.beginPath();
+    ctx.arc(fireX, fireY, pulseR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,120,40,0.65)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(fireX, fireY, fireR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,100,30,0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,160,60,0.85)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else {
+    // Idle — subtle outline
+    const idleA = 0.12 + 0.05 * Math.sin(t * 1.2);
+    ctx.beginPath();
+    ctx.arc(fireX, fireY, fireR, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,130,50,${idleA * 4})`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 7]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // Fire button label
+  const labelA = fireActive ? 0.9 : 0.22;
+  ctx.fillStyle = `rgba(255,180,80,${labelA})`;
+  ctx.font = `bold ${IS_MOBILE ? 10 : 9}px "Courier New", monospace`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#f5d76e';
+  ctx.fillText(Settings.autoFire ? 'AUTO' : 'FIRE', fireX, fireY);
+
+  ctx.restore();
+}
+
+function drawPause() {
   ctx.font = 'bold 36px "Courier New", monospace';
   ctx.fillText('PAUSED', W/2, H/2);
   ctx.font = '12px "Courier New", monospace';
@@ -12003,6 +12139,8 @@ function render() {
       drawComboMeter();
       if (typeof SplitScreen !== 'undefined' && SplitScreen.isActive()) SplitScreen.drawOverlay(ctx, W, H);
       if (Game.state === 'replay') drawReplayOverlay();
+      // Mobile on-canvas touch control overlay
+      if (IS_TOUCH && Game.state === 'playing' && controlHintMode === 'touch') drawTouchOverlay();
     }
     if (Game.state === 'playing' && Game.paused) drawPause();
     if (Game.state === 'loading') drawLoadingOverlay();
