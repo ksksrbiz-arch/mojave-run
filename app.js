@@ -2668,6 +2668,8 @@ const Profile = {
     if (result.mode === 'zombie' && result.score > (p.bestZombie || 0)) p.bestZombie = result.score;
     if ((result.kills || 0) > (p.bestKills || 0)) p.bestKills = result.kills || 0;
     if ((result.comboBest || 0) > (p.bestCombo || 0)) p.bestCombo = result.comboBest || 0;
+    if ((result.nearMisses || 0) > (p.bestNearMisses || 0)) p.bestNearMisses = result.nearMisses || 0;
+    p.totalNearMisses = (p.totalNearMisses || 0) + (result.nearMisses || 0);
     if ((result.scrapEarned || 0) > (p.bestScrapRun || 0)) p.bestScrapRun = result.scrapEarned || 0;
     p.totalCivilianHits = (p.totalCivilianHits || 0) + (result.civiliansHit || 0);
     if ((result.civiliansHit || 0) > (p.maxCivilianHits || 0)) p.maxCivilianHits = result.civiliansHit || 0;
@@ -3870,6 +3872,7 @@ function applyKill(x, y, baseScore) {
     Haptics.combo(mult);
     addPopup('×' + mult + ' COMBO!', W * 0.5, H * 0.32, '#ffe07a', 22);
     Game.shake = Math.max(Game.shake, 0.4);
+    Game.comboPulseT = Settings.reducedMotion ? 0 : 0.55;
   }
   const label = (x2 > 1 ? 'x2 ' : '') + '+' + score + (mult > 1 ? ' ×' + mult : '');
   addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
@@ -4187,6 +4190,7 @@ function updatePowerups(dt) {
     Game.comboT -= dt;
     if (Game.comboT <= 0) { Game.combo = 0; Game.comboT = 0; }
   }
+  if (Game.comboPulseT > 0) Game.comboPulseT = Math.max(0, Game.comboPulseT - dt);
 }
 
 // Magnet: pull pickups toward player when active
@@ -5490,6 +5494,7 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
     comboBest: Math.floor(Game.comboBest || 0),
     scrapEarned: Math.floor(Game.scrapEarned || 0),
     civiliansHit: Math.floor(Game.civiliansHit || 0),
+    nearMisses: Math.floor(Game.nearMisses || 0),
     level: Game.level,
     victory: reason === 'victory',
     dailySeedKey: Game.dailySeedKey,
@@ -10849,19 +10854,31 @@ function drawComboMeter() {
   const fs = W < 500 ? 14 : 18;
   // position on the right side, below HUD
   ctx.save();
+  const pulse = Game.comboPulseT || 0;
+  const scale = pulse > 0 ? 1 + Math.min(0.18, pulse * 0.32) : 1;
   ctx.font = `bold ${fs}px "Courier New", monospace`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   const x = W - 14;
   const hudH = W < 500 ? 48 : 56;
   const y = hudH + 10;
+  if (scale !== 1) {
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.translate(-x, -y);
+  }
   // shadow
   ctx.fillStyle = '#1a0f08';
   ctx.fillText(txt, x + 2, y + 2);
   // body
   const c = m >= 5 ? '#ff8a3d' : m >= 3 ? '#ffe07a' : '#f5d76e';
+  if (pulse > 0) {
+    ctx.shadowColor = c;
+    ctx.shadowBlur = 10 + pulse * 12;
+  }
   ctx.fillStyle = c;
   ctx.fillText(txt, x, y);
+  ctx.shadowBlur = 0;
   // countdown bar under text
   const w = 110, h = 3;
   const pct = Game.comboT / COMBO_WINDOW;
@@ -13178,6 +13195,7 @@ const UI = {
     }
     rows.push(['KILLS', Game.kills, false]);
     rows.push(['INNOCENTS HIT', Game.civiliansHit || 0, false]);
+    if ((Game.nearMisses || 0) > 0) rows.push(['NEAR MISSES', Game.nearMisses, false]);
     rows.push(['TOP COMBO', (Game.comboBest || 0) + KILL_STREAK_LABEL, false]);
     rows.push(['MOJAVE REP', getWastelandReputation(), false]);
     const bestMoment = (() => {
