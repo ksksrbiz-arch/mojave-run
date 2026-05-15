@@ -6867,6 +6867,37 @@ function update(dt) {
     }
     p.vx = clamp(p.vx, -maxV, maxV);
     p.x += p.vx * dt;
+    // Drift charge: held-direction high-speed steering builds a small meter
+    // that fires a brief nitro tick + score popup at full. Charge decays
+    // quickly when steering relaxes or direction flips.
+    {
+      const vxAbs = Math.abs(p.vx);
+      const speedFrac = (Game.speed || 0) / 460;
+      const dir = p.vx > 80 ? 1 : p.vx < -80 ? -1 : 0;
+      if (dir !== 0 && speedFrac > 0.55 && !Game.spinout) {
+        if (Game.driftLastDir !== dir) {
+          Game.driftCharge = Math.max(0, (Game.driftCharge || 0) * 0.4);
+        }
+        Game.driftLastDir = dir;
+        const gain = (vxAbs / Math.max(1, maxV)) * speedFrac * 55 * dt;
+        Game.driftCharge = Math.min(100, (Game.driftCharge || 0) + gain);
+        if (Game.driftCharge >= 100) {
+          Game.driftCharge = 0;
+          Game.targetSpeed = Math.min((Game.targetSpeed || 0) + 60, 520);
+          const bonus = 120;
+          Game.score += bonus;
+          addPopup('DRIFT BOOST +' + bonus, p.x, p.y - 70, '#7af0ff', 16);
+          SFX.nitroOn && SFX.nitroOn();
+          Haptics.combo(2);
+          if (!Settings.reducedMotion) {
+            emit(p.x, p.y + p.h * 0.35, 14, { color:'#7af0ff', speed:240, life:0.4, size:3, shape:'spark', spread:Math.PI });
+          }
+        }
+      } else {
+        Game.driftCharge = Math.max(0, (Game.driftCharge || 0) - 35 * dt);
+        if (Game.driftCharge <= 0.5) Game.driftLastDir = 0;
+      }
+    }
     const { x0, x1 } = roadBounds();
     if (p.x - p.w/2 < x0 + 4) {
       p.x = x0 + 4 + p.w/2;
