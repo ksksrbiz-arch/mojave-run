@@ -10930,6 +10930,45 @@ function drawPowerupStrip() {
   ctx.restore();
 }
 
+// Soft pulsing ring around the player while the MAGNET power-up is active.
+// Communicates the pickup-pull radius without being expensive — single radial
+// gradient plus a thin outline. Quality-gated and skipped when reducedMotion
+// is enabled.
+function drawPlayerMagnetAura() {
+  const p = Game.player;
+  if (!p) return;
+  if (!isPowerupActive('magnet')) return;
+  if (Settings.particles <= 0.05) return;
+  const mp = Game.powerups && Game.powerups.magnet;
+  if (!mp) return;
+  const baseR = 240;
+  const range = baseR * (Game.magnetRangeMul || 1);
+  const cx = p.x;
+  const cy = p.y + p.h * 0.45;
+  const pulse = Settings.reducedMotion ? 0.5 : (0.5 + 0.5 * Math.sin(Game.t * 4));
+  const a = 0.10 + pulse * 0.10;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(cx, cy, range * 0.55, cx, cy, range);
+  g.addColorStop(0, `rgba(255,180,90,0)`);
+  g.addColorStop(0.7, `rgba(255,180,90,${a * 0.7})`);
+  g.addColorStop(1, `rgba(255,180,90,0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, range, 0, Math.PI * 2);
+  ctx.fill();
+  // Thin dashed outline at the edge
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = `rgba(255,200,120,${0.18 + pulse * 0.12})`;
+  ctx.lineWidth = 1.25;
+  if (ctx.setLineDash) ctx.setLineDash([6, 8]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, range, 0, Math.PI * 2);
+  ctx.stroke();
+  if (ctx.setLineDash) ctx.setLineDash([]);
+  ctx.restore();
+}
+
 // Soft elliptical drop shadow under the player vehicle. Pure visual polish —
 // no game logic depends on it. We draw a radial gradient so the edge is
 // feathered rather than a hard offset rectangle.
@@ -12169,6 +12208,8 @@ function render() {
       // used to sit behind the chassis. Quality-gated via Settings.particles
       // so very-low quality skips the extra fill.
       drawPlayerGroundShadow();
+      // MAGNET aura: pulsing pickup-pull ring while the power-up is active.
+      drawPlayerMagnetAura();
       // NITRO afterimage trail: faint vehicle silhouettes at recent player
       // positions, oldest = most transparent. Captured in update() and only
       // drawn while at least one entry exists.
