@@ -12958,6 +12958,97 @@ const UI = {
     });
   },
 
+  // ---- FLEET ----
+  // A bird's-eye overview of every vehicle the driver owns (and the rest of
+  // the roster). Each row shows a mini preview, upgrade tier pips, and quick
+  // EQUIP / UPGRADE shortcuts so the driver doesn't have to tab through the
+  // full garage to swap rides.
+  _fleetTab: 'owned',
+  showFleet(tab) {
+    const p = Profile.active(); if (!p) return;
+    if (tab) this._fleetTab = tab;
+    if (this._fleetTab !== 'owned' && this._fleetTab !== 'all') this._fleetTab = 'owned';
+    document.getElementById('fleet-scrap').textContent = p.scrap;
+    document.querySelectorAll('[data-fleet-tab]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.fleetTab === this._fleetTab);
+    });
+
+    // Summary stats — owned count, total upgrade tiers built, mastered rides.
+    const ownedIds = VEHICLES.filter(v => p.ownedVehicles[v.id]).map(v => v.id);
+    const totalTiers = ownedIds.reduce(
+      (s, id) => s + totalUpgradeTiers(p.vehicleUpgrades[id] || {}), 0);
+    const maxTiersPerVehicle = 5 * 4; // 5 tiers across 4 tracks
+    const masteredCount = ownedIds.filter(id =>
+      totalUpgradeTiers(p.vehicleUpgrades[id] || {}) >= maxTiersPerVehicle).length;
+    document.getElementById('fleet-summary').innerHTML =
+      `<b>${ownedIds.length}</b>/${VEHICLES.length} OWNED &nbsp;&middot;&nbsp; ` +
+      `<b>${totalTiers}</b> TIERS BUILT &nbsp;&middot;&nbsp; ` +
+      `<b>${masteredCount}</b> MASTERED`;
+
+    const list = document.getElementById('fleet-list');
+    list.innerHTML = '';
+    const rows = (this._fleetTab === 'owned')
+      ? VEHICLES.filter(v => p.ownedVehicles[v.id])
+      : VEHICLES.slice();
+    if (rows.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'small center';
+      empty.style.padding = '20px 6px';
+      empty.textContent = 'NO RIDES OWNED YET — VISIT THE GARAGE';
+      list.appendChild(empty);
+    }
+    rows.forEach(v => {
+      const owned = !!p.ownedVehicles[v.id];
+      const selected = owned && p.activeVehicle === v.id;
+      const ups = p.vehicleUpgrades[v.id] || {};
+      const tiers = totalUpgradeTiers(ups);
+      const mastered = owned && tiers >= maxTiersPerVehicle;
+      const row = document.createElement('div');
+      row.className = 'fleet-row'
+        + (selected ? ' selected' : '')
+        + (!owned ? ' locked' : '')
+        + (mastered ? ' master' : '');
+
+      const tags = [];
+      if (selected) tags.push('<span class="fl-tag equipped">EQUIPPED</span>');
+      else if (owned) tags.push('<span class="fl-tag">OWNED</span>');
+      else tags.push('<span class="fl-tag locked">LOCKED</span>');
+      if (mastered) tags.push('<span class="fl-tag master">MASTER</span>');
+      if (v.master) tags.push('<span class="fl-tag">MASTER-CLASS</span>');
+
+      let pips = '';
+      for (let i = 0; i < maxTiersPerVehicle; i++) {
+        pips += `<span class="pip${i < tiers ? ' filled' : ''}"></span>`;
+      }
+
+      let actions = '';
+      if (owned) {
+        if (!selected) actions += `<button class="btn" data-act="fleet-equip" data-vid="${v.id}">EQUIP</button>`;
+        actions += `<button class="btn${selected ? ' primary' : ''}" data-act="fleet-upgrade" data-vid="${v.id}">UPGRADE</button>`;
+      } else {
+        actions += `<button class="btn" data-act="menu-garage">GARAGE</button>`;
+      }
+
+      row.innerHTML = `
+        <div class="fl-prev"><canvas width="78" height="54"></canvas></div>
+        <div class="fl-meta">
+          <div class="fl-name">${v.name}${selected ? ' \u25c0' : ''}</div>
+          <div class="fl-tags">${tags.join('')}</div>
+          <div class="fl-tiers" title="${tiers}/${maxTiersPerVehicle} upgrade tiers">${pips}</div>
+        </div>
+        <div class="fl-actions">${actions}</div>
+      `;
+      list.appendChild(row);
+      try {
+        renderVehiclePreview(row.querySelector('canvas'), v.id, p.cosmetics, {
+          size: { w: 78, h: 54 }, bay: false, label: false,
+        });
+      } catch (_) { /* preview rendering is best-effort */ }
+    });
+
+    this.show('fleet');
+  },
+
   // ---- UPGRADE ----
   showUpgrade(vehicleId) {
     const p = Profile.active(); if (!p || !p.ownedVehicles[vehicleId]) return;
@@ -13659,6 +13750,22 @@ const UI = {
       case 'menu-garage':
         UI.showGarage();
         break;
+      case 'menu-fleet':
+        UI.showFleet();
+        break;
+      case 'fleet-equip': {
+        const vid = data;
+        if (vid && Profile.selectVehicle(vid)) {
+          UI.toast('EQUIPPED ' + VEHICLE_BY_ID[vid].name);
+        }
+        UI.showFleet();
+        break;
+      }
+      case 'fleet-upgrade': {
+        const vid = data;
+        if (vid) UI.showUpgrade(vid);
+        break;
+      }
       case 'menu-stats':
         UI.showStats();
         break;

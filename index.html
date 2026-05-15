@@ -424,6 +424,41 @@
   .stat-bar .fill{height:100%;background:var(--gold)}
   .stat-bar .num{width:34px;text-align:right;color:var(--gold)}
 
+  /* FLEET rows */
+  .fleet-row{
+    display:grid;
+    grid-template-columns:78px 1fr auto;
+    gap:10px;align-items:center;
+    padding:10px 12px;
+    background:rgba(0,0,0,.45);
+    border:1px solid var(--gold-faint);
+    border-radius:6px;
+    transition:border-color .15s,background .15s,box-shadow .15s,transform .15s;
+  }
+  .fleet-row.selected{border-color:var(--gold);background:rgba(245,215,110,.07);box-shadow:0 0 14px rgba(245,215,110,.18)}
+  .fleet-row.locked{opacity:.55}
+  .fleet-row.master{border-color:#7aff5a}
+  .fleet-row .fl-prev{
+    width:78px;height:54px;border-radius:4px;overflow:hidden;
+    background:linear-gradient(180deg,#0c0a08,#1a120a 60%,#0a0604);
+    border:1px solid rgba(245,215,110,.2);position:relative;
+  }
+  .fleet-row .fl-prev canvas{position:absolute;inset:0;width:100% !important;height:100% !important}
+  .fleet-row .fl-meta{min-width:0}
+  .fleet-row .fl-name{font-weight:bold;letter-spacing:1.5px;font-size:13px;color:var(--gold)}
+  .fleet-row .fl-tags{font-size:9px;letter-spacing:1px;color:var(--gold-dim);margin-top:3px;display:flex;flex-wrap:wrap;gap:6px}
+  .fleet-row .fl-tag{padding:1px 6px;border:1px solid var(--gold-faint);border-radius:2px}
+  .fleet-row .fl-tag.equipped{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+  .fleet-row .fl-tag.master{background:#7aff5a;color:#0a1a06;border-color:#7aff5a;font-weight:900}
+  .fleet-row .fl-tag.locked{color:var(--rust);border-color:rgba(168,106,46,.55)}
+  .fleet-row .fl-tiers{display:flex;gap:3px;margin-top:5px}
+  .fleet-row .fl-tiers .pip{width:8px;height:8px;border:1px solid var(--gold-faint);border-radius:2px;background:rgba(0,0,0,.5)}
+  .fleet-row .fl-tiers .pip.filled{background:var(--gold);border-color:var(--gold);box-shadow:0 0 6px rgba(245,215,110,.5)}
+  .fleet-row .fl-actions{display:flex;flex-direction:column;gap:4px;min-width:88px}
+  .fleet-row .fl-actions .btn{min-height:32px;padding:6px 8px;font-size:10px;letter-spacing:1px}
+  .fleet-tab{min-height:38px;padding:8px 6px;font-size:10px;letter-spacing:1px;flex:1}
+  .fleet-tab.active{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+
   /* UPGRADE row */
   .up-row{
     background:rgba(0,0,0,.4);
@@ -1189,6 +1224,7 @@
       <button class="btn" data-act="menu-campaign">CAMPAIGN <span class="sub">US ROAD STORY</span></button>
       <button class="btn" data-act="menu-fleet">FLEET <span class="sub" id="menu-fleet-sub">OVERVIEW</span></button>
       <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
+      <button class="btn" data-act="menu-fleet">FLEET <span class="sub" id="menu-fleet-sub">VIEW ALL RIDES</span></button>
       <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
       <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
       <button class="btn" data-act="menu-stats">STATS</button>
@@ -1222,6 +1258,24 @@
       </div>
       <div id="vehicle-list" style="display:flex;flex-direction:column;gap:12px"></div>
       <div id="cosmetic-list" style="display:none;flex-direction:column;gap:10px"></div>
+      <div style="height:8px"></div>
+      <button class="btn" data-act="back-menu">◄ BACK TO MENU</button>
+    </div>
+  </div>
+
+  <!-- ===== FLEET ===== -->
+  <div class="screen" id="screen-fleet">
+    <div class="inner">
+      <div class="profile-bar">
+        <div class="name">FLEET</div>
+        <div class="scrap" id="fleet-scrap-bar">SCRAP <b id="fleet-scrap">0</b></div>
+      </div>
+      <div class="small center" id="fleet-summary" style="margin-bottom:6px"></div>
+      <div class="fleet-tabs" style="display:flex;gap:6px;margin-bottom:6px">
+        <button class="btn fleet-tab active" data-fleet-tab="owned">OWNED</button>
+        <button class="btn fleet-tab" data-fleet-tab="all">ALL</button>
+      </div>
+      <div id="fleet-list" style="display:flex;flex-direction:column;gap:8px"></div>
       <div style="height:8px"></div>
       <button class="btn" data-act="back-menu">◄ BACK TO MENU</button>
     </div>
