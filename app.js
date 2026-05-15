@@ -12777,6 +12777,11 @@ const UI = {
     document.getElementById('menu-character-sub').textContent = (ch ? ch.name : '') + ' ◢';
     const v = VEHICLE_BY_ID[p.activeVehicle];
     document.getElementById('menu-garage-sub').textContent = (v ? v.name : '') + ' ◢';
+    const _fleetSub = document.getElementById('menu-fleet-sub');
+    if (_fleetSub) {
+      const _ownedN = VEHICLES.filter(vv => p.ownedVehicles[vv.id]).length;
+      _fleetSub.textContent = _ownedN + ' / ' + VEHICLES.length + ' OWNED ◢';
+    }
     const _sk = p.activeSidekick ? SIDEKICK_BY_ID[p.activeSidekick] : null;
     const _skSub = document.getElementById('menu-sidekick-sub');
     if (_skSub) _skSub.textContent = _sk ? _sk.name + ' ◢' : 'NONE ◢';
@@ -13023,8 +13028,8 @@ const UI = {
 
       let actions = '';
       if (owned) {
-        if (!selected) actions += `<button class="btn" data-act="fleet-equip" data-vid="${v.id}">EQUIP</button>`;
-        actions += `<button class="btn${selected ? ' primary' : ''}" data-act="fleet-upgrade" data-vid="${v.id}">UPGRADE</button>`;
+        if (!selected) actions += `<button class="btn" data-act="fleet-equip" data-data="${v.id}">EQUIP</button>`;
+        actions += `<button class="btn${selected ? ' primary' : ''}" data-act="fleet-upgrade" data-data="${v.id}">UPGRADE</button>`;
       } else {
         actions += `<button class="btn" data-act="menu-garage">GARAGE</button>`;
       }
@@ -14360,6 +14365,12 @@ document.addEventListener('click', e => {
   if (gt) {
     SFX.click();
     UI.showGarage(gt.dataset.garageTab);
+    return;
+  }
+  const ft = e.target.closest('[data-fleet-tab]');
+  if (ft) {
+    SFX.click();
+    UI.showFleet(ft.dataset.fleetTab);
     return;
   }
   const ca = e.target.closest('[data-cact]');
@@ -17333,6 +17344,8 @@ const WASTELAND_RUN_MUTATORS = [
   { id:'overclocked',    name:'OVERCLOCKED',        desc:'Player shot cooldowns shorten sharply. Enemy durability rises.', weight:2 },
   { id:'graveyardshift', name:'GRAVEYARD SHIFT',    desc:'Night never ends and zombie raids pulse in extended waves.',     weight:2 },
   { id:'convoytax',      name:'CONVOY TAX',         desc:'Extra scrap income, but incoming damage is increased.',         weight:2 },
+  { id:'glasscannon',    name:'GLASS CANNON',       desc:'Damage dealt ×1.6 — damage taken ×1.5.',                        weight:2 },
+  { id:'headhunter',     name:'HEADHUNTER',         desc:'Kills score ×1.5. First civilian struck ends the run.',         weight:2 },
 ];
 
 // Get a deterministic set of mutators for a given Wasteland Run seed.
@@ -17759,6 +17772,8 @@ function applyWastelandRunStartBonuses() {
   if (hasMutator('overclocked')) { Game.enemyHpMul *= 1.20; weaponSpecState.fireRateMul = (weaponSpecState.fireRateMul || 1) * 0.75; }
   if (hasMutator('graveyardshift')) Game.isNight = true;
   if (hasMutator('convoytax')) { Game.scrapMul *= 1.60; Game.damageTakenMul *= 1.15; }
+  if (hasMutator('glasscannon')) { Game.killScoreMul *= 1.10; Game.vehicleStats.dmg *= 1.60; Game.damageTakenMul *= 1.50; }
+  if (hasMutator('headhunter')) { Game.killScoreMul *= 1.50; Game.scoreMul *= 1.15; }
 }
 
 function pickWastelandRunBiome(seedKey) {
