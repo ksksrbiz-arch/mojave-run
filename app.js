@@ -3703,16 +3703,19 @@ function getWindingRoadShift(y = H * 0.5) {
 
 function emit(x, y, n, opts = {}) {
   n = Math.max(1, Math.round(n * PARTICLE_SCALE * Settings.particles));
-  const { color='#f5d76e', speed=180, life=0.6, size=3, spread=Math.PI*2, gravity=0 } = opts;
+  const { color='#f5d76e', speed=180, life=0.6, size=3, spread=Math.PI*2, gravity=0, shape } = opts;
   for (let i = 0; i < n; i++) {
     const ang = rand(0, spread) - (spread === Math.PI*2 ? 0 : spread/2 - Math.PI/2);
     const sp = rand(speed * 0.3, speed);
-    Game.particles.push({
+    const p = {
       x, y,
       vx: Math.cos(ang)*sp, vy: Math.sin(ang)*sp,
       life, max: life, size: size * rand(0.6, 1.2),
       color, gravity,
-    });
+    };
+    if (shape) p.shape = shape;
+    if (shape === 'rect') p.rot = rand(0, Math.PI * 2);
+    Game.particles.push(p);
   }
 }
 
@@ -10883,6 +10886,84 @@ function drawComboAura() {
   ctx.fillRect(0, 0, W, H);
 }
 
+// ── Phase 6A: Motion-blur speed lines radiating from VP + edge vignette
+function drawSpeedLines() {
+  if (Game.mode === 'arena' || !Game.player) return;
+  const speedN = clamp(Game.speed / 460, 0, 1);
+  if (speedN < 0.35 || PerfMon.quality < 0.25) return;
+  const intensity = clamp((speedN - 0.35) / 0.65, 0, 1);
+  const vpX = W * 0.5;
+  const vpY = H * 0.42;
+  const lineCount = Math.round(10 + intensity * 18);
+  const tOffset = (Game.t || 0) * 0.55;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let li = 0; li < lineCount; li++) {
+    const ang = (li / lineCount) * Math.PI * 2 + tOffset * 0.3;
+    // Only draw lines in the bottom half (road area)
+    if (ang > 0.15 && ang < Math.PI - 0.15) continue;
+    const near = H * (0.08 + intensity * 0.10);
+    const far  = H * (0.35 + intensity * 0.40);
+    const jitter = Math.sin((Game.t || 0) * 12 + li * 1.7) * 0.05;
+    const ax = Math.cos(ang + jitter), ay = Math.sin(ang + jitter);
+    const lg = ctx.createLinearGradient(
+      vpX + ax * near, vpY + ay * near,
+      vpX + ax * far,  vpY + ay * far
+    );
+    const lineA = intensity * (0.05 + 0.06 * ((li % 3) === 0 ? 1 : 0.4));
+    lg.addColorStop(0, `rgba(255,240,200,0)`);
+    lg.addColorStop(0.3, `rgba(255,240,200,${lineA})`);
+    lg.addColorStop(1, `rgba(255,220,150,0)`);
+    ctx.strokeStyle = lg;
+    ctx.lineWidth = (li % 5 === 0) ? 2.5 : 1;
+    ctx.beginPath();
+    ctx.moveTo(vpX + ax * near, vpY + ay * near);
+    ctx.lineTo(vpX + ax * far,  vpY + ay * far);
+    ctx.stroke();
+  }
+  // Edge vignette at high speed
+  const vigA = intensity * 0.22;
+  const vg = ctx.createRadialGradient(W * 0.5, H * 0.55, Math.min(W,H) * 0.28, W * 0.5, H * 0.55, Math.max(W,H) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, `rgba(0,0,0,${vigA})`);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+// ── Phase 5C + 6C: Biome colour grading — warm/cool tint keyed to biome + time-of-day
+function drawBiomeColorGrade() {
+  if (Game.mode === 'arena') return;
+  const t = activeBiomeTheme();
+  // Per-biome tint palette
+  const biome = Game.biome || 'wastes';
+  const tintMap = {
+    wastes:       Game.isNight ? [20,10,5,0.035]  : [255,195,100,0.028],
+    neonruins:    Game.isNight ? [0,160,255,0.040] : [40,180,255,0.022],
+    irradiated:   Game.isNight ? [80,200,0,0.038]  : [120,220,40,0.025],
+    thunderplains:Game.isNight ? [80,100,255,0.038]: [130,160,255,0.025],
+    frostwaste:   Game.isNight ? [170,210,255,0.040]: [200,230,255,0.022],
+    scraparch:    Game.isNight ? [255,160,30,0.038] : [255,180,60,0.025],
+    midnight:     [80,100,200,0.045],
+  };
+  const tint = tintMap[biome] || tintMap.wastes;
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = `rgba(${tint[0]},${tint[1]},${tint[2]},${tint[3]})`;
+  ctx.fillRect(0, 0, W, H);
+  // Subtle sun-warm gradient from VP downward (daytime only)
+  if (!Game.isNight && !Game.isStorm) {
+    const vpY = H * 0.42;
+    const warmG = ctx.createLinearGradient(0, vpY, 0, vpY + H * 0.30);
+    warmG.addColorStop(0, 'rgba(255,190,80,0.018)');
+    warmG.addColorStop(1, 'rgba(255,190,80,0)');
+    ctx.fillStyle = warmG;
+    ctx.fillRect(0, vpY, W, H * 0.30);
+  }
+  ctx.restore();
+}
+
 function drawNitroOverlay() {
   if (!isPowerupActive('nitro')) return;
   // chromatic edges + speed lines (lines done via particles in update)
@@ -11098,6 +11179,55 @@ function drawHUD() {
   ctx.fillStyle = cineHud ? '#ffe6ad' : '#fff3b0';
   ctx.font = 'bold 9px "Courier New", monospace';
   ctx.fillText('HULL ' + Math.ceil(Game.health) + '/' + Game.maxHealth, W/2, hbY + hbH + 10);
+
+  // ── Phase 6D: Health bar live-pulse shimmer when health just changed
+  if (Game.hitFlash > 0 && visualQualityLevel() >= 1) {
+    const hpPulse = clamp(Game.hitFlash / 0.35, 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = hpPulse * 0.45;
+    const hpShine = ctx.createLinearGradient(hbX, hbY, hbX + hbW * pct, hbY);
+    hpShine.addColorStop(0,   'rgba(255,255,255,0)');
+    hpShine.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+    hpShine.addColorStop(1,   'rgba(255,255,255,0)');
+    ctx.fillStyle = hpShine;
+    pathRoundRect(hbX, hbY, hbW * pct, hbH, 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Phase 6D: Speed needle arc (bottom-right corner, compact)
+  if ((Game.mode === 'classic' || Game.mode === 'winding' || Game.mode === 'gauntlet') && visualQualityLevel() >= 1) {
+    const sR = Math.min(28, W * 0.055);
+    const sX = W - sR - 10, sY = hudH - sR * 0.15;
+    const speedN = clamp(Game.speed / 460, 0, 1);
+    const startAng = Math.PI * 0.72, sweepAng = Math.PI * 0.56;
+    ctx.save();
+    // Track arc
+    ctx.strokeStyle = 'rgba(60,44,28,0.8)';
+    ctx.lineWidth = Math.max(2, sR * 0.20);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(sX, sY, sR, Math.PI + startAng, Math.PI + startAng + sweepAng);
+    ctx.stroke();
+    // Fill arc
+    const needleColor = speedN > 0.80 ? '#ff5050' : speedN > 0.55 ? '#f5d76e' : '#7af07a';
+    ctx.strokeStyle = needleColor;
+    ctx.lineWidth = Math.max(2, sR * 0.18);
+    ctx.beginPath();
+    ctx.arc(sX, sY, sR, Math.PI + startAng, Math.PI + startAng + sweepAng * speedN);
+    ctx.stroke();
+    // Needle dot
+    const nAng = Math.PI + startAng + sweepAng * speedN;
+    ctx.fillStyle = needleColor;
+    ctx.beginPath(); ctx.arc(sX + Math.cos(nAng) * sR, sY + Math.sin(nAng) * sR, sR * 0.16, 0, Math.PI * 2); ctx.fill();
+    // Speed label
+    ctx.fillStyle = 'rgba(245,215,110,0.75)';
+    ctx.font = `bold ${Math.round(sR * 0.38)}px "Courier New", monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(Math.round(Game.speed), sX, sY + sR * 0.14);
+    ctx.restore();
+  }
 
   // boss bar (top)
   if (Game.boss && Game.boss.y >= Game.boss.targetY - 5) {
@@ -11851,6 +11981,11 @@ function render() {
       ctx.fillRect(0, 0, W, H);
     }
     ctx.restore();
+
+    // ── Phase 6A: Motion-blur speed lines (screen-space, outside world transform)
+    if (Game.mode !== 'arena') drawSpeedLines();
+    // ── Phase 5C + 6C: Biome colour grading
+    if (Game.state === 'playing' || Game.state === 'replay') drawBiomeColorGrade();
 
     // vignette (cached gradient — rebuilt on resize)
     ctx.fillStyle = VIGNETTE_PLAY;
