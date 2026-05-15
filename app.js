@@ -3889,10 +3889,23 @@ function awardNearMiss(e) {
   e.nearMissed = true;
   Game.nearMisses = (Game.nearMisses || 0) + 1;
   Game.comboT = Math.max(Game.comboT || 0, COMBO_WINDOW * 0.45);
-  const bonus = 25 + Math.min(75, (Game.combo || 0) * 2);
-  Game.score += bonus;
-  addPopup('NEAR MISS +' + bonus, p.x, p.y - 54, '#7af0ff', 12);
+  // Chain streak: consecutive near-misses within 2s scale the bonus and decay.
   const now = Game.t || 0;
+  const streakWindow = 2.0;
+  if (now - (Game._lastNearMissAtT || -99) <= streakWindow) {
+    Game.nearMissStreak = Math.min(8, (Game.nearMissStreak || 0) + 1);
+  } else {
+    Game.nearMissStreak = 1;
+  }
+  Game._lastNearMissAtT = now;
+  Game.nearMissStreakT = streakWindow;
+  const streakMul = 1 + (Game.nearMissStreak - 1) * 0.25;
+  const bonus = Math.round((25 + Math.min(75, (Game.combo || 0) * 2)) * streakMul);
+  Game.score += bonus;
+  const label = Game.nearMissStreak > 1
+    ? 'NEAR MISS ×' + Game.nearMissStreak + ' +' + bonus
+    : 'NEAR MISS +' + bonus;
+  addPopup(label, p.x, p.y - 54, '#7af0ff', 12);
   if (now - (Game._lastNearMissFeedbackT || 0) > 0.18) {
     Game._lastNearMissFeedbackT = now;
     SFX.nearMiss();
@@ -4191,6 +4204,10 @@ function updatePowerups(dt) {
     if (Game.comboT <= 0) { Game.combo = 0; Game.comboT = 0; }
   }
   if (Game.comboPulseT > 0) Game.comboPulseT = Math.max(0, Game.comboPulseT - dt);
+  if (Game.nearMissStreakT > 0) {
+    Game.nearMissStreakT = Math.max(0, Game.nearMissStreakT - dt);
+    if (Game.nearMissStreakT <= 0) Game.nearMissStreak = 0;
+  }
 }
 
 // Magnet: pull pickups toward player when active
@@ -4652,6 +4669,8 @@ const Game = {
   kills: 0,
   civiliansHit: 0,
   nearMisses: 0,
+  nearMissStreak: 0,
+  nearMissStreakT: 0,
   speed: 280,
   targetSpeed: 280,
   health: 100,
@@ -5023,6 +5042,9 @@ function startRun(mode, level) {
   Game.distance = 0;
   Game.kills = 0;
   Game.nearMisses = 0;
+  Game.nearMissStreak = 0;
+  Game.nearMissStreakT = 0;
+  Game._lastNearMissAtT = -99;
   Game._lastNearMissFeedbackT = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
