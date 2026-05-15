@@ -3030,19 +3030,23 @@ const BrowserPerfHelper = {
 // battery & UX (no buzz spam during heavy combat).
 const Haptics = {
   _can: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
-  vibrate(pattern) {
+  _last: Object.create(null),
+  vibrate(pattern, key = 'default', minMs = 0) {
     if (!this._can || !Settings.haptics) return;
+    const now = perfNow();
+    if (minMs > 0 && now - (this._last[key] || 0) < minMs) return;
+    this._last[key] = now;
     try { navigator.vibrate(pattern); } catch (_) {}
   },
-  hit()      { this.vibrate(40); },         // player took damage
-  kill()     { this.vibrate(15); },         // enemy killed (light confirmation)
-  fire()     { this.vibrate(6); },          // weapon fired (very light, only called on manual tap)
-  pickup()   { this.vibrate([0, 12, 18, 12]); },
-  scrap()    { this.vibrate(10); },
-  death()    { this.vibrate([0, 80, 60, 120, 60, 200]); },
-  bossWarn() { this.vibrate([0, 60, 40, 60, 40, 60]); },
-  victory()  { this.vibrate([0, 30, 30, 30, 30, 80]); },
-  combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12); },
+  hit()      { this.vibrate(40, 'hit', 180); },         // player took damage
+  kill()     { this.vibrate(15, 'kill', 90); },         // enemy killed (light confirmation)
+  fire()     { this.vibrate(6, 'fire', 120); },         // manual tap-fire only
+  pickup()   { this.vibrate([0, 12, 18, 12], 'pickup', 120); },
+  scrap()    { this.vibrate(10, 'scrap', 90); },
+  death()    { this.vibrate([0, 80, 60, 120, 60, 200], 'death', 0); },
+  bossWarn() { this.vibrate([0, 60, 40, 60, 40, 60], 'bossWarn', 900); },
+  victory()  { this.vibrate([0, 30, 30, 30, 30, 80], 'victory', 0); },
+  combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12, 'combo', 260); },
 };
 
 // ============================================================
@@ -3264,6 +3268,7 @@ function resize() {
   const wantedDpr = (window.devicePixelRatio || 1) * renderScale;
   const nextDpr = Math.round(Math.min(DPR_CAP, Math.max(MIN_DPR, wantedDpr)) * 100) / 100;
   const sameSize = (nextW === W && nextH === H);
+  const sizeChanged = !sameSize;
   const tinyDprChange = Math.abs(nextDpr - DPR) < DPR_CHANGE_THRESHOLD;
   if (sameSize && tinyDprChange) return;
   DPR = nextDpr;
@@ -3275,6 +3280,10 @@ function resize() {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   rebuildGradients();
+  if (sizeChanged && activePointers && activePointers.size) {
+    activePointers.clear();
+    syncTouchInput();
+  }
   if (Game.player) {
     if (Game.mode === 'arena' && Game.world) {
       // Arena player is free-roaming; clamp to world bounds (resize-safe).
@@ -11435,6 +11444,32 @@ function drawTouchOverlay() {
   ctx.restore();
 }
 
+function drawMobileOrientationHint() {
+  if (!IS_MOBILE || W >= H || Game.paused) return;
+  const t = Game.t || 0;
+  const a = 0.58 + 0.12 * Math.sin(t * 2.4);
+  const boxW = Math.min(W - 40, 260);
+  const boxH = 54;
+  const x = (W - boxW) / 2;
+  const y = Math.max(76, H * 0.18);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.58)';
+  pathRoundRect(x, y, boxW, boxH, 12);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(245,215,110,${a})`;
+  ctx.lineWidth = 1.5;
+  pathRoundRect(x + 1, y + 1, boxW - 2, boxH - 2, 11);
+  ctx.stroke();
+  ctx.fillStyle = `rgba(245,215,110,${a})`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.fillText('ROTATE FOR BEST PLAY', W / 2, y + 21);
+  ctx.font = '9px "Courier New", monospace';
+  ctx.fillStyle = 'rgba(255,235,180,0.68)';
+  ctx.fillText('LANDSCAPE GIVES FULL ROAD VIEW', W / 2, y + 38);
+  ctx.restore();
+}
+
 function drawPause() {
   ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(0, 0, W, H);
@@ -12171,6 +12206,7 @@ function render() {
       if (Game.state === 'replay') drawReplayOverlay();
       // Mobile on-canvas touch control overlay
       if (IS_TOUCH && Game.state === 'playing' && controlHintMode === 'touch') drawTouchOverlay();
+      drawMobileOrientationHint();
     }
     if (Game.state === 'playing' && Game.paused) drawPause();
     if (Game.state === 'loading') drawLoadingOverlay();
@@ -14455,11 +14491,14 @@ function frame(now) {
   // quality quickly instead of stuttering for several seconds.
   if (PerfMon.mode === 'auto' && now - PerfMon.lastAdjustAt > 800) {
     PerfMon.lastAdjustAt = now;
-    // 22ms ≈ 45fps floor. Above it we shed quality; well below it we recover.
-    if (PerfMon.ewmaMs > 22 && PerfMon.quality > 0) {
+    // Mobile reacts a little earlier to keep input latency from becoming
+    // visible before the governor sheds cosmetic work.
+    const qualityShedMs = IS_MOBILE ? 20 : 22;
+    const qualityRecoverMs = IS_MOBILE ? 13 : 14;
+    if (PerfMon.ewmaMs > qualityShedMs && PerfMon.quality > 0) {
       PerfMon.quality = Math.max(0, PerfMon.quality - 0.20);
       applyQualityCaps();
-    } else if (PerfMon.ewmaMs < 14 && PerfMon.quality < 1) {
+    } else if (PerfMon.ewmaMs < qualityRecoverMs && PerfMon.quality < 1) {
       PerfMon.quality = Math.min(1, PerfMon.quality + 0.1);
       applyQualityCaps();
     }
@@ -14473,11 +14512,14 @@ function frame(now) {
     const minScale = BrowserPerfHelper.minRenderScale();
     // Intentional deadband between high and recover thresholds to avoid
     // oscillating scale around borderline frame times.
-    if (PerfMon.ewmaMs > SCALE_THRESHOLD_SEVERE_MS) {
+    const severeMs = IS_MOBILE ? 24 : SCALE_THRESHOLD_SEVERE_MS;
+    const highMs = IS_MOBILE ? 19 : SCALE_THRESHOLD_HIGH_MS;
+    const recoverMs = IS_MOBILE ? Math.min(12.5, BrowserPerfHelper.recoverThreshold()) : BrowserPerfHelper.recoverThreshold();
+    if (PerfMon.ewmaMs > severeMs) {
       renderScale = Math.max(minScale, renderScale - SCALE_STEP_DOWN_SEVERE);
-    } else if (PerfMon.ewmaMs > SCALE_THRESHOLD_HIGH_MS) {
+    } else if (PerfMon.ewmaMs > highMs) {
       renderScale = Math.max(minScale, renderScale - SCALE_STEP_DOWN);
-    } else if (PerfMon.ewmaMs < BrowserPerfHelper.recoverThreshold() && renderScale < 1) {
+    } else if (PerfMon.ewmaMs < recoverMs && renderScale < 1) {
       renderScale = Math.min(1, renderScale + SCALE_STEP_UP);
     }
     // Flag for resize at the start of the NEXT frame — avoids the blank
