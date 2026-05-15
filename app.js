@@ -2885,7 +2885,7 @@ const Settings = {
   // navigator.vibrate-based haptic feedback on key events
   haptics: true,
   // 1.5x hit areas for menu buttons (accessibility)
-  bigButtons: false,
+  bigButtons: IS_TOUCH,
   // always fire while driving (assist — defaults on for touch devices)
   autoFire: IS_TOUCH,
   // show incoming/outgoing damage numbers
@@ -4429,7 +4429,11 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 // Clear all held keys when the window loses focus so keys don't get "stuck"
 // (keyup events are never fired for keys held while the window is blurred)
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+window.addEventListener('blur', () => {
+  for (const k in keys) keys[k] = false;
+  activePointers.clear();
+  syncTouchInput();
+});
 
 function onPointerDown(e) {
   ensureAudio();
@@ -4438,12 +4442,13 @@ function onPointerDown(e) {
   setControlHintMode('touch');
   e.preventDefault();
   try { cvs.setPointerCapture(e.pointerId); } catch(_){}
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
   syncTouchInput();
 }
 function onPointerMove(e) {
   if (activePointers.has(e.pointerId)) {
-    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const prev = activePointers.get(e.pointerId);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: prev.sx, sy: prev.sy });
     syncTouchInput();
   }
 }
@@ -4467,7 +4472,7 @@ function syncTouchInput() {
     return;
   }
 
-  const pts = [...activePointers.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y }));
+  const pts = [...activePointers.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y, sx: p.sx, sy: p.sy }));
 
   if (pts.length === 1) {
     // Single touch → steer + fire (backward-compatible)
@@ -4486,8 +4491,13 @@ function syncTouchInput() {
     touchSteerPt  = steerPt;
     touchFireActive = rightPts.length > 0;
 
-    input.touchTargetX = steerPt.x;
-    input.touchTargetY = steerPt.y;
+    // Left-zone steering is a virtual joystick: thumb displacement from its
+    // start point maps across the full playfield, avoiding left-half bias.
+    const joyMax = Math.max(42, Math.min(72, W * 0.12));
+    const axisX = clamp((steerPt.x - steerPt.sx) / joyMax, -1, 1);
+    const axisY = clamp((steerPt.y - steerPt.sy) / joyMax, -1, 1);
+    input.touchTargetX = W * 0.5 + axisX * W * 0.48;
+    input.touchTargetY = H * 0.5 + axisY * H * 0.42;
     // In split mode, fire is handled by right zone; left zone only steers
     // (autoFire covers continuous fire; right-zone touch adds explicit fire)
     input.touchFire = touchFireActive;
@@ -4548,7 +4558,7 @@ function toggleFullscreen() {
   if (!document.fullscreenElement && !document.webkitFullscreenElement) {
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (req) req.call(el).catch(()=>{});
-    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(()=>{});
+    if (screen.orientation && screen.orientation.lock) screen.orientation.lock(IS_MOBILE ? 'landscape' : 'portrait').catch(()=>{});
   } else {
     const exit = document.exitFullscreen || document.webkitExitFullscreen;
     if (exit) exit.call(document).catch(()=>{});
@@ -11329,7 +11339,23 @@ function drawTouchOverlay() {
   if (touchSteerPt !== null) {
     const tx = clamp(touchSteerPt.x, 0, W * 0.55);
     const ty = clamp(touchSteerPt.y, H * 0.25, H * 0.92);
-    // Outer ring
+    const joystickMode = activePointers.size > 1 && touchSteerPt.sx !== undefined;
+    const bx = joystickMode ? clamp(touchSteerPt.sx, 28, W * 0.48) : tx;
+    const by = joystickMode ? clamp(touchSteerPt.sy, H * 0.25, H * 0.92) : ty;
+    if (joystickMode) {
+      ctx.beginPath();
+      ctx.arc(bx, by, 34, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(245,215,110,0.26)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(tx, ty);
+      ctx.strokeStyle = 'rgba(245,215,110,0.38)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    // Outer thumb ring
     ctx.beginPath();
     ctx.arc(tx, ty, 28, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(245,215,110,0.55)';
@@ -11340,8 +11366,8 @@ function drawTouchOverlay() {
     ctx.arc(tx, ty, 7, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(245,215,110,0.75)';
     ctx.fill();
-    // Direction arrow toward player position
-    if (Game.player) {
+    // Direction arrow toward player position (absolute single-touch mode)
+    if (!joystickMode && Game.player) {
       const px = Game.player.x;
       const dx = px - tx;
       const ang = Math.atan2(0, dx); // horizontal only
@@ -11410,6 +11436,10 @@ function drawTouchOverlay() {
 }
 
 function drawPause() {
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f5d76e';
   ctx.font = 'bold 36px "Courier New", monospace';
   ctx.fillText('PAUSED', W/2, H/2);
   ctx.font = '12px "Courier New", monospace';
