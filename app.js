@@ -5051,6 +5051,9 @@ function startRun(mode, level) {
   Game.nearMissStreak = 0;
   Game.nearMissStreakT = 0;
   Game._lastNearMissAtT = -99;
+  Game._lastAutoAdrenT = -99;
+  Game.driftCharge = 0;
+  Game.driftLastDir = 0;
   Game._lastNearMissFeedbackT = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
