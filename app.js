@@ -4725,6 +4725,7 @@ const Game = {
   combo: 0,
   comboT: 0,
   comboBest: 0,
+  comboPulseT: 0,
   // power-ups: id -> { t, max } | null
   powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null, homing: null, armor: null, chainsaw: null, molotov: null, pipebomb: null, barricade: null, adrenaline: null },
   // tire skid marks (drawn under road decals)
@@ -5148,6 +5149,7 @@ function startRun(mode, level) {
   Game.combo = 0;
   Game.comboT = 0;
   Game.comboBest = 0;
+  Game.comboPulseT = 0;
   Game._pendingBadges = [];
   Game._pendingCosmetics = [];
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
