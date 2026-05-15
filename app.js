@@ -3047,6 +3047,7 @@ const Haptics = {
   bossWarn() { this.vibrate([0, 60, 40, 60, 40, 60], 'bossWarn', 900); },
   victory()  { this.vibrate([0, 30, 30, 30, 30, 80], 'victory', 0); },
   combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12, 'combo', 260); },
+  nearMiss() { this.vibrate(8, 'nearMiss', 180); },
 };
 
 // ============================================================
@@ -3632,6 +3633,7 @@ const SFX = {
   shieldOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(300, 0.2, 'sine', 0.095, 70, t); tone(620, 0.28, 'sine', 0.08, 90, t + 0.08); filteredNoise(0.16, 0.03, 2600, t + 0.02, audioSfxGain, 'highpass', 0.75); },
   nitroOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.42, 0.18, 2400, t); tone(140, 0.3, 'sawtooth', 0.095, 440, t); tone(320, 0.2, 'triangle', 0.03, 480, t + 0.08); },
   combo:  (tier) => { const f = 430 + Math.min(tier, 12) * 90; tone(f, 0.09, 'square', 0.058, 40); tone(f * 1.5, 0.06, 'triangle', 0.04, 60, audioCtx ? audioCtx.currentTime + 0.01 : 0); },
+  nearMiss:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(980, 0.045, 'triangle', 0.045, 220, t); tone(1320, 0.05, 'triangle', 0.035, 260, t + 0.025); },
   mortar: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(64, 0.54, 'sawtooth', 0.085, -18, t); filteredNoise(0.42, 0.11, 620, t + 0.01); },
   rocket: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(150, 0.38, 'square', 0.078, -58, t); filteredNoise(0.24, 0.09, 1900, t + 0.01); },
   // Electric crack for the thunder horn and lightning strikes
@@ -3872,6 +3874,28 @@ function applyKill(x, y, baseScore) {
   const label = (x2 > 1 ? 'x2 ' : '') + '+' + score + (mult > 1 ? ' ×' + mult : '');
   addPopup(label, x, y - 18, mult > 1 ? '#ffe07a' : '#ffd86b', mult > 1 ? 16 : 14);
   Haptics.kill();
+}
+
+function awardNearMiss(e) {
+  if (!e || e.nearMissed || !Game.player || Game.spinout) return;
+  if (e.kind === 'mortar' || e.kind === 'zombie') return;
+  const p = Game.player;
+  const centerGap = Math.abs(e.x - p.x) - ((e.w || 0) + (p.w || 0)) * 0.5;
+  if (centerGap <= 0 || centerGap > 30) return;
+  if (e.y < p.y + p.h * 0.15 || e.y > p.y + p.h * 0.95) return;
+  e.nearMissed = true;
+  Game.nearMisses = (Game.nearMisses || 0) + 1;
+  Game.comboT = Math.max(Game.comboT || 0, COMBO_WINDOW * 0.45);
+  const bonus = 25 + Math.min(75, (Game.combo || 0) * 2);
+  Game.score += bonus;
+  addPopup('NEAR MISS +' + bonus, p.x, p.y - 54, '#7af0ff', 12);
+  const now = Game.t || 0;
+  if (now - (Game._lastNearMissFeedbackT || 0) > 0.18) {
+    Game._lastNearMissFeedbackT = now;
+    SFX.nearMiss();
+    Haptics.nearMiss();
+    emit((e.x + p.x) * 0.5, p.y - 8, 4, { color:'#7af0ff', speed:120, life:0.22, size:2, shape:'spark', spread:Math.PI * 2 });
+  }
 }
 
 // ── Phase 4C: cinematic enemy explosion — multi-ring shockwaves + spark streaks + smoke puffs
@@ -4992,6 +5016,8 @@ function startRun(mode, level) {
   Game.scrapBonusEarned = 0;
   Game.distance = 0;
   Game.kills = 0;
+  Game.nearMisses = 0;
+  Game._lastNearMissFeedbackT = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
   Game.lastResultsSnapshot = null;
@@ -7142,6 +7168,7 @@ function update(dt) {
     }
     if (!Game.enemies[i]) continue;
 
+    awardNearMiss(e);
     if (aabb(e, Game.player)) {
       const isZombie = e.kind === 'zombie';
       // Zombies: running them down damages them, they claw the player
@@ -14397,6 +14424,7 @@ function applyQualityCaps() {
   RUNTIME_CAPS.enemyBullets = Math.round(140 + 110 * q);
   RUNTIME_CAPS.popups       = Math.round((40 + 40 * q) * visualCap);
   RUNTIME_CAPS.shockwaves   = Math.round((12 + 12 * q) * visualCap);
+  RUNTIME_CAPS.skidMarks    = Math.round((70 + 90 * q) * visualCap);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -14589,6 +14617,7 @@ const RUNTIME_CAPS = {
   enemyBullets: 250,
   popups: 80,
   shockwaves: 24,
+  skidMarks: 160,
   enemies: 60,
   obstacles: 60,
   pickups: 20,
@@ -17883,7 +17912,7 @@ function startReplayPlayback(rp, returnScreen) {
   Game.vehicle = VEHICLE_BY_ID[meta.vehicle] || VEHICLES[0];
   Game.vehicleStats = Profile.effectiveStats(Game.vehicle.id) || Object.assign({}, Game.vehicle.base);
   Game.player = { x: W * 0.5, y: H - 110, w:42, h:64, vx:0, steerSmooth:0 };
-  Game.score = 0; Game.kills = 0; Game.health = Game.maxHealth = Math.round(Game.vehicleStats.maxHp || 100);
+  Game.score = 0; Game.kills = 0; Game.nearMisses = 0; Game._lastNearMissFeedbackT = 0; Game.health = Game.maxHealth = Math.round(Game.vehicleStats.maxHp || 100);
   Game.biome = 'wastes'; Game.isNight = false; Game.isStorm = false;
   Game.bullets.length = Game.enemies.length = Game.obstacles.length = Game.pickups.length = Game.enemyBullets.length = 0;
   emitModScriptEvent('replay:start', {
