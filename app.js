@@ -8208,7 +8208,30 @@ function drawRoad() {
 
 function drawDecor() {
   const t = activeBiomeTheme();
+  // Classic/campaign/gauntlet use OutRun perspective — scale decor by depth.
+  // SHADOW_HORIZON = y-fraction where ground shadows start fading in.
+  // SHADOW_FADE_RANGE = y-fraction over which shadow reaches full opacity.
+  const SHADOW_HORIZON    = 0.38;
+  const SHADOW_FADE_RANGE = 0.28;
+  const usePerspectiveDepth = Game.mode !== 'arena' && Game.mode !== 'winding';
   for (const d of Game.decor) {
+    const scale = usePerspectiveDepth ? perspectiveScale(d.y) : 1;
+    // Ground contact shadow — flat oval at the object's base, fades in below horizon.
+    if (usePerspectiveDepth && d.y > H * SHADOW_HORIZON) {
+      const shadowAlpha = 0.30 * clamp((d.y - H * SHADOW_HORIZON) / (H * SHADOW_FADE_RANGE), 0, 1);
+      ctx.save();
+      ctx.globalAlpha = shadowAlpha;
+      ctx.fillStyle = 'rgba(0,0,0,1)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.size * scale * 1.5, d.size * scale * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // Apply perspective scale centered on the object's base position.
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.scale(scale, scale);
+    ctx.translate(-d.x, -d.y);
     if (d.type === 'rock') {
       const c = Math.floor(60*d.tone), c2 = Math.floor(40*d.tone), c3 = Math.floor(24*d.tone);
       const isNt = Game.isNight;
@@ -8531,6 +8554,7 @@ function drawDecor() {
       ctx.fillRect(d.x - sw / 2 + 5, d.y - ph + sh * 0.3, sw * 0.6, 2);
       ctx.fillRect(d.x - sw / 2 + 5, d.y - ph + sh * 0.6, sw * 0.4, 2);
     }
+    ctx.restore();
   }
 }
 
@@ -11138,47 +11162,102 @@ function drawComboAura() {
   ctx.fillRect(0, 0, W, H);
 }
 
-// ── Phase 6A: Motion-blur speed lines radiating from VP + edge vignette
+// ── Depth-aware speed streaks — road-surface perspective streaks (classic/winding)
+// Classic/campaign/gauntlet: streaks radiate from the vanishing point along the
+// road-surface trapezoid, giving an OutRun-style ground-level motion feel.
+// Winding mode: vertical road-edge streaks reinforce the scrolling direction.
 function drawSpeedLines() {
   if (Game.mode === 'arena' || !Game.player) return;
   const speedN = clamp(Game.speed / 460, 0, 1);
-  if (speedN < 0.35 || PerfMon.quality < 0.25) return;
-  const intensity = clamp((speedN - 0.35) / 0.65, 0, 1);
-  const vpX = W * 0.5;
-  const vpY = H * 0.42;
-  const lineCount = Math.round(10 + intensity * 18);
-  const tOffset = (Game.t || 0) * 0.55;
+  if (speedN < 0.30 || PerfMon.quality < 0.25) return;
+  const intensity = clamp((speedN - 0.30) / 0.70, 0, 1);
+
+  if (Game.mode === 'winding') {
+    // Winding mode — vertical edge streaks alongside the road shoulders.
+    const { x0, x1 } = roadBounds(H * 0.5);
+    const lineCount = Math.round(8 + intensity * 14);
+    const tOff = (Game.t || 0) * (1.5 + intensity);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let li = 0; li < lineCount; li++) {
+      const onLeft = (li % 2 === 0);
+      const seed = li * 7.391 + tOff * 0.08;
+      const rx = Math.abs((Math.sin(seed) * 43758.5453) % 1);
+      const ry = Math.abs((Math.cos(seed * 1.31) * 24578.123) % 1);
+      const yy = ry * H;
+      const len = (30 + rx * 70) * intensity;
+      const xx = onLeft
+        ? x0 * (0.1 + rx * 0.8)
+        : x1 + (W - x1) * (0.1 + rx * 0.8);
+      const lineA = intensity * (0.06 + rx * 0.06);
+      const lg = ctx.createLinearGradient(xx, yy, xx, yy + len);
+      lg.addColorStop(0, 'rgba(255,240,200,0)');
+      lg.addColorStop(0.4, `rgba(255,240,200,${lineA})`);
+      lg.addColorStop(1, 'rgba(255,220,150,0)');
+      ctx.strokeStyle = lg;
+      ctx.lineWidth = Math.max(0.6, rx * 1.8);
+      ctx.beginPath();
+      ctx.moveTo(xx, yy);
+      ctx.lineTo(xx, yy + len);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
+  // Classic / perspective modes — road-surface streaks clipped to the trapezoid.
+  const horizonY = H * 0.42;
+  const playerLean = clamp((Game.player.vx || 0) / 460, -1, 1);
+  const vpX = W * 0.5 - playerLean * W * 0.055;
+  const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
+  const x0bot = vpX - roadW / 2;
+  const x1bot = vpX + roadW / 2;
+  const lineCount = Math.round(14 + intensity * 22);
+  const tOff = (Game.t || 0) * (1.0 + intensity * 0.9);
+
   ctx.save();
+  // Clip streaks to the road surface trapezoid so they stay on the road.
+  ctx.beginPath();
+  ctx.moveTo(vpX, horizonY);
+  ctx.lineTo(x1bot + 2, H + 1);
+  ctx.lineTo(x0bot - 2, H + 1);
+  ctx.closePath();
+  ctx.clip();
   ctx.globalCompositeOperation = 'lighter';
+
   for (let li = 0; li < lineCount; li++) {
-    const ang = (li / lineCount) * Math.PI * 2 + tOffset * 0.3;
-    // Only draw lines in the bottom half (road area)
-    if (ang > 0.15 && ang < Math.PI - 0.15) continue;
-    const near = H * (0.08 + intensity * 0.10);
-    const far  = H * (0.35 + intensity * 0.40);
-    const jitter = Math.sin((Game.t || 0) * 12 + li * 1.7) * 0.05;
-    const ax = Math.cos(ang + jitter), ay = Math.sin(ang + jitter);
-    const lg = ctx.createLinearGradient(
-      vpX + ax * near, vpY + ay * near,
-      vpX + ax * far,  vpY + ay * far
-    );
-    const lineA = intensity * (0.05 + 0.06 * ((li % 3) === 0 ? 1 : 0.4));
-    lg.addColorStop(0, `rgba(255,240,200,0)`);
-    lg.addColorStop(0.3, `rgba(255,240,200,${lineA})`);
-    lg.addColorStop(1, `rgba(255,220,150,0)`);
+    // Spread across road width, animated with speed.
+    const frac = ((li / lineCount) + tOff * 0.06) % 1;
+    const bx = x0bot + frac * roadW;
+    const dx = bx - vpX, dy = H - horizonY;
+    // Per-line depth 0..1 from horizon to bottom, animated.
+    const d0 = ((li * 0.371 + tOff * 0.04) % 1) * 0.72 + 0.08;
+    const d1 = Math.min(1, d0 + 0.09 + intensity * 0.14);
+    const sx = vpX + dx * d0, sy = horizonY + dy * d0;
+    const ex = vpX + dx * d1, ey = horizonY + dy * d1;
+    // Lines near the road edges and close to the player appear brighter.
+    const edgeBoost = Math.abs(frac - 0.5) * 2;
+    const lineA = intensity * (0.04 + edgeBoost * 0.055) * (0.3 + d0 * 0.7);
+    const lw = Math.max(0.5, d0 * 2.2 * (0.5 + edgeBoost * 0.6));
+    const lg = ctx.createLinearGradient(sx, sy, ex, ey);
+    lg.addColorStop(0, 'rgba(255,240,200,0)');
+    lg.addColorStop(0.35, `rgba(255,240,200,${lineA})`);
+    lg.addColorStop(1, 'rgba(255,220,150,0)');
     ctx.strokeStyle = lg;
-    ctx.lineWidth = (li % 5 === 0) ? 2.5 : 1;
+    ctx.lineWidth = lw;
     ctx.beginPath();
-    ctx.moveTo(vpX + ax * near, vpY + ay * near);
-    ctx.lineTo(vpX + ax * far,  vpY + ay * far);
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
     ctx.stroke();
   }
-  // Edge vignette at high speed
+  ctx.restore();
+
+  // Edge vignette at high speed (drawn outside the road clip region).
   const vigA = intensity * 0.22;
   const vg = ctx.createRadialGradient(W * 0.5, H * 0.55, Math.min(W,H) * 0.28, W * 0.5, H * 0.55, Math.max(W,H) * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
   vg.addColorStop(1, `rgba(0,0,0,${vigA})`);
-  ctx.globalCompositeOperation = 'source-over';
+  ctx.save();
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
@@ -17098,28 +17177,47 @@ const Cinematic = (function () {
 
   // ----- speed lines -----
   function drawSpeedLines(ctx, k, sp) {
+    // Cinematic pass: angled shoulder streaks converging toward the vanishing
+    // point — reinforce ground-level forward motion rather than flying.
     const amt = (sp - 0.55) / 0.45; // 0..1
-    const lines = Math.round(8 + amt * 14);
-    const t = (Game.t || 0) * 6;
+    const horizonY = H * 0.42;
+    const playerLean = (Game.player) ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
+    const vpX = W * 0.5 - playerLean * W * 0.055;
+    const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
+    const lines = Math.round(6 + amt * 10);
+    const t = (Game.t || 0) * 4.5;
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = 0.18 * amt * k;
-    ctx.strokeStyle = 'rgba(255,220,180,1)';
-    ctx.lineWidth = 1.2;
     for (let i = 0; i < lines; i++) {
-      // Pseudo-random but stable-ish per-frame using i+t for animation.
-      const seed = i * 12.9898 + t * 0.7;
-      const rx = (Math.sin(seed) * 43758.5453) % 1;
-      const ry = (Math.cos(seed * 1.31) * 24578.123) % 1;
-      const sideRand = (Math.abs(rx) > 0.5);
-      const yy = (Math.abs(ry) * H);
-      const len = 30 + Math.abs(rx) * 90;
-      const xx = sideRand
-        ? (Math.abs(rx) * (W * 0.18))                    // left edge band
-        : (W - Math.abs(rx) * (W * 0.18) - len);          // right edge band
+      const seed = i * 12.9898 + t * 0.5;
+      const rx = Math.abs((Math.sin(seed) * 43758.5453) % 1);
+      const ry = Math.abs((Math.cos(seed * 1.31) * 24578.123) % 1);
+      // Position in the ground zone below the horizon.
+      const yy = horizonY + ry * (H - horizonY) * 0.90;
+      const depthFrac = (yy - horizonY) / Math.max(1, H - horizonY);
+      // Alternate between left and right shoulders.
+      const onLeft = (i % 2 === 0);
+      const roadEdge = onLeft ? (vpX - roadW / 2) : (vpX + roadW / 2);
+      const shoulderX = onLeft
+        ? roadEdge * (0.1 + rx * 0.88)
+        : roadEdge + (W - roadEdge) * (0.1 + rx * 0.88);
+      // Streak length grows with depth (longer near the player).
+      const len = (18 + depthFrac * 55) * amt;
+      // Angle toward the VP.
+      const toVPX = vpX - shoulderX;
+      const toVPY = horizonY - yy;
+      const mag = Math.sqrt(toVPX * toVPX + toVPY * toVPY) || 1;
+      const ex = shoulderX + (toVPX / mag) * len;
+      const ey = yy       + (toVPY / mag) * len;
+      const lineA = 0.13 * amt * k * (0.4 + depthFrac * 0.6);
+      const lg = ctx.createLinearGradient(shoulderX, yy, ex, ey);
+      lg.addColorStop(0, `rgba(255,230,180,${lineA})`);
+      lg.addColorStop(1, 'rgba(255,200,140,0)');
+      ctx.strokeStyle = lg;
+      ctx.lineWidth = Math.max(0.5, depthFrac * 1.6);
       ctx.beginPath();
-      ctx.moveTo(xx, yy);
-      ctx.lineTo(xx + len, yy);
+      ctx.moveTo(shoulderX, yy);
+      ctx.lineTo(ex, ey);
       ctx.stroke();
     }
     ctx.restore();
