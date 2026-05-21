@@ -17467,7 +17467,7 @@ const Cinematic = (function () {
     ctx.beginPath();
     ctx.arc(sx, sy, 26, 0, Math.PI * 2);
     ctx.fill();
-    // Two faint flare beads down the optical axis (off-disc) — classic JJ
+    // Three faint flare beads down the optical axis (off-disc) — classic JJ
     // Abrams lens-flare cue.
     ctx.globalAlpha = 0.16 * k;
     ctx.fillStyle = haloCol + '0.8)';
