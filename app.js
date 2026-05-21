@@ -17182,9 +17182,98 @@ const Cinematic = (function () {
   function postFxMenu(ctx) {
     if (!isOn()) return;
     const k = intensity() * 0.85;
+    // v2.1 Overhaul: parallax silhouette horizon behind the title for depth.
+    if (k > 0.25) drawMenuHorizon(ctx, k);
     if (k > 0.35) drawGodRays(ctx, k * 0.85);
     if (k > 0.3)  drawBiomeGrade(ctx, k * 0.6, false);
+    // v2.1 Overhaul: drifting embers across the title screen.
+    if (k > 0.3)  drawAmbientMotes(ctx, k * 0.55);
+    // v2.1 Overhaul: neon sign flicker accent in the upper-right corner.
+    if (k > 0.3)  drawMenuNeonSign(ctx, k);
     if (k > 0.2)  drawGrain(ctx, k * 0.4);
+  }
+
+  // ----- v2.1: title-scene parallax silhouette horizon -----
+  // Two thin layers of jagged silhouette (distant ridge + nearer mesa)
+  // procedurally drawn from a stable sin sum so they look like a real
+  // skyline without per-frame allocation of large path arrays.
+  function drawMenuHorizon(ctx, k) {
+    const horizonY = H * 0.62;
+    ctx.save();
+    // Distant ridge — desaturated purple.
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.35 * k;
+    ctx.fillStyle = 'rgb(48,30,60)';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    const segs = 32;
+    for (let i = 0; i <= segs; i++) {
+      const x = (i / segs) * W;
+      const y = horizonY - 18 - 12 * Math.sin(i * 0.7) - 8 * Math.sin(i * 1.9 + 1.3);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+    // Nearer mesa — deeper, warmer black with rim hint of orange.
+    ctx.globalAlpha = 0.55 * k;
+    ctx.fillStyle = 'rgb(20,10,8)';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let i = 0; i <= segs; i++) {
+      const x = (i / segs) * W;
+      const y = horizonY + 6 - 22 * Math.abs(Math.sin(i * 0.4 + 0.6)) - 6 * Math.sin(i * 1.3);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+    // Thin warm rim along the mesa top.
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.18 * k;
+    ctx.strokeStyle = 'rgba(255,140,60,0.9)';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    for (let i = 0; i <= segs; i++) {
+      const x = (i / segs) * W;
+      const y = horizonY + 6 - 22 * Math.abs(Math.sin(i * 0.4 + 0.6)) - 6 * Math.sin(i * 1.3);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ----- v2.1: title-scene neon sign flicker -----
+  // A tiny diegetic neon glyph far in the upper-right that flickers like a
+  // failing wasteland sign. No text — just a couple of glowing bars.
+  function drawMenuNeonSign(ctx, k) {
+    const t = (Game && Game.t) || 0;
+    // Flicker — mostly on, occasionally drops to dim with a sharp blink.
+    const f1 = Math.sin(t * 7.3 + 1.1);
+    const f2 = Math.sin(t * 23.7);
+    let flick = 0.85 + 0.15 * f1;
+    if (f2 > 0.92) flick = 0.25;          // sharp dropout
+    else if (f2 > 0.85) flick = 0.55;     // brown-out
+    const sx = W - 64;
+    const sy = 56;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    // Halo
+    ctx.globalAlpha = 0.35 * flick * k;
+    const halo = ctx.createRadialGradient(sx, sy, 2, sx, sy, 40);
+    halo.addColorStop(0, 'rgba(220,140,255,0.9)');
+    halo.addColorStop(0.5, 'rgba(180,80,220,0.4)');
+    halo.addColorStop(1, 'rgba(180,80,220,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 40, 0, Math.PI * 2);
+    ctx.fill();
+    // Two horizontal bars suggesting a sign glyph.
+    ctx.globalAlpha = 0.85 * flick * k;
+    ctx.fillStyle = 'rgba(240,180,255,1)';
+    ctx.fillRect(sx - 14, sy - 7, 28, 2.5);
+    ctx.fillRect(sx - 10, sy + 4, 20, 2.5);
+    ctx.restore();
   }
 
   // ----- god rays -----
