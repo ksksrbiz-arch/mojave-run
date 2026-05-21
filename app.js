@@ -16935,8 +16935,12 @@ function renderVersus() {
 // Cannot reassign `update` since it's declared with function; versus hooks directly into frame().
 
 // ============================================================
-// CINEMATIC POST-FX — "Wasteland Cinematic" v2.1
+// CINEMATIC POST-FX — "Wasteland Cinematic" v2.1 — Visual Overhaul
 // ============================================================
+// v2.1 Visual Overhaul: dust atmosphere, heat shimmer, headlight cones,
+// chrome rim light, neon underglow, blood-red impact vignette, re-graded
+// biome palettes (deep orange / blood red / neon blue-purple / chrome).
+// All purely additive — gameplay, AI, scoring, simulation untouched.
 // Purely additive visual layer drawn on top of the existing render pipeline.
 // Does not touch gameplay, scoring, input, AI, or simulation. Disable any
 // time via Settings.cinematic, or scale via the QUALITY preset (auto/low/
@@ -17086,6 +17090,24 @@ const Cinematic = (function () {
       drawAtmosphericHaze(ctx, k);
     }
 
+    // ---- 1d. v2.1 Overhaul: full-screen dust atmosphere — warm ochre
+    // dust haze layered on the ground band, drift animated by Game.speed.
+    if (k > 0.3) {
+      drawDustAtmosphere(ctx, k);
+    }
+
+    // ---- 1e. v2.1 Overhaul: heat shimmer band near horizon for warm
+    // daytime biomes — sinusoidal additive bands fake column displacement
+    // cheaply (no getImageData, GPU-friendly).
+    if (k > 0.4 && !isNight && !isStorm) {
+      drawHeatShimmer(ctx, k);
+    }
+
+    // ---- 1f. v2.1 Overhaul: volumetric headlight cones at night.
+    if (playing && k > 0.35 && isNight) {
+      drawHeadlightCones(ctx, k);
+    }
+
     // ---- 2. Bloom highlights around bright events ----
     // Read-only: we glow on muzzle flash, hit flash, recent shockwave, or
     // when shake is high (explosion/impact). One additive radial.
@@ -17098,6 +17120,18 @@ const Cinematic = (function () {
     // as bloom highlights, scaled to be felt only when the action is hot.
     if (playing && k > 0.35) {
       drawAnamorphicFlare(ctx, k);
+    }
+
+    // ---- 2c. v2.1 Overhaul: chrome rim light on the player's leading
+    // edge — additive highlight strip, no sprite changes.
+    if (playing && k > 0.35) {
+      drawChromeRim(ctx, k);
+    }
+
+    // ---- 2d. v2.1 Overhaul: neon blue/violet underglow beneath the
+    // vehicle, scaled by speed and nitro.
+    if (playing && k > 0.3) {
+      drawNeonUnderglow(ctx, k);
     }
 
     // ---- 3. Speed-line motion vignette ----
@@ -17129,6 +17163,11 @@ const Cinematic = (function () {
     // boss). Sits below grain so grain still reads inside the darkened ring.
     if (k > 0.25) {
       drawCinematicVignette(ctx, k, playing);
+    }
+
+    // ---- 5c. v2.1 Overhaul: blood-red impact vignette pulse on hit.
+    if (playing && k > 0.3 && (Game.hitFlash || 0) > 0.01) {
+      drawImpactVignette(ctx, k);
     }
 
     // ---- 6. Film grain (always last, lowest-cost) ----
@@ -17312,38 +17351,45 @@ const Cinematic = (function () {
     const t = (Game && Game.t) || 0;
 
     // Per-biome tint: (r, g, b, base-alpha, composite-op)
-    // We pick colors that reinforce the biome mood without drowning the art.
+    // v2.1 Visual Overhaul palette — deep oranges, blood reds, neon blue/violet,
+    // chrome whites, dust ochre. Slightly punchier than v4 but still bounded
+    // so the grade is felt without drowning art.
     let r = 0, g = 0, b = 0, baseA = 0, comp = 'multiply';
     if (biome === 'neonruins') {
-      // Magenta/purple neon bloom that slowly pulses
+      // Blood-red + neon violet pulse — stronger key/fill split
       const pulse = 0.75 + 0.25 * Math.sin(t * 1.8);
-      r = 200; g = 60; b = 220;
-      baseA = 0.045 * k * pulse;
+      r = 220; g = 50; b = 200;
+      baseA = 0.055 * k * pulse;
       comp = 'screen';
     } else if (biome === 'thunderplains') {
-      // Cold electric blue atmospheric tint
-      r = 100; g = 140; b = 255;
-      baseA = 0.04 * k;
+      // Cobalt blue with magenta lightning — punchier than v4
+      r = 90; g = 130; b = 255;
+      baseA = 0.05 * k;
       comp = 'screen';
     } else if (biome === 'frostwaste') {
-      // Icy blue-white desaturation wash
-      r = 200; g = 225; b = 255;
-      baseA = 0.055 * k;
+      // Cold steel blue with neon teal accents
+      r = 190; g = 230; b = 255;
+      baseA = 0.06 * k;
       comp = 'screen';
     } else if (biome === 'irradiated') {
-      // Sickly green chromatic tinge
-      r = 80; g = 220; b = 60;
-      baseA = 0.035 * k;
+      // Toxic green muted; rim highlights handled separately in cyan
+      r = 90; g = 215; b = 80;
+      baseA = 0.04 * k;
       comp = 'screen';
     } else if (biome === 'midnight') {
-      // Deep blue vignette to intensify the night atmosphere
-      r = 10; g = 20; b = 80;
-      baseA = 0.06 * k;
+      // Deep navy with neon-purple key light
+      r = 18; g = 14; b = 70;
+      baseA = 0.075 * k;
       comp = 'multiply';
+    } else if (biome === 'saltflats') {
+      // High-contrast chrome whites with cobalt sky + crimson sunset rim
+      r = 235; g = 220; b = 255;
+      baseA = 0.038 * k;
+      comp = 'screen';
     } else if (biome === 'redcanyon' || biome === 'wastes') {
-      // Warm amber heat-haze tint — tiny subtle shimmer in bottom half
-      r = 255; g = 110; b = 40;
-      baseA = 0.028 * k;
+      // Deep orange + dust ochre, slight magenta in shadows
+      r = 255; g = 95; b = 30;
+      baseA = 0.04 * k;
       comp = 'screen';
     }
 
@@ -17408,7 +17454,8 @@ const Cinematic = (function () {
   // ========================================================================
 
   // Cached anamorphic flare canvas (single horizontal gradient) so we don't
-  // allocate a gradient per frame for the flare streak.
+  // allocate a gradient per frame for the flare streak. v2.1 Overhaul:
+  // shifted toward neon blue/violet for the new art direction.
   let _flareCanvas = null;
   function _ensureFlareCanvas() {
     if (_flareCanvas) return _flareCanvas;
@@ -17416,11 +17463,11 @@ const Cinematic = (function () {
     c.width = 256; c.height = 8;
     const cc = c.getContext('2d');
     const g = cc.createLinearGradient(0, 0, 256, 0);
-    g.addColorStop(0,    'rgba(140,200,255,0)');
-    g.addColorStop(0.45, 'rgba(180,220,255,1)');
-    g.addColorStop(0.5,  'rgba(255,255,255,1)');
-    g.addColorStop(0.55, 'rgba(180,220,255,1)');
-    g.addColorStop(1,    'rgba(140,200,255,0)');
+    g.addColorStop(0,    'rgba(140,120,255,0)');
+    g.addColorStop(0.45, 'rgba(170,160,255,1)');
+    g.addColorStop(0.5,  'rgba(230,225,255,1)');
+    g.addColorStop(0.55, 'rgba(170,160,255,1)');
+    g.addColorStop(1,    'rgba(140,120,255,0)');
     cc.fillStyle = g;
     cc.fillRect(0, 0, 256, 8);
     _flareCanvas = c;
@@ -17541,13 +17588,17 @@ const Cinematic = (function () {
     const t = (Game && Game.t) || 0;
     const isNight = !!(Game && Game.isNight);
     const biome = (Game && Game.biome) || 'wastes';
-    // Ember vs dust palette per biome.
+    // Ember vs dust palette per biome. v2.1 Overhaul leans toward
+    // deep-orange embers for warm biomes, neon violet for neonruins,
+    // toxic cyan for irradiated, chrome white for frostwaste.
     let col;
-    if (biome === 'irradiated') col = 'rgba(180,255,140,';
-    else if (biome === 'neonruins') col = 'rgba(240,150,255,';
+    if (biome === 'irradiated') col = 'rgba(170,255,210,';
+    else if (biome === 'neonruins') col = 'rgba(220,140,255,';
     else if (biome === 'frostwaste') col = 'rgba(220,240,255,';
-    else if (isNight) col = 'rgba(230,210,160,';
-    else col = 'rgba(255,225,170,';
+    else if (biome === 'thunderplains') col = 'rgba(160,180,255,';
+    else if (biome === 'midnight') col = 'rgba(200,170,255,';
+    else if (isNight) col = 'rgba(255,180,110,';
+    else col = 'rgba(255,160,80,';
     const count = Math.round(28 * k);
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
@@ -17597,6 +17648,214 @@ const Cinematic = (function () {
     g.addColorStop(0.55, 'rgba(0,0,0,' + (a * 0.45).toFixed(3) + ')');
     g.addColorStop(1, 'rgba(0,0,0,' + a.toFixed(3) + ')');
     ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // ========================================================================
+  // v2.1 VISUAL OVERHAUL — additional cinematic sub-layers.
+  // All purely additive, intensity-gated, no per-frame allocations beyond
+  // the gradient/path patterns already used by the v3/v4 stack.
+  // ========================================================================
+
+  // ----- v2.1: dust atmosphere -----
+  // Warm ochre dust haze layered on the ground band. Two soft vertical
+  // gradients (warm core + cooler dust drift) combine into a cheap
+  // atmospheric layer. Drift speed scales with Game.speed.
+  function drawDustAtmosphere(ctx, k) {
+    const biome = (Game && Game.biome) || 'wastes';
+    const isNight = !!(Game && Game.isNight);
+    // Only run for biomes where dust reads correctly. Skip frostwaste
+    // (it has its own snow look) and pure neonruins night (already busy).
+    if (biome === 'frostwaste') return;
+    // Palette: warm ochre on warm biomes, cool dust on neonruins/midnight.
+    let warm, cool;
+    if (biome === 'neonruins') { warm = 'rgba(230,140,200,'; cool = 'rgba(110,80,160,'; }
+    else if (biome === 'midnight') { warm = 'rgba(150,120,200,'; cool = 'rgba(60,50,120,'; }
+    else if (biome === 'thunderplains') { warm = 'rgba(170,180,220,'; cool = 'rgba(90,110,170,'; }
+    else if (biome === 'irradiated') { warm = 'rgba(200,220,150,'; cool = 'rgba(110,150,90,'; }
+    else if (biome === 'saltflats') { warm = 'rgba(245,225,200,'; cool = 'rgba(180,170,200,'; }
+    else { warm = 'rgba(230,150,80,'; cool = 'rgba(160,100,50,'; }
+    const topY = H * 0.42;
+    const baseA = (isNight ? 0.06 : 0.085) * k;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    // Warm haze layer drifting up.
+    const t = (Game && Game.t) || 0;
+    const drift = (t * 12) % 64;
+    const g1 = ctx.createLinearGradient(0, topY - drift, 0, H);
+    g1.addColorStop(0, warm + '0)');
+    g1.addColorStop(0.4, warm + baseA.toFixed(3) + ')');
+    g1.addColorStop(1, warm + (baseA * 0.4).toFixed(3) + ')');
+    ctx.fillStyle = g1;
+    ctx.fillRect(0, topY, W, H - topY);
+    // Cooler dust drift, opposite phase, on top.
+    const g2 = ctx.createLinearGradient(0, topY, 0, H);
+    g2.addColorStop(0, cool + '0)');
+    g2.addColorStop(0.55, cool + (baseA * 0.5).toFixed(3) + ')');
+    g2.addColorStop(1, cool + '0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, topY, W, H - topY);
+    ctx.restore();
+  }
+
+  // ----- v2.1: heat shimmer -----
+  // Thin sinusoidal additive bands near the horizon that fake column
+  // displacement without any getImageData read. 6–8 narrow bands phased
+  // in time so they appear to ripple. Daytime warm biomes only.
+  function drawHeatShimmer(ctx, k) {
+    const biome = (Game && Game.biome) || 'wastes';
+    if (biome === 'frostwaste' || biome === 'thunderplains') return;
+    const t = (Game && Game.t) || 0;
+    const horizonY = H * 0.42;
+    const bandH = 1.3;
+    const bands = 7;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < bands; i++) {
+      const phase = i * 0.7 + t * 1.8;
+      const y = horizonY + i * 6 + Math.sin(phase) * 1.4;
+      const a = 0.045 * k * (0.5 + 0.5 * Math.sin(phase * 1.3 + 0.7));
+      if (a < 0.005) continue;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = 'rgba(255,210,170,1)';
+      ctx.fillRect(0, y, W, bandH);
+    }
+    ctx.restore();
+  }
+
+  // ----- v2.1: volumetric headlight cones -----
+  // Two triangle-fan cones from the front of the player, additively
+  // brightening the ground in front. Night-biome only. Strength reads
+  // Game.speed so the cones puff out as the player accelerates.
+  function drawHeadlightCones(ctx, k) {
+    if (!Game.player) return;
+    const px = Game.player.x;
+    const py = Game.player.y - 6;
+    const sp = speedNorm();
+    const reach = 110 + sp * 80;
+    const spread = 36 + sp * 14;
+    const a = 0.16 * k * (0.6 + sp * 0.6);
+    if (a < 0.01) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    // Two narrow cones, left and right of the player center.
+    const drawCone = (ox) => {
+      const g = ctx.createRadialGradient(px + ox, py, 4, px + ox, py - reach * 0.4, reach);
+      g.addColorStop(0, 'rgba(255,240,200,' + a.toFixed(3) + ')');
+      g.addColorStop(0.5, 'rgba(255,210,140,' + (a * 0.45).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(255,180,90,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(px + ox, py);
+      ctx.lineTo(px + ox - spread, py - reach);
+      ctx.lineTo(px + ox + spread, py - reach);
+      ctx.closePath();
+      ctx.fill();
+    };
+    drawCone(-10);
+    drawCone(10);
+    ctx.restore();
+  }
+
+  // ----- v2.1: chrome rim light -----
+  // Additive highlight strip along the leading edge of the player vehicle.
+  // No sprite changes — we draw a thin gradient strip using only the player
+  // position and approximate bounding box. Color leans chrome white but
+  // picks up the biome accent (neon violet / cobalt / amber).
+  function drawChromeRim(ctx, k) {
+    if (!Game.player) return;
+    const biome = (Game && Game.biome) || 'wastes';
+    let rim;
+    if (biome === 'neonruins') rim = 'rgba(220,160,255,';
+    else if (biome === 'thunderplains') rim = 'rgba(170,200,255,';
+    else if (biome === 'midnight') rim = 'rgba(200,180,255,';
+    else if (biome === 'irradiated') rim = 'rgba(180,255,230,';
+    else if (biome === 'frostwaste') rim = 'rgba(230,245,255,';
+    else rim = 'rgba(255,225,180,';
+    const px = Game.player.x;
+    const py = Game.player.y;
+    // Approximate vehicle half-width / half-height — read player.w/.h if
+    // present, else use defaults that match the on-screen footprint.
+    const pw = (Game.player.w || 56) * 0.5;
+    const ph = (Game.player.h || 80) * 0.5;
+    const a = 0.22 * k;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    // Top rim strip — narrow gradient above the vehicle.
+    const g = ctx.createLinearGradient(0, py - ph, 0, py - ph + 6);
+    g.addColorStop(0, rim + a.toFixed(3) + ')');
+    g.addColorStop(1, rim + '0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(px - pw, py - ph, pw * 2, 6);
+    // Side highlight glints (left + right edges) — very short strips.
+    const sg = ctx.createLinearGradient(px - pw, 0, px - pw + 4, 0);
+    sg.addColorStop(0, rim + (a * 0.7).toFixed(3) + ')');
+    sg.addColorStop(1, rim + '0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(px - pw, py - ph * 0.7, 4, ph * 1.4);
+    const sg2 = ctx.createLinearGradient(px + pw - 4, 0, px + pw, 0);
+    sg2.addColorStop(0, rim + '0)');
+    sg2.addColorStop(1, rim + (a * 0.7).toFixed(3) + ')');
+    ctx.fillStyle = sg2;
+    ctx.fillRect(px + pw - 4, py - ph * 0.7, 4, ph * 1.4);
+    ctx.restore();
+  }
+
+  // ----- v2.1: neon underglow -----
+  // Soft blue/violet radial beneath the vehicle. Scales with speed and
+  // ramps up under nitro. Sits below the player visually because it is
+  // drawn after the main scene but in screen-space, so the gradient is
+  // anchored at the vehicle's wheels.
+  function drawNeonUnderglow(ctx, k) {
+    if (!Game.player) return;
+    const sp = speedNorm();
+    const nitro = (typeof isPowerupActive === 'function' && isPowerupActive('nitro')) ? 1 : 0;
+    const amt = Math.min(1, sp * 0.7 + nitro * 0.6);
+    if (amt < 0.08) return;
+    const px = Game.player.x;
+    const py = Game.player.y + (Game.player.h || 80) * 0.45;
+    const r = 60 + amt * 50 + nitro * 30;
+    // Color: cobalt with a violet tint under nitro.
+    const baseR = 80 + nitro * 60;
+    const baseG = 120;
+    const baseB = 255;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.min(0.55, amt * 0.42 * k);
+    const g = ctx.createRadialGradient(px, py, 2, px, py, r);
+    g.addColorStop(0, `rgba(${baseR},${baseG},${baseB},0.9)`);
+    g.addColorStop(0.45, `rgba(${baseR},${baseG},${baseB},0.4)`);
+    g.addColorStop(1, `rgba(${baseR},${baseG},${baseB},0)`);
+    ctx.fillStyle = g;
+    // Flatten the radial into an ellipse so it reads as ground-level glow,
+    // not a sphere — scaleY < 1 around the center.
+    ctx.translate(px, py);
+    ctx.scale(1, 0.45);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ----- v2.1: blood-red impact vignette -----
+  // Short pulse on Game.hitFlash that paints a red edge vignette on top of
+  // the cinematic vignette. Decays naturally with hitFlash so we just read
+  // its current value — no extra timer state.
+  function drawImpactVignette(ctx, k) {
+    const hit = Math.max(0, Math.min(1, (Game.hitFlash || 0) / 0.35));
+    if (hit < 0.05) return;
+    const a = 0.45 * hit * k;
+    const cx = W * 0.5, cy = H * 0.55;
+    const inner = Math.min(W, H) * 0.28;
+    const outer = Math.max(W, H) * 0.75;
+    const g = ctx.createRadialGradient(cx, cy, inner, cx, cy, outer);
+    g.addColorStop(0, 'rgba(140,0,0,0)');
+    g.addColorStop(0.7, 'rgba(170,10,10,' + (a * 0.55).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(200,20,20,' + a.toFixed(3) + ')');
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
@@ -17664,7 +17923,7 @@ const Cinematic = (function () {
       c.font = `${Math.round(h * 0.018)}px "Courier New", monospace`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText('— WASTELAND CINEMATIC v4.0 —', w / 2, bar / 2);
+      c.fillText('— WASTELAND CINEMATIC v2.1 OVERHAUL —', w / 2, bar / 2);
       return out.toDataURL('image/png');
     } catch (e) {
       console.warn('[Cinematic] poster build failed', e);
