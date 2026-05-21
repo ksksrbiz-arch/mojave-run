@@ -17062,6 +17062,8 @@ const Cinematic = (function () {
     const k = intensity();
     const sp = speedNorm();
     const playing = (Game.state === 'playing');
+    const isNight = !!(Game && Game.isNight);
+    const isStorm = !!(Game && Game.isStorm);
 
     // ---- 1. Volumetric god rays (sky band) ----
     // Two angled additive bands that drift very slowly. Faded out at night
@@ -17071,6 +17073,19 @@ const Cinematic = (function () {
       drawGodRays(ctx, k);
     }
 
+    // ---- 1b. v4: Sun disc + halo at the vanishing point (day, no storm).
+    // Adds a hero light source the god rays can be read against.
+    if (k > 0.4 && !isNight && !isStorm) {
+      drawSunDisc(ctx, k);
+    }
+
+    // ---- 1c. v4: Atmospheric horizon haze — a soft warm band sitting on
+    // the horizon line. Cheap atmospheric perspective that pushes the
+    // distant mesas into the haze and makes the road feel deeper.
+    if (k > 0.3) {
+      drawAtmosphericHaze(ctx, k);
+    }
+
     // ---- 2. Bloom highlights around bright events ----
     // Read-only: we glow on muzzle flash, hit flash, recent shockwave, or
     // when shake is high (explosion/impact). One additive radial.
@@ -17078,10 +17093,23 @@ const Cinematic = (function () {
       drawBloomHighlights(ctx, k);
     }
 
+    // ---- 2b. v4: Anamorphic horizontal lens flare — a blue/white streak
+    // through bright events that screams blockbuster lens. Same triggers
+    // as bloom highlights, scaled to be felt only when the action is hot.
+    if (playing && k > 0.35) {
+      drawAnamorphicFlare(ctx, k);
+    }
+
     // ---- 3. Speed-line motion vignette ----
     // Thin radial-from-edges streaks scaling with speed. Cheap line draws.
     if (playing && sp > 0.55 && k > 0.3) {
       drawSpeedLines(ctx, k, sp);
+    }
+
+    // ---- 3b. v4: Ambient drifting dust motes — small additive sparkles
+    // floating in screen space. Reads as in-air dust under the lighting.
+    if (playing && k > 0.4) {
+      drawAmbientMotes(ctx, k);
     }
 
     // ---- 4. Chromatic aberration ----
@@ -17094,6 +17122,13 @@ const Cinematic = (function () {
     // ---- 5. Biome color grading — per-biome atmospheric tint ----
     if (k > 0.3) {
       drawBiomeGrade(ctx, k, playing);
+    }
+
+    // ---- 5b. v4: Cinematic edge vignette — a corner darken that
+    // intensifies subtly when the action escalates (low health / combo /
+    // boss). Sits below grain so grain still reads inside the darkened ring.
+    if (k > 0.25) {
+      drawCinematicVignette(ctx, k, playing);
     }
 
     // ---- 6. Film grain (always last, lowest-cost) ----
@@ -17366,6 +17401,208 @@ const Cinematic = (function () {
   }
 
   // ========================================================================
+  // v4 — WASTELAND CINEMATIC additions. Sun disc, anamorphic flare,
+  // atmospheric horizon haze, ambient dust motes, cinematic edge vignette.
+  // All purely additive, quality-gated by intensity() and small-amplitude
+  // so they layer cleanly with the v3 stack above.
+  // ========================================================================
+
+  // Cached anamorphic flare canvas (single horizontal gradient) so we don't
+  // allocate a gradient per frame for the flare streak.
+  let _flareCanvas = null;
+  function _ensureFlareCanvas() {
+    if (_flareCanvas) return _flareCanvas;
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 8;
+    const cc = c.getContext('2d');
+    const g = cc.createLinearGradient(0, 0, 256, 0);
+    g.addColorStop(0,    'rgba(140,200,255,0)');
+    g.addColorStop(0.45, 'rgba(180,220,255,1)');
+    g.addColorStop(0.5,  'rgba(255,255,255,1)');
+    g.addColorStop(0.55, 'rgba(180,220,255,1)');
+    g.addColorStop(1,    'rgba(140,200,255,0)');
+    cc.fillStyle = g;
+    cc.fillRect(0, 0, 256, 8);
+    _flareCanvas = c;
+    return c;
+  }
+
+  // ----- v4: sun disc -----
+  // A small bright disc at the vanishing point with a wide soft halo and
+  // a couple of faint horizontal flare beads. Daytime / no-storm only;
+  // colors lean warm by default and shift cooler in cool biomes.
+  function drawSunDisc(ctx, k) {
+    const biome = (Game && Game.biome) || 'wastes';
+    // Vanishing point sits where the road's horizon is in the legacy
+    // background draw. Shift slightly by player lean so the sun tracks
+    // gentle camera turn.
+    const playerLean = (Game.player) ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
+    const sx = W * 0.5 - playerLean * W * 0.04;
+    const sy = H * 0.34;
+    // Cool biomes pull the sun toward white/blue; warm biomes keep amber.
+    let coreCol = 'rgba(255,240,200,1)';
+    let haloCol = 'rgba(255,180,90,';
+    if (biome === 'frostwaste') { coreCol = 'rgba(235,245,255,1)'; haloCol = 'rgba(170,210,255,'; }
+    else if (biome === 'neonruins') { coreCol = 'rgba(255,220,255,1)'; haloCol = 'rgba(230,140,255,'; }
+    else if (biome === 'irradiated') { coreCol = 'rgba(230,255,210,1)'; haloCol = 'rgba(160,230,120,'; }
+    else if (biome === 'thunderplains') { coreCol = 'rgba(230,235,255,1)'; haloCol = 'rgba(150,170,220,'; }
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    // Outer halo — wide soft circle.
+    ctx.globalAlpha = 0.18 * k;
+    const halo = ctx.createRadialGradient(sx, sy, 4, sx, sy, 140);
+    halo.addColorStop(0, haloCol + '0.9)');
+    halo.addColorStop(0.4, haloCol + '0.35)');
+    halo.addColorStop(1, haloCol + '0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 140, 0, Math.PI * 2);
+    ctx.fill();
+    // Inner core — small bright disc.
+    ctx.globalAlpha = 0.55 * k;
+    const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, 26);
+    core.addColorStop(0, coreCol);
+    core.addColorStop(1, haloCol + '0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 26, 0, Math.PI * 2);
+    ctx.fill();
+    // Two faint flare beads down the optical axis (off-disc) — classic JJ
+    // Abrams lens-flare cue.
+    ctx.globalAlpha = 0.16 * k;
+    ctx.fillStyle = haloCol + '0.8)';
+    ctx.beginPath(); ctx.arc(sx + 60, sy + 22, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx - 90, sy - 16, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx + 140, sy + 48, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ----- v4: atmospheric horizon haze -----
+  // A soft horizontal band centered on the horizon line. Pulls a warm/cool
+  // wash from the sky into the upper ground, faking aerial perspective.
+  function drawAtmosphericHaze(ctx, k) {
+    const biome = (Game && Game.biome) || 'wastes';
+    const isNight = !!(Game && Game.isNight);
+    let col;
+    if (isNight) col = 'rgba(60,80,140,';
+    else if (biome === 'frostwaste') col = 'rgba(200,225,250,';
+    else if (biome === 'neonruins') col = 'rgba(220,140,230,';
+    else if (biome === 'irradiated') col = 'rgba(180,220,140,';
+    else if (biome === 'thunderplains') col = 'rgba(150,170,220,';
+    else col = 'rgba(255,200,140,';
+    const bandTop = H * 0.36;
+    const bandBot = H * 0.56;
+    const a = (isNight ? 0.10 : 0.14) * k;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const g = ctx.createLinearGradient(0, bandTop, 0, bandBot);
+    g.addColorStop(0,   col + '0)');
+    g.addColorStop(0.5, col + a.toFixed(3) + ')');
+    g.addColorStop(1,   col + '0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, bandTop, W, bandBot - bandTop);
+    ctx.restore();
+  }
+
+  // ----- v4: anamorphic horizontal flare -----
+  // Long thin blue/white horizontal streak through bright sources. Read of
+  // the same source signals used by drawBloomHighlights so the flare and
+  // bloom strike together. Quality-gated; skipped when no signal.
+  function drawAnamorphicFlare(ctx, k) {
+    if (!Game.player) return;
+    const muzzle = Math.max(0, Math.min(1, (Game.muzzleT || 0) / 0.08));
+    const flash  = Math.max(0, Math.min(1, (Game.flash || 0)));
+    const shake  = Math.max(0, Math.min(1, (Game.shake || 0) / 1.4));
+    const hit    = Math.max(0, Math.min(1, (Game.hitFlash || 0) / 0.35));
+    const nitroAmt = (typeof isPowerupActive === 'function' && isPowerupActive('nitro')) ? 0.45 : 0;
+    const total = Math.min(1.2, muzzle * 0.9 + flash * 0.55 + shake * 0.35 + hit * 0.35 + nitroAmt);
+    if (total < 0.12) return;
+    const px = Game.player.x;
+    const py = Game.player.y - 8;
+    // Streak width = full screen; height grows with intensity.
+    const streakH = 6 + total * 14;
+    const tex = _ensureFlareCanvas();
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.min(0.55, total * 0.35 * k);
+    // Stretch the gradient texture across screen, centered on player Y.
+    ctx.drawImage(tex, 0, py - streakH / 2, W, streakH);
+    // A second, narrower brighter core for punch.
+    ctx.globalAlpha = Math.min(0.5, total * 0.45 * k);
+    ctx.drawImage(tex, px - W * 0.35, py - streakH * 0.18, W * 0.7, streakH * 0.36);
+    ctx.restore();
+  }
+
+  // ----- v4: ambient drifting dust motes -----
+  // Tiny additive sparkles drifting in the lower screen half. Deterministic
+  // sin/cos positions seeded by index so we draw without any per-frame
+  // allocations. Reads as in-air dust/embers under the lighting.
+  function drawAmbientMotes(ctx, k) {
+    const t = (Game && Game.t) || 0;
+    const isNight = !!(Game && Game.isNight);
+    const biome = (Game && Game.biome) || 'wastes';
+    // Ember vs dust palette per biome.
+    let col;
+    if (biome === 'irradiated') col = 'rgba(180,255,140,';
+    else if (biome === 'neonruins') col = 'rgba(240,150,255,';
+    else if (biome === 'frostwaste') col = 'rgba(220,240,255,';
+    else if (isNight) col = 'rgba(230,210,160,';
+    else col = 'rgba(255,225,170,';
+    const count = Math.round(28 * k);
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < count; i++) {
+      // Each mote has a stable seed; position drifts with time + wind.
+      const sx = ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1;
+      const sy = ((Math.cos(i * 78.233) * 12345.6789) % 1 + 1) % 1;
+      const phase = i * 0.37;
+      // Wind drift: slow horizontal scroll + tiny vertical bob.
+      const driftX = (t * (8 + (i % 3) * 3) + sx * W) % (W + 80) - 40;
+      const driftY = H * (0.45 + sy * 0.5) + Math.sin(t * 0.7 + phase) * 4;
+      const tw = 0.4 + 0.6 * Math.sin(t * (1.4 + (i % 4) * 0.3) + phase);
+      const sz = (i % 5 === 0) ? 1.4 : 0.7;
+      ctx.globalAlpha = Math.min(0.65, (0.18 + tw * 0.4) * k);
+      ctx.fillStyle = col + (0.5 + tw * 0.5).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(driftX, driftY, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ----- v4: cinematic edge vignette -----
+  // Soft corner darken that intensifies a little when the action escalates.
+  // Heightens focus without ever stealing readability from the gameplay.
+  function drawCinematicVignette(ctx, k, playing) {
+    // Base subtle darkening always present at higher quality.
+    let extra = 0;
+    if (playing) {
+      // Low-HP push: ramp up as health falls under 50%.
+      const hp = (Game.health || 0), maxHp = Math.max(1, Game.maxHealth || 1);
+      const lowHpN = clamp(1 - (hp / maxHp) / 0.5, 0, 1); // 0 above 50% HP, 1 at 0
+      // Boss / arena boss raises tension.
+      const bossActive = !!(Game.boss || Game.arenaBossPending) ? 1 : 0;
+      // Combo build-up (uses the same combo counter the HUD shows).
+      const combo = Math.max(Game.combo || 0, Game.arenaCombo || 0);
+      const comboN = clamp(combo / 20, 0, 1);
+      extra = Math.min(0.18, lowHpN * 0.14 + bossActive * 0.05 + comboN * 0.06);
+    }
+    const a = 0.18 * k + extra;
+    if (a < 0.02) return;
+    const cx = W * 0.5, cy = H * 0.55;
+    const inner = Math.min(W, H) * 0.32;
+    const outer = Math.max(W, H) * 0.78;
+    const g = ctx.createRadialGradient(cx, cy, inner, cx, cy, outer);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.55, 'rgba(0,0,0,' + (a * 0.45).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,' + a.toFixed(3) + ')');
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // ========================================================================
   // PHOTO MODE — composites the current canvas into a poster (title, score,
   // brand, dramatic frame). Returns a dataURL or null. Used by the results
   // screen "PHOTO MODE" button. Pure read of the current canvas pixels —
@@ -17427,7 +17664,7 @@ const Cinematic = (function () {
       c.font = `${Math.round(h * 0.018)}px "Courier New", monospace`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText('— WASTELAND CINEMATIC v3.0 —', w / 2, bar / 2);
+      c.fillText('— WASTELAND CINEMATIC v4.0 —', w / 2, bar / 2);
       return out.toDataURL('image/png');
     } catch (e) {
       console.warn('[Cinematic] poster build failed', e);
@@ -21317,6 +21554,11 @@ function renderArena() {
   }
 
   ctx.restore(); // end shake save
+
+  // v4: route the cinematic post-FX stack through arena rendering too so
+  // sun disc / horizon haze / anamorphic flare / dust motes / edge vignette
+  // all read in arena mode just like the classic mode.
+  if (typeof Cinematic !== 'undefined') Cinematic.postFx(ctx);
 
   // Batch v3 — day/night tint sits between gameplay and vignette so the
   // vignette darken still reads. Lightning flash overlays on top.
