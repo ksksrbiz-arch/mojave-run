@@ -5054,6 +5054,16 @@ function startRun(mode, level) {
   Game._lastAutoAdrenT = -99;
   Game.driftCharge = 0;
   Game.driftLastDir = 0;
+  // === Classic Dirt5/OutRun handling state (Phase 1) — mode-isolated ===
+  Game.classicDrifting = false;
+  Game.classicDriftHoldT = 0;        // time current high-steer hold has lasted
+  Game.classicDriftActiveT = 0;      // time currently in drift state (for charge gain)
+  Game.classicBoostT = 0;            // remaining drift-boost burst time
+  Game.classicLean = 0;              // smoothed lean (-1..1) for camera/VP cues
+  Game.classicSurfaceGrip = 1;       // 1 = tarmac, <1 = dirt edge
+  Game.classicDirtDustT = 0;         // throttle for edge dust emit
+  Game.topSpeed = 0;                 // run-scope, surfaced in Phase 5 overlay
+  Game.bestDriftCharge = 0;          // peak drift charge banked
   Game._lastNearMissFeedbackT = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
@@ -6588,6 +6598,193 @@ function updateVictory(dt) {
   while (Game.decor.length < 36) Game.decor.push(makeDecor());
 }
 
+// =========================================================================
+// Classic Dirt5 × OutRun handling (Phase 1) — mode-isolated to 'classic'.
+// Replaces the direct vx-clamp steering with an accel/grip model + drift
+// state machine. Reuses Game.driftCharge / Game.driftLastDir. All extra
+// state lives on Game (Game.classic*). When called, this function performs
+// the full per-frame movement update for the player (vx integration, x
+// integration, edge clamps) — the caller must NOT also run the legacy
+// steering block.
+// =========================================================================
+function updateClassicHandling(dt, p, stats) {
+  const accel = stats.accel;
+  const maxV  = stats.maxV;
+  // -- read steering input (keyboard + touch target) --
+  const keyAxis = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  let steerInput = 0;
+  if (keyAxis !== 0) {
+    steerInput = keyAxis;
+  } else if (input.touchTargetX !== null) {
+    const target = clamp(input.touchTargetX, 0, W);
+    const dx = target - p.x;
+    if (Math.abs(dx) > 16) steerInput = clamp(dx / 90, -1, 1);
+  }
+  p.steerSmooth = expEase(p.steerSmooth || 0, steerInput, 18, dt);
+
+  // -- speed fraction (drives grip scaling) --
+  const speedFrac = clamp((Game.speed || 0) / 520, 0, 1);
+
+  // -- surface feel: edge of road = "dirt", lower grip + dust --
+  const rb = roadBounds();
+  const halfW = p.w / 2;
+  const insetL = (p.x - halfW) - rb.x0;
+  const insetR = rb.x1 - (p.x + halfW);
+  const minInset = Math.min(insetL, insetR);
+  const dirtZone = 22;
+  let surfGrip = 1;
+  if (minInset < dirtZone) {
+    // 0 at edge → 1 at dirtZone
+    surfGrip = 0.55 + 0.45 * Math.max(0, minInset / dirtZone);
+  }
+  Game.classicSurfaceGrip = surfGrip;
+
+  // -- drift state machine --
+  // Enter drift when player holds hard steer at speed for >0.18s, or when
+  // |vx| already exceeds 0.7*maxV (carried slide).
+  const wantDrift = (Math.abs(steerInput) > 0.85 && speedFrac > 0.5) ||
+                    (Math.abs(p.vx) > maxV * 0.7 && Math.abs(steerInput) > 0.4);
+  if (wantDrift) {
+    Game.classicDriftHoldT = (Game.classicDriftHoldT || 0) + dt;
+  } else {
+    Game.classicDriftHoldT = Math.max(0, (Game.classicDriftHoldT || 0) - dt * 2.2);
+  }
+  const wasDrifting = !!Game.classicDrifting;
+  const enterThresh = 0.18;
+  const exitThresh  = 0.05;
+  if (!wasDrifting && Game.classicDriftHoldT >= enterThresh) {
+    Game.classicDrifting = true;
+    Game.classicDriftActiveT = 0;
+    if (Settings && !Settings.reducedMotion) Game.shake = Math.max(Game.shake, 0.18);
+    if (SFX && SFX.click) SFX.click();
+  } else if (wasDrifting && Game.classicDriftHoldT <= exitThresh) {
+    // Exit drift — convert accumulated charge to a boost if meaningful.
+    Game.classicDrifting = false;
+    const charge = Game.driftCharge || 0;
+    Game.bestDriftCharge = Math.max(Game.bestDriftCharge || 0, charge);
+    if (charge >= 30) {
+      // 30..100 → 0.35..0.85s boost; speed kick scales with charge
+      const cN = Math.min(1, charge / 100);
+      Game.classicBoostT = Math.max(Game.classicBoostT || 0, 0.35 + cN * 0.5);
+      const kick = 45 + cN * 95;
+      Game.targetSpeed = Math.min((Game.targetSpeed || 0) + kick, 560);
+      Game.speed = Math.min((Game.speed || 0) + kick * 0.55, Game.targetSpeed);
+      const bonus = Math.round(60 + cN * 180);
+      Game.score += bonus;
+      addPopup('DRIFT BOOST +' + bonus, p.x, p.y - 70, '#7af0ff', 14 + Math.round(cN * 4));
+      if (SFX && SFX.nitroOn) SFX.nitroOn();
+      if (Haptics && Haptics.combo) Haptics.combo(2);
+      if (Settings && !Settings.reducedMotion) {
+        Game.shake = Math.max(Game.shake, 0.35 + cN * 0.35);
+        emit(p.x, p.y + p.h * 0.35, 12 + Math.round(cN * 14),
+          { color:'#7af0ff', speed:240, life:0.45, size:3, shape:'spark', spread:Math.PI });
+      }
+    } else if (charge > 6) {
+      // Small "fizzle" — release without bonus, just a wisp
+      if (Settings && !Settings.reducedMotion) {
+        emit(p.x, p.y + p.h * 0.35, 4,
+          { color:'rgba(160,180,200,0.5)', speed:120, life:0.35, size:3, spread:Math.PI });
+      }
+    }
+    Game.driftCharge = 0;
+    Game.driftLastDir = 0;
+  }
+
+  // -- grip & lateral integration --
+  // Base grip drops with speed (high-speed = slidey). Drift slashes it.
+  // Surface dirt cuts a further bit.
+  const baseGrip = 7.5 * (1 - speedFrac * 0.42);
+  const driftGripMul = Game.classicDrifting ? 0.32 : 1.0;
+  const grip = Math.max(0.8, baseGrip * driftGripMul * surfGrip);
+  const driftAccelMul = Game.classicDrifting ? 1.55 : 1.0;
+  // brake (input.down): real speed cut, not just visual.
+  if (input.down) {
+    Game.targetSpeed = Math.max(160, (Game.targetSpeed || 0) - 240 * dt);
+    Game.speed = Math.max(160, (Game.speed || 0) - 320 * dt);
+  }
+  // Lateral force from steering input + drift amplification
+  p.vx += p.steerSmooth * accel * driftAccelMul * dt;
+  // Grip pulls vx toward 0 (per-second exponential)
+  p.vx -= p.vx * Math.min(1, grip * dt);
+  // Clamp; allow ~25% overshoot when drifting (the "loose" feel)
+  const vxCap = maxV * (Game.classicDrifting ? 1.25 : 1.0);
+  p.vx = clamp(p.vx, -vxCap, vxCap);
+  p.x  += p.vx * dt;
+
+  // -- drift-charge accumulation (reuses existing Game.driftCharge) --
+  if (Game.classicDrifting) {
+    Game.classicDriftActiveT = (Game.classicDriftActiveT || 0) + dt;
+    const dir = p.vx > 60 ? 1 : p.vx < -60 ? -1 : 0;
+    if (dir !== 0 && Game.driftLastDir !== 0 && Game.driftLastDir !== dir) {
+      // Flick the other way mid-drift: small bonus + reset peak so the
+      // player can chain alternating drifts for a fatter boost.
+      Game.driftCharge = Math.min(100, (Game.driftCharge || 0) + 12);
+    }
+    if (dir !== 0) Game.driftLastDir = dir;
+    const vxFrac = Math.abs(p.vx) / Math.max(1, maxV);
+    const gain = (40 + vxFrac * 75) * Math.max(0.4, speedFrac) * dt;
+    Game.driftCharge = Math.min(100, (Game.driftCharge || 0) + gain);
+  } else {
+    // Decay charge when not drifting (gentle so brief settling between
+    // chained drifts doesn't drain too much).
+    if (!Game.classicBoostT || Game.classicBoostT <= 0) {
+      Game.driftCharge = Math.max(0, (Game.driftCharge || 0) - 28 * dt);
+      if (Game.driftCharge <= 0.5) Game.driftLastDir = 0;
+    }
+  }
+
+  // -- dirt-edge dust + scrap-feel "rough" drain --
+  if (minInset < dirtZone && Math.abs(p.vx) > 30 && speedFrac > 0.25) {
+    Game.classicDirtDustT = (Game.classicDirtDustT || 0) - dt;
+    if (Game.classicDirtDustT <= 0 && Settings && !Settings.reducedMotion) {
+      Game.classicDirtDustT = 0.05;
+      const side = (insetL < insetR) ? -1 : 1;
+      emit(p.x + side * (p.w * 0.45), p.y + p.h * 0.4, 2,
+        { color:'rgba(170,140,90,0.55)', speed:90, life:0.45, size:5, spread:Math.PI * 0.6 });
+    }
+    // Steady speed bleed off-road (the "rough" feel) — no scrap loss to
+    // avoid touching the economy.
+    Game.targetSpeed = Math.max(180, (Game.targetSpeed || 0) - 45 * dt);
+  }
+
+  // -- camera lean (read by VP/road code when wired in later phases) --
+  const leanTarget = clamp(p.steerSmooth * (Game.classicDrifting ? 1.6 : 1.0), -1.6, 1.6);
+  Game.classicLean = expEase(Game.classicLean || 0, leanTarget, 6, dt);
+
+  // -- boost burst aftermath --
+  if (Game.classicBoostT > 0) {
+    Game.classicBoostT -= dt;
+    if (Settings && !Settings.reducedMotion) {
+      Game.shake = Math.max(Game.shake, 0.12 + 0.18 * Math.min(1, Game.classicBoostT));
+    }
+  }
+
+  // -- track top speed (run-scope, Phase 5 surfaces it) --
+  if ((Game.speed || 0) > (Game.topSpeed || 0)) Game.topSpeed = Game.speed;
+
+  // -- road-edge collision (kept consistent with legacy steering block) --
+  const { x0, x1 } = rb;
+  if (p.x - halfW < x0 + 4) {
+    p.x = x0 + 4 + halfW;
+    p.vx = Math.max(0, p.vx * 0.18);
+    p.steerSmooth = Math.max(0, (p.steerSmooth || 0) * 0.35);
+    Game.shake = Math.max(Game.shake, 0.1);
+  }
+  if (p.x + halfW > x1 - 4) {
+    p.x = x1 - 4 - halfW;
+    p.vx = Math.min(0, p.vx * 0.18);
+    p.steerSmooth = Math.min(0, (p.steerSmooth || 0) * 0.35);
+    Game.shake = Math.max(Game.shake, 0.1);
+  }
+  p.y = H - 110;
+
+  // Skid marks while drifting hard
+  if (Game.classicDrifting && Math.abs(p.vx) > 180 && Math.random() < 0.9) {
+    Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
+    Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
+  }
+}
+
 function update(dt) {
   Game.animT += dt;
   if (Game.state === 'replay')  { updateReplayPlayback(dt); return; }
@@ -6837,6 +7034,9 @@ function update(dt) {
       Game.spinout = null;
       addPopup('BACK IN CONTROL', W * 0.5, H * 0.4, '#7af07a', 13);
     }
+  } else if (Game.mode === 'classic') {
+    // ---- Phase 1 Classic handling: accel/grip + drift state machine ----
+    updateClassicHandling(dt, p, stats);
   } else {
     // ---- normal steering ----
     const accel = stats.accel;
@@ -21932,6 +22132,8 @@ function renderArena() {
     if (Game.mode === 'arena') drawArenaDashHUD();
     // Phase 6 — arena combo display
     if (Game.mode === 'arena') drawArenaCombo();
+    // Phase 1 Classic Dirt5/OutRun — drift-charge meter (Classic only)
+    if (Game.mode === 'classic') drawClassicDriftHUD();
     // Phase 5 refinement — offscreen threat indicators (boss + armed mines).
     if (Game.mode === 'arena') drawArenaOffscreenIndicators();
     drawArenaMinimap();
@@ -22351,6 +22553,52 @@ function drawArenaCombo() {
   ctx.textAlign = 'center';
   ctx.fillText((comboNum % ARENA_COMBO_KILLS_PER_TIER) + '/' + ARENA_COMBO_KILLS_PER_TIER, x + barW/2, y + 53);
   
+  ctx.restore();
+}
+
+// Phase 1 Classic Dirt5/OutRun — drift-charge meter. Sits below the HUD
+// strip on the left, mirrors the visual idiom of drawArenaCombo's bar.
+function drawClassicDriftHUD() {
+  const charge = Game.driftCharge || 0;
+  const drifting = !!Game.classicDrifting;
+  const boostT = Game.classicBoostT || 0;
+  // Hide when there's nothing interesting to show
+  if (charge < 1 && !drifting && boostT <= 0) return;
+  const hudH = W < 500 ? 48 : 56;
+  const x = 12;
+  const y = hudH + 6;
+  const barW = W < 500 ? 96 : 120;
+  const barH = 8;
+  ctx.save();
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  // Label
+  const labelColor = boostT > 0 ? '#ffffff' : drifting ? '#ffd86b' : 'rgba(220,210,180,0.85)';
+  ctx.fillStyle = labelColor;
+  ctx.fillText(boostT > 0 ? 'BOOST!' : drifting ? 'DRIFT' : 'DRIFT', x, y);
+  // Bar background
+  ctx.fillStyle = 'rgba(20,16,12,0.7)';
+  ctx.fillRect(x, y + 14, barW, barH);
+  // Fill — neutral → gold; flashes white during boost
+  const frac = Math.min(1, charge / 100);
+  let fillCol;
+  if (boostT > 0) {
+    fillCol = '#ffffff';
+  } else if (drifting) {
+    // ramp blue → cyan → gold as charge builds while drifting
+    fillCol = frac > 0.75 ? '#ffd86b' : frac > 0.4 ? '#7af0ff' : '#5fb6e0';
+  } else {
+    fillCol = frac > 0.6 ? '#ffb36a' : '#a8c890';
+  }
+  ctx.fillStyle = fillCol;
+  ctx.fillRect(x, y + 14, barW * frac, barH);
+  // Threshold ticks at 30 (min boost) and 100 (max)
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.fillRect(x + Math.round(barW * 0.30), y + 14, 1, barH);
+  // Outline
+  ctx.strokeStyle = drifting ? '#ffd86b' : 'rgba(140,120,90,0.7)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 14 + 0.5, barW - 1, barH - 1);
   ctx.restore();
 }
 
