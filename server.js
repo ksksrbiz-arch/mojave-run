@@ -622,7 +622,7 @@ const server = http.createServer((req, res) => {
     }
     let body = '';
     req.on('data', chunk => {
-      if (body.length + chunk.length > 4096) { req.destroy(); return; }
+      if (body.length + chunk.length > 8192) { req.destroy(); return; }
       body += chunk;
     });
     req.on('end', () => {
@@ -723,7 +723,7 @@ const server = http.createServer((req, res) => {
               acc.data.subscription = acc.data.subscription || {};
               acc.data.subscription.active = true;
               acc.data.subscription.priceId = priceId;
-              acc.data.subscription.currentPeriodEnd = session.expires_at || null;
+              acc.data.subscription.currentPeriodEnd = null; // Set by customer.subscription.updated webhook
             }
 
             acc.savedAt = Date.now();
