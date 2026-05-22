@@ -5022,6 +5022,10 @@ const Game = {
   powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null, homing: null, armor: null, chainsaw: null, molotov: null, pipebomb: null, barricade: null, adrenaline: null },
   // tire skid marks (drawn under road decals)
   skidMarks: [],
+  // Phase 6 polish: throttle classic-drift skid spawns to ~30 Hz instead of
+  // per-frame Math.random(), and cache road-strip count keyed by quality.
+  classicSkidSpawnT: 0,
+  _classicStripsCache: { q: -1, n: 0 },
   // far parallax peaks (deepest layer)
   farPeaks: [],
   // dust devils / weather embellishments
@@ -7086,8 +7090,13 @@ function updateClassicHandling(dt, p, stats) {
   }
   p.y = H - 110;
 
-  // Skid marks while drifting hard
-  if (Game.classicDrifting && Math.abs(p.vx) > 180 && Math.random() < 0.9) {
+  // Skid marks while drifting hard.
+  // Phase 6: throttle to ~30 Hz so we don't push two marks every frame at
+  // 60 fps; the skidMarks array is RUNTIME_CAPS-bounded but each push has
+  // a real cost and per-frame Math.random() was wasteful.
+  Game.classicSkidSpawnT = (Game.classicSkidSpawnT || 0) - dt;
+  if (Game.classicDrifting && Math.abs(p.vx) > 180 && Game.classicSkidSpawnT <= 0) {
+    Game.classicSkidSpawnT = 0.033; // ~30 Hz
     Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
     Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
   }
@@ -8744,7 +8753,14 @@ function drawRoadClassicV2() {
 
   // Per-row road-surface strips (cheap horizontal trapezoids).
   // STRIPS controls density: ~64 strips is plenty for a smooth curve.
-  const STRIPS = (PerfMon.quality > 0.5) ? 72 : 44;
+  // Phase 6: cache the result keyed on PerfMon.quality so we don't
+  // re-evaluate the threshold on every road frame. Quality only changes
+  // on shed/recover events (~once per several seconds at most).
+  const _stripsCache = Game._classicStripsCache;
+  if (!_stripsCache || _stripsCache.q !== PerfMon.quality) {
+    Game._classicStripsCache = { q: PerfMon.quality, n: (PerfMon.quality > 0.5) ? 72 : 44 };
+  }
+  const STRIPS = Game._classicStripsCache.n;
   const stripH = (H - horizonYEff) / STRIPS;
   for (let si = 0; si < STRIPS; si++) {
     const yTop = horizonYEff + si * stripH;
@@ -9045,9 +9061,10 @@ function _drawClassicHorizonLayer(horizonY, fill, scrollFrac, curveDx, yOff, pea
   for (let i = 0; i <= N; i++) {
     const fr = (i / N + scrollFrac) % 1;
     const x  = -20 + fr * (W + 40) + curveDx;
-    // hash-ish but cheap: stable per i
-    const h  = ((i * 8761 + 13) % 100) / 100;
-    const ph = peakH * (0.5 + h * 0.9);
+    // Deterministic 0..1 height factor per peak index (hash-ish but cheap
+    // and stable so the silhouette doesn't shimmer frame to frame).
+    const peakHeightNorm = ((i * 8761 + 13) % 100) / 100;
+    const ph = peakH * (0.5 + peakHeightNorm * 0.9);
     // alternating shapes — sharp triangle vs flat-top mesa
     if ((i & 1) === 0) {
       ctx.lineTo(x - 16, baseY - ph * 0.85);
