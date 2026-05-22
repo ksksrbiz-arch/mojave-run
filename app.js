@@ -6958,7 +6958,7 @@ const SUSP_ROLL_LERP = 0.15;    // body roll interpolation speed
 const SUSP_ROLL_MAX  = 5;       // max roll degrees
 
 function updateCarSuspension(dt) {
-  const dtN = dt / (1 / 60);                      // normalise to 60 fps
+  const dtN = dt * 60;                                  // normalise to 60 fps
   const speed = Game.speed || 0;
   const speedN = clamp(speed / 460, 0, 1);
   const p = Game.player;
@@ -10706,7 +10706,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   // Spring-based suspension: use real physics output for the player vehicle,
   // fall back to sinusoidal bob for enemies/previews.
   const isPlayerVehicle = (vehicle === Game.vehicle && !opts.ghost && !opts.isEnemy
-    && Game.player && x === Game.player.x && y === Game.player.y);
+    && Game.player && Game.state === 'playing');
   const suspensionBob = isPlayerVehicle
     ? (Game.suspOffset || 0) * 0.55              // spring compression → visual downward shift
     : Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
