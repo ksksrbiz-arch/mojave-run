@@ -3815,12 +3815,8 @@ const ClassicAudio = {
         this._musicAcc = 0;
         const biome = (Game && Game.biome) || 'wastes';
         if (biome !== this._lastBiome) this._lastBiome = biome;
-        // Per-biome scale (semitones from a root). OutRun-y minor scales.
-        const ROOTS = { wastes: 220, canyon: 196, neonruins: 247, frostwaste: 174,
-                        irradiated: 207, thunderplains: 185, midnight: 165 };
-        const root = ROOTS[biome] || 220;
-        const SCALES = [0, 3, 5, 7, 10, 12, 15];
-        const step1 = SCALES[Math.floor(Math.random() * SCALES.length)];
+        const root = CLASSIC_AUDIO_ROOTS[biome] || 220;
+        const step1 = CLASSIC_AUDIO_SCALE[Math.floor(Math.random() * CLASSIC_AUDIO_SCALE.length)];
         const note  = root * Math.pow(2, step1 / 12);
         const noteVol = 0.025 + sN * 0.035;
         const dur = step * 0.85;
@@ -3838,9 +3834,11 @@ const ClassicAudio = {
   },
 };
 
-// ============================================================
-// HELPERS
-// ============================================================
+// Module-level constants for ClassicAudio music driver — hoisted out of
+// the per-frame update() to avoid per-call allocation.
+const CLASSIC_AUDIO_ROOTS = { wastes: 220, canyon: 196, neonruins: 247, frostwaste: 174,
+                              irradiated: 207, thunderplains: 185, midnight: 165 };
+const CLASSIC_AUDIO_SCALE = [0, 3, 5, 7, 10, 12, 15];
 const rand = (a,b) => a + Math.random() * (b - a);
 const irand = (a,b) => Math.floor(rand(a,b+1));
 const clamp = (v,lo,hi) => v < lo ? lo : v > hi ? hi : v;
@@ -6893,6 +6891,24 @@ function updateClassicHandling(dt, p, stats) {
   Game.classicCurveSmooth = expEase(Game.classicCurveSmooth || 0, curveTarget, 2.4, dt);
   const hillTarget = getClassicHillAt(Game.distance);
   Game.classicHillSmooth = expEase(Game.classicHillSmooth || 0, hillTarget, 2.0, dt);
+  // Phase 5 — edge-trigger a soft "thump" when we crest a hill (smoothed
+  // hill peaks above threshold, then drops). Adds a punchy suspension cue
+  // synced with the visual horizon lift.
+  {
+    const h = Game.classicHillSmooth || 0;
+    const ph = Game._classicHillPrev || 0;
+    if (ph > 0.55 && h <= ph && h > 0.50 && (Game.classicCrestTriggerT || 0) <= 0) {
+      Game.classicCrestTriggerT = 0.6;
+      if (audioCtx && typeof tone === 'function') {
+        const now = audioCtx.currentTime;
+        try { tone(95, 0.10, 'sine',  0.05, -40, now,        audioSfxGain, 0.0006); } catch (_) {}
+        try { tone(160, 0.07, 'triangle', 0.03, -60, now + 0.02, audioSfxGain, 0.0006); } catch (_) {}
+      }
+      if (Settings && !Settings.reducedMotion) Game.shake = Math.max(Game.shake, 0.18);
+    }
+    Game._classicHillPrev = h;
+    if (Game.classicCrestTriggerT > 0) Game.classicCrestTriggerT -= dt;
+  }
   // -- read steering input (keyboard + touch target) --
   const keyAxis = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   let steerInput = 0;
@@ -13219,6 +13235,14 @@ function drawDeathOverlay() {
         ctx.fillStyle = '#c0b0ff';
         ctx.fillText('PERKS x' + perkCount + ' · KILLS ' + (Game.arenaKills || 0), W/2, H * 0.70);
       }
+    }
+    // Phase 5 Classic Dirt5/OutRun — top speed & biggest drift chain.
+    if (Game.mode === 'classic') {
+      const topMps = Math.round(Game.topSpeed || 0);
+      const bestC  = Math.round(Game.bestDriftCharge || 0);
+      ctx.font = `bold ${W < 500 ? 11 : 13}px "Courier New", monospace`;
+      ctx.fillStyle = '#7af0ff';
+      ctx.fillText('TOP SPEED ' + topMps + ' · DRIFT ' + bestC + '%', W/2, H * 0.59);
     }
   }
   ctx.restore();
