@@ -3917,6 +3917,18 @@ function getWindingRoadShift(y = H * 0.5) {
 // =====================================================================
 const CLASSIC_CURVE_SEG_LEN = 700;
 const CLASSIC_HILL_SEG_LEN  = 950;
+const CLASSIC_ROAD_VISUAL_SPEED_REF = 540;
+const CLASSIC_ROAD_VISUAL_BOOST_REF = 0.85;
+const CLASSIC_PLAYER_SHADOW_SPEED_REF = 520; // shadow tightening starts slightly earlier than road streak peak
+const CLASSIC_TEXTURE_SEED_A = 73;
+const CLASSIC_TEXTURE_SEED_B = 97;
+const CLASSIC_TEXTURE_SEED_MOD = 997;
+const CLASSIC_TEXTURE_DETAIL_HIGH_T = 0.72;
+const CLASSIC_TEXTURE_DETAIL_MED_T = 0.45;
+const CLASSIC_TEXTURE_SCROLL_RATE = 0.22;
+// Golden ratio conjugate — used for even pseudo-random distribution in
+// procedural texture seeding.
+const GOLDEN_RATIO_CONJUGATE = 0.6180339887;
 function _classicSegHash(i) {
   let h = (i | 0) ^ 0xDEADBEEF;
   h = Math.imul(h ^ (h >>> 15), 0x85EBCA77);
@@ -3982,6 +3994,45 @@ function getClassicRoadHillDy(y) {
   const wq = (1 - tFrac) * (1 - tFrac);
   return -h * wq * 16;
 }
+function classicRoadPerspectiveT(tFrac) {
+  return Math.pow(clamp(tFrac, 0, 1), 1.08);
+}
+
+// === Z-based perspective helpers ===
+// These map world-Z distance (0 = player, increasing into horizon) to screen
+// coordinates. They share the same perspective strength (CLASSIC_PERSP_K) so
+// road surface, markings, barriers, and roadside detail all converge
+// identically. baseWidth is the pixel road width at Z = 0 (the player row).
+const CLASSIC_PERSP_K = 0.008;
+const CLASSIC_BASE_WIDTH = 280;
+
+// Returns the screen-space Y for a given world-Z distance from the player.
+// z: world distance from player (0 = at player, larger = farther)
+// horizonY: pixel Y of the horizon line on screen
+function worldToScreenY(z, horizonY) {
+  const scale = 1 / (1 + z * CLASSIC_PERSP_K);
+  return horizonY + (H - horizonY) * (1 - scale);
+}
+
+// Returns the apparent pixel road width at a given world-Z distance.
+function getRoadWidthAtZ(z) {
+  return CLASSIC_BASE_WIDTH * (1 / (1 + z * CLASSIC_PERSP_K));
+}
+
+// Projects a world-X position to screen-space at a given world-Z distance.
+// roadCenterX: screen-space X of the road center (defaults to W/2)
+function worldToScreenX(worldX, z, roadCenterX) {
+  const scale = 1 / (1 + z * CLASSIC_PERSP_K);
+  return (roadCenterX || W * 0.5) + worldX * scale;
+}
+
+// Speed-based road vibration amplitude — rougher biomes produce stronger
+// micro-shake at high speed, giving the surface a tactile rumble feel.
+const CLASSIC_ROAD_ROUGHNESS = {
+  wastes: 0.12, canyon: 0.22, neonruins: 0.10, thunderplains: 0.28,
+  frostwaste: 0.18, irradiated: 0.20, midnight: 0.06, scraparch: 0.25,
+};
+
 
 function emit(x, y, n, opts = {}) {
   n = Math.max(1, Math.round(n * PARTICLE_SCALE * Settings.particles));
@@ -5352,6 +5403,10 @@ function startRun(mode, level) {
   Game.classicCrestTriggerT = 0;     // edge-trigger for crest SFX (Phase 5)
   Game.topSpeed = 0;                 // run-scope, surfaced in Phase 5 overlay
   Game.bestDriftCharge = 0;          // peak drift charge banked
+  // === Suspension physics state (spring-based, replaces sinusoidal bob) ===
+  Game.suspOffset = 0;               // current vertical compression (px)
+  Game.suspVelocity = 0;             // spring velocity
+  Game.suspBodyRoll = 0;             // lean into turns (degrees)
   Game._lastNearMissFeedbackT = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
@@ -6889,6 +6944,68 @@ function updateVictory(dt) {
 }
 
 // =========================================================================
+// Spring-based car suspension physics.
+// Replaces the sinusoidal suspensionBob in drawVehicle with a real spring
+// simulation driven by speed, boost, drift, hill crests, and damage.
+// State lives on Game (suspOffset, suspVelocity, suspBodyRoll).
+// Called once per frame from updateClassicHandling (classic mode) and from
+// the legacy steering path for other modes.
+// =========================================================================
+const SUSP_SPRING = 0.24;        // spring stiffness
+const SUSP_DAMP   = 0.80;        // damping (lower = bouncier)
+const SUSP_MAX    = 18;          // max compression (px)
+const SUSP_ROLL_LERP = 0.15;    // body roll interpolation speed
+const SUSP_ROLL_MAX  = 5;       // max roll degrees
+
+function updateCarSuspension(dt) {
+  const dtN = dt * 60;                                  // normalise to 60 fps
+  const speed = Game.speed || 0;
+  const speedN = clamp(speed / 460, 0, 1);
+  const p = Game.player;
+  if (!p) return;
+
+  // -- target compression based on current state --
+  let target = 0;
+  if (speed > 40) target = 3 + (speed - 40) * 0.035;
+  if ((Game.classicBoostT || 0) > 0) target += 6;
+  if (Game.classicDrifting) target += 4;
+
+  // Damage sag: heavy damage makes the chassis sag slightly
+  const dmgR = 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1);
+  target += dmgR * 4;
+
+  // Hill crests inject an upward impulse (suspension extends, then rebounds)
+  if ((Game.classicCrestTriggerT || 0) > 0.4) {
+    Game.suspVelocity -= 3.5;  // kick upward
+  }
+
+  // Biome roughness adds a small oscillating perturbation at speed
+  const biomeRough = CLASSIC_ROAD_ROUGHNESS[Game.biome] || 0.12;
+  if (speedN > 0.35) {
+    const roughOsc = Math.sin((Game.t || 0) * (14 + speedN * 22)) * biomeRough * speedN * 2.8;
+    target += roughOsc;
+  }
+
+  // -- spring simulation --
+  Game.suspVelocity += (target - Game.suspOffset) * SUSP_SPRING * dtN;
+  Game.suspVelocity *= SUSP_DAMP;
+  Game.suspOffset += Game.suspVelocity * dtN;
+  Game.suspOffset = clamp(Game.suspOffset, -3, SUSP_MAX);
+
+  // -- body roll (lean into turns) --
+  const vx = p.vx || 0;
+  const turnDir = clamp(vx / 320, -1, 1);
+  const targetRoll = turnDir * SUSP_ROLL_MAX * (Game.classicDrifting ? 1.5 : 1);
+  Game.suspBodyRoll = Game.suspBodyRoll * (1 - SUSP_ROLL_LERP) + targetRoll * SUSP_ROLL_LERP;
+
+  // Sync camera shake with strong suspension movements
+  if (Settings && !Settings.reducedMotion) {
+    const suspImpact = Math.abs(Game.suspVelocity) * 0.006;
+    if (suspImpact > 0.06) Game.shake = Math.max(Game.shake, suspImpact);
+  }
+}
+
+// =========================================================================
 // Classic Dirt5 × OutRun handling (Phase 1) — mode-isolated to 'classic'.
 // Replaces the direct vx-clamp steering with an accel/grip model + drift
 // state machine. Reuses Game.driftCharge / Game.driftLastDir. All extra
@@ -7080,6 +7197,19 @@ function updateClassicHandling(dt, p, stats) {
     }
   }
 
+  // -- speed-based road vibration / camera bob --
+  // At high speed the surface micro-shakes proportionally to biome roughness,
+  // giving the road a tactile rumble feel without requiring explicit bumps.
+  if (Settings && !Settings.reducedMotion) {
+    const biomeRough = CLASSIC_ROAD_ROUGHNESS[Game.biome] || 0.12;
+    const speedFrac2 = clamp((Game.speed || 0) / 480, 0, 1);
+    if (speedFrac2 > 0.45) {
+      const vibIntensity = (speedFrac2 - 0.45) / 0.55;
+      const vibAmp = vibIntensity * biomeRough * 0.08;
+      Game.shake = Math.max(Game.shake, vibAmp);
+    }
+  }
+
   // -- track top speed (run-scope, Phase 5 surfaces it) --
   if ((Game.speed || 0) > (Game.topSpeed || 0)) Game.topSpeed = Game.speed;
 
@@ -7112,6 +7242,9 @@ function updateClassicHandling(dt, p, stats) {
     Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
     Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
   }
+
+  // -- spring-based suspension physics --
+  updateCarSuspension(dt);
 }
 
 function update(dt) {
@@ -7469,6 +7602,9 @@ function update(dt) {
     }
     p.y = H - 110;
   }
+
+  // -- suspension physics (runs for all non-arena modes) --
+  if (!Game.spinout) updateCarSuspension(dt);
 
   // ---- fire ----
   Game.fireCooldown -= dt;
@@ -8177,6 +8313,8 @@ function damagePlayer(amt) {
   Game.health -= amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
+  // Suspension impact kick — car jolts downward on hit
+  Game.suspVelocity = (Game.suspVelocity || 0) + 4.5;
   // taking damage breaks the combo and bounty chain
   Game.combo = 0;
   Game.bountyStreak = 0;
@@ -8804,11 +8942,21 @@ function drawRoad() {
 // the current curve; rumble strips / dashes / cracks / oil patches all
 // re-project through getClassicRoadShift(y). Mode-isolated — strictly
 // called only when Game.mode === 'classic'.
+//
+// Modular architecture — drawRoadClassicV2 builds a shared context object
+// and delegates to focused sub-renderers:
+//   _drawClassicRoadSurface    — per-strip trapezoid banding + rumble strips
+//   _drawClassicRoadMarkings   — centre line, lane guides, edge lines
+//   _drawClassicSideBarriers   — concrete walls with faces, tops, posts
+//   _drawClassicAsphaltDetail  — tyre wear, grain specks, boost glow, cracks, oil, haze
+//   _drawClassicRoadsideDetails — small debris/rocks along road shoulders
 // =====================================================================
 function drawRoadClassicV2() {
   const t = activeBiomeTheme();
   const { w } = roadBounds();                // straight road width (stable)
   const horizonY = H * 0.42;
+  const speedN = clamp((Game.speed || 0) / CLASSIC_ROAD_VISUAL_SPEED_REF, 0, 1);
+  const boostN = clamp((Game.classicBoostT || 0) / CLASSIC_ROAD_VISUAL_BOOST_REF, 0, 1);
   // Vanishing point: player lean + smoothed curve at the horizon.
   const playerLean = Game.player ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
   // Boost slightly amplifies the lean for that hot-corner cinematic kick.
@@ -8818,10 +8966,24 @@ function drawRoadClassicV2() {
   const hillHorizonOffset = -(Game.classicHillSmooth || 0) * 12;
   const horizonYEff = horizonY + hillHorizonOffset;
 
+  // Shared render context passed to all sub-renderers.
+  const rc = { t, w, horizonY, horizonYEff, speedN, boostN, vpX };
+
   // Ground fill (shoulder) — full screen from horizon to bottom.
   ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
   ctx.fillRect(0, horizonYEff, W, H - horizonYEff);
 
+  _drawClassicRoadSurface(rc);
+  _drawClassicRoadMarkings(rc);
+  _drawClassicSideBarriers(rc);
+  _drawClassicRoadDashes(rc);
+  _drawClassicAsphaltDetail(rc);
+  _drawClassicRoadsideDetails(rc);
+}
+
+// --- Sub-renderer: road surface strips (alternating banding + rumble strips) ---
+function _drawClassicRoadSurface(rc) {
+  const { t, w, horizonYEff, vpX } = rc;
   // Per-row road-surface strips (cheap horizontal trapezoids).
   // STRIPS controls density: ~64 strips is plenty for a smooth curve.
   // Phase 6: cache the result keyed on PerfMon.quality so we don't
@@ -8841,8 +9003,8 @@ function drawRoadClassicV2() {
     // Center for this strip = vpX + per-row curve offset (use mid-row).
     const yMid = (yTop + yBot) * 0.5;
     const cx = vpX + getClassicRoadShift(yMid);
-    const hwT = w * tT * 0.5;
-    const hwB = w * tB * 0.5;
+    const hwT = w * classicRoadPerspectiveT(tT) * 0.5;
+    const hwB = w * classicRoadPerspectiveT(tB) * 0.5;
     // Stripe banding for depth — alternates per row (OutRun staple).
     const band = si & 1;
     if (Game.isNight) {
@@ -8873,7 +9035,7 @@ function drawRoadClassicV2() {
         const dist  = 1.0 / Math.max(0.001, tFrac);
         if (Math.floor(dist * 5.2 + Game.laneOffset * 0.028) % 2 !== pass) continue;
         const tTop = ri / RS, tBot = (ri + 1) / RS;
-        const hw0 = w * tTop / 2, hw1 = w * tBot / 2;
+        const hw0 = w * classicRoadPerspectiveT(tTop) / 2, hw1 = w * classicRoadPerspectiveT(tBot) / 2;
         const rT = Math.max(0.5, hw0 * 0.046), rB = Math.max(0.5, hw1 * 0.046);
         const y = horizonYEff + ri * rsH;
         const cx0 = vpX + getClassicRoadShift(y + rsH * 0.5);
@@ -8890,6 +9052,11 @@ function drawRoadClassicV2() {
       ctx.fill();
     }
   }
+}
+
+// --- Sub-renderer: road markings (edge lines, centre dashes, lane guides) ---
+function _drawClassicRoadMarkings(rc) {
+  const { t, w, horizonYEff, vpX } = rc;
 
   // Road-edge yellow lines — series of short segments per strip, each
   // anchored to the curved row centers (gives a clean bending edge).
@@ -8904,12 +9071,89 @@ function drawRoadClassicV2() {
       const yBot = yTop + eH;
       const cT = vpX + getClassicRoadShift(yTop + eH * 0.5);
       const cB = vpX + getClassicRoadShift(yBot - eH * 0.5);
-      const hwT = w * tTop / 2, hwB = w * tBot / 2;
+      const hwT = w * classicRoadPerspectiveT(tTop) / 2, hwB = w * classicRoadPerspectiveT(tBot) / 2;
       ctx.moveTo(cT - hwT, yTop); ctx.lineTo(cB - hwB - 1, yBot);
       ctx.moveTo(cT + hwT, yTop); ctx.lineTo(cB + hwB + 1, yBot);
     }
     ctx.stroke();
   }
+}
+
+// --- Sub-renderer: side barriers (concrete walls with faces, tops, posts) ---
+function _drawClassicSideBarriers(rc) {
+  const { t, w, horizonYEff, speedN, boostN, vpX } = rc;
+
+  // Side barriers — low concrete walls with visible tops so the road edges
+  // have height and stronger depth cues instead of reading as flat stripes.
+  {
+    const WALL = 24, wallH = (H - horizonYEff) / WALL;
+    for (let wi = 0; wi < WALL; wi++) {
+      const tTop = wi / WALL, tBot = (wi + 1) / WALL;
+      const pTop = classicRoadPerspectiveT(tTop);
+      const pBot = classicRoadPerspectiveT(tBot);
+      const yTop = horizonYEff + wi * wallH;
+      const yBot = yTop + wallH;
+      const cT = vpX + getClassicRoadShift(yTop + wallH * 0.4);
+      const cB = vpX + getClassicRoadShift(yBot - wallH * 0.2);
+      const hwT = w * pTop * 0.5;
+      const hwB = w * pBot * 0.5;
+      const outT = Math.max(2, hwT * 0.085);
+      const outB = Math.max(3, hwB * 0.085);
+      const hT = Math.max(1.2, 1 + pTop * (7 + speedN * 5 + boostN * 3));
+      const hB = Math.max(1.5, 1 + pBot * (9 + speedN * 6 + boostN * 4));
+      const faceAlpha = 0.04 + pBot * 0.22;
+      const topAlpha = 0.05 + pBot * 0.18;
+      ctx.fillStyle = Game.isNight
+        ? `rgba(84,96,118,${faceAlpha})`
+        : `rgba(178,156,118,${faceAlpha})`;
+      ctx.beginPath();
+      ctx.moveTo(cT - hwT, yTop);
+      ctx.lineTo(cT - hwT - outT, yTop - hT);
+      ctx.lineTo(cB - hwB - outB, yBot - hB);
+      ctx.lineTo(cB - hwB, yBot);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cT + hwT, yTop);
+      ctx.lineTo(cT + hwT + outT, yTop - hT);
+      ctx.lineTo(cB + hwB + outB, yBot - hB);
+      ctx.lineTo(cB + hwB, yBot);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = Game.isNight
+        ? `rgba(160,184,220,${topAlpha})`
+        : `rgba(242,218,164,${topAlpha})`;
+      ctx.beginPath();
+      ctx.moveTo(cT - hwT - outT, yTop - hT);
+      ctx.lineTo(cT - hwT - outT * 1.32, yTop - hT * 1.25);
+      ctx.lineTo(cB - hwB - outB * 1.32, yBot - hB * 1.25);
+      ctx.lineTo(cB - hwB - outB, yBot - hB);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cT + hwT + outT, yTop - hT);
+      ctx.lineTo(cT + hwT + outT * 1.32, yTop - hT * 1.25);
+      ctx.lineTo(cB + hwB + outB * 1.32, yBot - hB * 1.25);
+      ctx.lineTo(cB + hwB + outB, yBot - hB);
+      ctx.closePath();
+      ctx.fill();
+      if (((wi + Math.floor(Game.laneOffset * 0.05)) & 1) === 0) {
+        const postA = 0.05 + pBot * 0.16;
+        ctx.fillStyle = Game.isNight
+          ? `rgba(255,245,215,${postA})`
+          : `rgba(96,72,44,${postA})`;
+        const postW = Math.max(1, outB * 0.42);
+        const postH = Math.max(2, hB * 0.9);
+        ctx.fillRect(cB - hwB - outB * 0.78, yBot - hB - postH * 0.1, postW, postH);
+        ctx.fillRect(cB + hwB + outB * 0.36, yBot - hB - postH * 0.1, postW, postH);
+      }
+    }
+  }
+}
+
+// --- Sub-renderer: dashed centre line + lane guide overlays ---
+function _drawClassicRoadDashes(rc) {
+  const { t, w, horizonYEff, vpX } = rc;
 
   // Dashed centre line — perspective scaled, follows the curve.
   {
@@ -8919,10 +9163,21 @@ function drawRoadClassicV2() {
       const tFrac = (ci + 0.5) / CDS;
       const dist  = 1.0 / Math.max(0.001, tFrac);
       if ((dist * 5.8 + Game.laneOffset * 0.02) % 1 > 0.52) continue;
-      const y     = horizonYEff + ci * cdH;
-      const dashW = Math.max(1, w * tFrac * 0.012);
-      const cx    = vpX + getClassicRoadShift(y + cdH * 0.5);
-      ctx.fillRect(cx - dashW / 2, y, dashW, cdH);
+      const yTop  = horizonYEff + ci * cdH;
+      const yBot  = yTop + cdH;
+      const pTop  = classicRoadPerspectiveT(ci / CDS);
+      const pBot  = classicRoadPerspectiveT((ci + 1) / CDS);
+      const dashWT = Math.max(1, w * pTop * 0.008);
+      const dashWB = Math.max(dashWT + 0.4, w * pBot * 0.012);
+      const cxT   = vpX + getClassicRoadShift(yTop + cdH * 0.2);
+      const cxB   = vpX + getClassicRoadShift(yBot - cdH * 0.2);
+      ctx.beginPath();
+      ctx.moveTo(cxT - dashWT / 2, yTop);
+      ctx.lineTo(cxT + dashWT / 2, yTop);
+      ctx.lineTo(cxB + dashWB / 2, yBot);
+      ctx.lineTo(cxB - dashWB / 2, yBot);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
@@ -8935,12 +9190,96 @@ function drawRoadClassicV2() {
       const tFrac = (li + 0.5) / LGS;
       const dist  = 1.0 / Math.max(0.001, tFrac);
       if ((dist * 4.8 + Game.laneOffset * 0.015) % 1 > 0.38) continue;
-      const y    = horizonYEff + li * lgH;
-      const hw   = w * tFrac / 2;
-      const lw   = Math.max(0.5, hw * 0.008);
-      const cx   = vpX + getClassicRoadShift(y + lgH * 0.5);
-      ctx.fillRect(cx - hw / 3 - lw / 2, y, lw, lgH);
-      ctx.fillRect(cx + hw / 3 - lw / 2, y, lw, lgH);
+      const yTop = horizonYEff + li * lgH;
+      const yBot = yTop + lgH;
+      const pTop = classicRoadPerspectiveT(li / LGS);
+      const pBot = classicRoadPerspectiveT((li + 1) / LGS);
+      const hwT  = w * pTop / 2;
+      const hwB  = w * pBot / 2;
+      const lwT  = Math.max(0.5, hwT * 0.008);
+      const lwB  = Math.max(0.8, hwB * 0.0085);
+      const cxT  = vpX + getClassicRoadShift(yTop + lgH * 0.2);
+      const cxB  = vpX + getClassicRoadShift(yBot - lgH * 0.2);
+      for (const laneMul of [-1 / 3, 1 / 3]) {
+        const xTop = cxT + hwT * laneMul;
+        const xBot = cxB + hwB * laneMul;
+        ctx.beginPath();
+        ctx.moveTo(xTop - lwT / 2, yTop);
+        ctx.lineTo(xTop + lwT / 2, yTop);
+        ctx.lineTo(xBot + lwB / 2, yBot);
+        ctx.lineTo(xBot - lwB / 2, yBot);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+}
+
+// --- Sub-renderer: asphalt detail (tyre wear, grain, boost glow, cracks, haze, glare, shimmer, oil) ---
+function _drawClassicAsphaltDetail(rc) {
+  const { t, w, horizonYEff, speedN, boostN, vpX } = rc;
+
+  // Streaming asphalt texture + tyre wear — cheap procedural detail that
+  // makes the surface feel like it is rushing beneath the player.
+  if (PerfMon.quality > 0.32) {
+    const TEX = PerfMon.quality > 0.6 ? 38 : 26;
+    const texH = (H - horizonYEff) / TEX;
+    for (let ti = 0; ti < TEX; ti++) {
+      const yTop = horizonYEff + ti * texH;
+      const yBot = yTop + texH;
+      const tTop = classicRoadPerspectiveT(ti / TEX);
+      const tBot = classicRoadPerspectiveT((ti + 1) / TEX);
+      const tMid = (tTop + tBot) * 0.5;
+      const cxT = vpX + getClassicRoadShift(yTop + texH * 0.2);
+      const cxB = vpX + getClassicRoadShift(yBot - texH * 0.2);
+      const hwT = w * tTop * 0.5;
+      const hwB = w * tBot * 0.5;
+      const wearWT = Math.max(1, hwT * 0.13);
+      const wearWB = Math.max(1.4, hwB * 0.13);
+      const wearA = (0.016 + tMid * 0.075) * (1 + speedN * 0.55);
+      ctx.fillStyle = `rgba(0,0,0,${wearA})`;
+      for (const laneMul of [-0.24, 0.24]) {
+        const xTop = cxT + hwT * laneMul;
+        const xBot = cxB + hwB * laneMul;
+        ctx.beginPath();
+        ctx.moveTo(xTop - wearWT / 2, yTop);
+        ctx.lineTo(xTop + wearWT / 2, yTop);
+        ctx.lineTo(xBot + wearWB / 2, yBot);
+        ctx.lineTo(xBot - wearWB / 2, yBot);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const specks = tMid > CLASSIC_TEXTURE_DETAIL_HIGH_T ? 4 : tMid > CLASSIC_TEXTURE_DETAIL_MED_T ? 3 : 2;
+      for (let gi = 0; gi < specks; gi++) {
+        const seed = (ti * CLASSIC_TEXTURE_SEED_A + gi * CLASSIC_TEXTURE_SEED_B + Math.floor((Game.laneOffset || 0) * CLASSIC_TEXTURE_SCROLL_RATE)) % CLASSIC_TEXTURE_SEED_MOD;
+        const frac = (((seed * GOLDEN_RATIO_CONJUGATE) % 1) - 0.5) * 1.5;
+        const gwT = Math.max(1, hwT * (0.025 + ((seed % 7) * 0.003)));
+        const gwB = Math.max(gwT + 0.3, hwB * (0.026 + ((seed % 5) * 0.004)));
+        const xTop = cxT + hwT * frac;
+        const xBot = cxB + hwB * frac * 1.02;
+        const grainA = (0.012 + tMid * 0.05) * (gi === 0 ? 1.3 : 1);
+        ctx.fillStyle = (gi & 1)
+          ? `rgba(255,255,255,${grainA * 0.24})`
+          : `rgba(0,0,0,${grainA})`;
+        ctx.beginPath();
+        ctx.moveTo(xTop - gwT / 2, yTop + texH * 0.12);
+        ctx.lineTo(xTop + gwT / 2, yTop + texH * 0.12);
+        ctx.lineTo(xBot + gwB / 2, yBot - texH * 0.08);
+        ctx.lineTo(xBot - gwB / 2, yBot - texH * 0.08);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (boostN > 0.08 && tMid > 0.25) {
+        const glowA = boostN * (0.01 + tMid * 0.03);
+        ctx.fillStyle = `rgba(255,190,110,${glowA})`;
+        ctx.beginPath();
+        ctx.moveTo(cxT - hwT * 0.08, yTop);
+        ctx.lineTo(cxT + hwT * 0.08, yTop);
+        ctx.lineTo(cxB + hwB * 0.11, yBot);
+        ctx.lineTo(cxB - hwB * 0.11, yBot);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 
@@ -8951,8 +9290,9 @@ function drawRoadClassicV2() {
     for (let i = 0; i < 10; i++) {
       const tFrac = clamp(((i * 73 + crackSeed) % Math.max(1, Math.round(H - horizonYEff))) / (H - horizonYEff), 0.06, 1);
       const cy    = horizonYEff + tFrac * (H - horizonYEff);
-      const hw    = w * tFrac / 2;
-      const crackW = Math.max(6, w * tFrac * 0.065);
+      const projT = classicRoadPerspectiveT(tFrac);
+      const hw    = w * projT / 2;
+      const crackW = Math.max(6, w * projT * 0.065);
       const cx    = vpX + getClassicRoadShift(cy);
       const cx2   = cx + ((i * 37) % Math.max(1, Math.round(hw * 1.6))) - hw * 0.8;
       ctx.fillRect(cx2, cy, crackW, Math.max(1, tFrac * 3));
@@ -9054,8 +9394,55 @@ function drawRoadClassicV2() {
   }
 }
 
-// =====================================================================
-// Phase 3 Classic Dirt5 × OutRun — sky/parallax/headlight/wet/chromatic.
+// --- Sub-renderer: roadside details (small debris, rocks along road edges) ---
+// Draws perspective-scaled rocks / rubble at the road shoulders. They scroll
+// with laneOffset and are seeded deterministically so they don't flicker.
+function _drawClassicRoadsideDetails(rc) {
+  if (PerfMon.quality < 0.35) return;
+  const { w, horizonYEff, vpX, speedN } = rc;
+  const count = PerfMon.quality > 0.6 ? 18 : 12;
+  const scrollSeed = Math.floor((Game.laneOffset || 0) * 0.18);
+  for (let di = 0; di < count; di++) {
+    const hash = ((di * 127 + scrollSeed * 31) % 499) / 499;
+    const tFrac = clamp(0.08 + hash * 0.82, 0.08, 0.90);
+    const pT = classicRoadPerspectiveT(tFrac);
+    const y = horizonYEff + tFrac * (H - horizonYEff);
+    const hw = w * pT * 0.5;
+    const cx = vpX + getClassicRoadShift(y);
+    const side = (di & 1) === 0 ? -1 : 1;
+    const offset = hw + Math.max(4, hw * (0.06 + ((di * 53 + scrollSeed) % 23) * 0.006));
+    const rx = cx + side * offset;
+    const sz = Math.max(1.5, pT * (3 + ((di * 37) % 5)));
+    const alpha = 0.08 + pT * 0.22;
+    // Rock shape — simple filled polygon with 2-3 jags.
+    ctx.fillStyle = Game.isNight
+      ? `rgba(70,65,58,${alpha})`
+      : `rgba(130,110,85,${alpha})`;
+    ctx.beginPath();
+    const jag = sz * 0.4 * (((di * 71) % 7) / 7 - 0.5);
+    ctx.moveTo(rx - sz, y);
+    ctx.lineTo(rx - sz * 0.5 + jag, y - sz * 0.8);
+    ctx.lineTo(rx + sz * 0.4, y - sz * 0.65);
+    ctx.lineTo(rx + sz, y);
+    ctx.closePath();
+    ctx.fill();
+    // Occasional larger debris (every 4th item, only at higher quality).
+    if ((di & 3) === 0 && PerfMon.quality > 0.55) {
+      const sz2 = sz * 1.6;
+      const rx2 = rx + side * sz * 1.1;
+      ctx.fillStyle = Game.isNight
+        ? `rgba(55,50,44,${alpha * 0.7})`
+        : `rgba(110,90,65,${alpha * 0.7})`;
+      ctx.beginPath();
+      ctx.moveTo(rx2 - sz2 * 0.6, y);
+      ctx.lineTo(rx2, y - sz2 * 0.55);
+      ctx.lineTo(rx2 + sz2 * 0.7, y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
 // Three small overlay helpers gated to Classic + visualQualityLevel().
 //   drawClassicHorizon()       — layered parallax silhouettes (back of sky)
 //   drawClassicRoadOverlays()  — headlight cone (night/midnight) + wet road
@@ -10316,12 +10703,19 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const { spawnN, hitN, storyN } = enemyAnimState(opts);
   const biomeRough = BIOME_ROUGHNESS_MAP[Game.biome] || 0.15;
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
-  const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
+  // Spring-based suspension: use real physics output for the player vehicle,
+  // fall back to sinusoidal bob for enemies/previews.
+  const isPlayerVehicle = (vehicle === Game.vehicle && !opts.ghost && !opts.isEnemy
+    && Game.player && Game.state === 'playing');
+  const suspensionBob = isPlayerVehicle
+    ? (Game.suspOffset || 0) * 0.55              // spring compression → visual downward shift
+    : Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
+  const springRoll = isPlayerVehicle ? (Game.suspBodyRoll || 0) * (Math.PI / 180) * 0.35 : 0;
   const lean = clamp(vx / 460, -1, 1) * (0.16 + speedN * 0.16) + idleRock;
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
-  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0)) + hitPunch * 0.08;
+  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + (opts.extraTilt || 0)) + hitPunch * 0.08;
   const wheelSpin = t * (5.5 + speedN * 30);
   const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
   const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
@@ -12117,31 +12511,67 @@ function drawPlayerGroundShadow() {
   if (!p) return;
   if (Settings.particles <= 0.05) return;
   const pw = p.w + 14;
+  const speedN = clamp((Game.speed || 0) / CLASSIC_PLAYER_SHADOW_SPEED_REF, 0, 1);
+  const boostN = clamp((Game.classicBoostT || 0) / CLASSIC_ROAD_VISUAL_BOOST_REF, 0, 1);
   const slant = 5 + clamp(Math.abs(p.vx || 0) / 460, 0, 1) * 9;
+  // Shadow offset syncs with suspension: when the spring compresses (car
+  // squats), the shadow sits tighter/wider; when the spring extends (car
+  // lifts), the shadow shrinks and gains a slight gap.
+  const suspComp = clamp((Game.suspOffset || 0) / SUSP_MAX, 0, 1);
+  const suspShadowScale = 1 + suspComp * 0.12;       // wider when squatting
+  const suspShadowGap = (1 - suspComp) * 2;           // small gap when lifted
   const cx = p.x + slant * 0.25;
-  const cy = p.y + p.h / 2 + 7;
+  const cy = p.y + p.h / 2 + 7 + suspShadowGap;
   ctx.save();
   ctx.translate(cx, cy);
   if (PerfMon.quality > 0.5) {
+    ctx.save();
     // Angled shadow — larger/softer radial gradient with forward slant
-    const sg = ctx.createRadialGradient(slant * 0.3, 0, 0, slant * 0.3, 0, pw * 0.62);
+    const sR = pw * 0.62 * suspShadowScale;
+    const sg = ctx.createRadialGradient(slant * 0.3, 0, 0, slant * 0.3, 0, sR);
     sg.addColorStop(0, 'rgba(0,0,0,0.46)');
     sg.addColorStop(0.5, 'rgba(0,0,0,0.18)');
     sg.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = sg;
     ctx.scale(1.0, 0.38);
     ctx.beginPath();
-    ctx.ellipse(slant * 0.3, 0, pw * 0.62, pw * 0.62 * 0.75, 0, 0, Math.PI * 2);
+    ctx.ellipse(slant * 0.3, 0, sR, sR * 0.75, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   } else {
+    ctx.save();
     ctx.scale(1, 0.45);
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, pw * 0.58);
+    const sR2 = pw * 0.58 * suspShadowScale;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, sR2);
     g.addColorStop(0, 'rgba(0,0,0,0.44)');
     g.addColorStop(0.6, 'rgba(0,0,0,0.17)');
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(0, 0, pw * 0.58, (p.h + 12) * 0.34, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, sR2, (p.h + 12) * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Contact patches under the tyres anchor the car to the road plane once
+  // the softer body shadow is stretched out by speed.
+  ctx.globalAlpha = 0.16 + speedN * 0.10;
+  ctx.fillStyle = 'rgba(0,0,0,0.82)';
+  const contactY = 1 + speedN * 2.5;
+  const contactW = pw * (0.13 + speedN * 0.02);
+  const contactH = (p.h + 12) * 0.075;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(side * pw * 0.24, contactY, contactW, contactH, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (boostN > 0) {
+    const exhaustG = ctx.createLinearGradient(-pw * 0.32, contactY + 4, pw * 0.32, contactY + 16);
+    exhaustG.addColorStop(0, 'rgba(255,170,90,0)');
+    exhaustG.addColorStop(0.5, `rgba(255,170,90,${0.07 + boostN * 0.10})`);
+    exhaustG.addColorStop(1, 'rgba(255,170,90,0)');
+    ctx.fillStyle = exhaustG;
+    ctx.beginPath();
+    ctx.ellipse(0, contactY + 10, pw * 0.34, contactH * 2.6, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -12241,9 +12671,10 @@ function drawSpeedLines() {
   }
 
   // Classic / perspective modes — road-surface streaks clipped to the trapezoid.
-  const horizonY = H * 0.42;
+  const classicMode = Game.mode === 'classic';
+  const horizonY = H * 0.42 - (classicMode ? ((Game.classicHillSmooth || 0) * 12) : 0);
   const playerLean = clamp((Game.player.vx || 0) / 460, -1, 1);
-  const vpX = W * 0.5 - playerLean * W * 0.055;
+  const vpX = W * 0.5 - playerLean * W * 0.055 + (classicMode ? (Game.classicCurveSmooth || 0) * W * 0.10 : 0);
   const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
   const x0bot = vpX - roadW / 2;
   const x1bot = vpX + roadW / 2;
@@ -12263,13 +12694,21 @@ function drawSpeedLines() {
   for (let li = 0; li < lineCount; li++) {
     // Spread across road width, animated with speed.
     const frac = ((li / lineCount) + tOff * 0.06) % 1;
-    const bx = x0bot + frac * roadW;
-    const dx = bx - vpX, dy = H - horizonY;
+    const normalizedX = frac * 2 - 1;
+    const dy = H - horizonY;
     // Per-line depth 0..1 from horizon to bottom, animated.
     const d0 = ((li * 0.371 + tOff * 0.04) % 1) * 0.72 + 0.08;
     const d1 = Math.min(1, d0 + 0.09 + intensity * 0.14);
-    const sx = vpX + dx * d0, sy = horizonY + dy * d0;
-    const ex = vpX + dx * d1, ey = horizonY + dy * d1;
+    const sy = horizonY + dy * d0;
+    const ey = horizonY + dy * d1;
+    const p0 = classicMode ? classicRoadPerspectiveT(d0) : d0;
+    const p1 = classicMode ? classicRoadPerspectiveT(d1) : d1;
+    const c0 = vpX + (classicMode ? getClassicRoadShift(sy) : 0);
+    const c1 = vpX + (classicMode ? getClassicRoadShift(ey) : 0);
+    const hw0 = roadW * p0 * 0.5;
+    const hw1 = roadW * p1 * 0.5;
+    const sx = c0 + hw0 * normalizedX * 0.92;
+    const ex = c1 + hw1 * normalizedX * 0.92;
     // Lines near the road edges and close to the player appear brighter.
     const edgeBoost = Math.abs(frac - 0.5) * 2;
     const lineA = intensity * (0.04 + edgeBoost * 0.055) * (0.3 + d0 * 0.7);
