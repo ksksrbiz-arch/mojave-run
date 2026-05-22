@@ -25152,6 +25152,8 @@ const LIVING_ROAD_DEBRIS_W        = 26;
 const LIVING_ROAD_DEBRIS_H        = 18;
 const LIVING_ROAD_DEBRIS_DMG      = 6;        // hull damage on contact
 const LIVING_ROAD_CRACK_DMG_PS    = 4;        // hull dps over wear=0.6+ (light)
+const LIVING_ROAD_CRACK_DMG_WEAR_THRESHOLD = 0.6;   // wear above which cracks start chipping
+const LIVING_ROAD_CRACK_DMG_WEAR_OFFSET    = 0.5;   // baseline for dmg scaling above threshold
 const LIVING_ROAD_TRACTION_AT_MAX = 0.7;      // multiplier on lateral steer at full wear
 const LIVING_ROAD_BEACON_CHANCE   = 0.06;     // share of new pickup spawns
 const LIVING_ROAD_BEACON_RESTORE  = 0.6;      // how much wear a beacon removes
@@ -25221,12 +25223,12 @@ function updateLivingRoad(dt) {
   // The player handling code multiplies by livingRoadTractionMul() opportunistically.
 
   // --- Light damage from cracks once wear is high ---
-  if (Game.roadCondition >= 0.6 && Game.health > 0) {
+  if (Game.roadCondition >= LIVING_ROAD_CRACK_DMG_WEAR_THRESHOLD && Game.health > 0) {
     Game.roadCrackDmgT += dt;
     const tickEvery = 1.0; // 1 dps tick
     if (Game.roadCrackDmgT >= tickEvery) {
       Game.roadCrackDmgT = 0;
-      const dmg = LIVING_ROAD_CRACK_DMG_PS * (Game.roadCondition - 0.5) * 2;
+      const dmg = LIVING_ROAD_CRACK_DMG_PS * (Game.roadCondition - LIVING_ROAD_CRACK_DMG_WEAR_OFFSET) * 2;
       if (dmg > 0) {
         // Apply directly without the regular hit shake/flash spam — this is
         // an ambient drain, not a punch.
@@ -25548,8 +25550,8 @@ function vehicleRepairCostFor(vid) {
 }
 
 function todayDateKey() {
-  const d = new Date();
-  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+  // YYYY-MM-DD in UTC. Using toISOString() avoids manual zero-padding logic.
+  return new Date().toISOString().slice(0, 10);
 }
 
 function canClaimFreeTuneUp() {
