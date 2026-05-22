@@ -3926,6 +3926,8 @@ const CLASSIC_TEXTURE_SEED_MOD = 997;
 const CLASSIC_TEXTURE_DETAIL_HIGH_T = 0.72;
 const CLASSIC_TEXTURE_DETAIL_MED_T = 0.45;
 const CLASSIC_TEXTURE_SCROLL_RATE = 0.22;
+// Golden ratio conjugate — used for even pseudo-random distribution in
+// procedural texture seeding.
 const GOLDEN_RATIO_CONJUGATE = 0.6180339887;
 function _classicSegHash(i) {
   let h = (i | 0) ^ 0xDEADBEEF;
@@ -4004,15 +4006,21 @@ function classicRoadPerspectiveT(tFrac) {
 const CLASSIC_PERSP_K = 0.008;
 const CLASSIC_BASE_WIDTH = 280;
 
+// Returns the screen-space Y for a given world-Z distance from the player.
+// z: world distance from player (0 = at player, larger = farther)
+// horizonY: pixel Y of the horizon line on screen
 function worldToScreenY(z, horizonY) {
   const scale = 1 / (1 + z * CLASSIC_PERSP_K);
   return horizonY + (H - horizonY) * (1 - scale);
 }
 
+// Returns the apparent pixel road width at a given world-Z distance.
 function getRoadWidthAtZ(z) {
   return CLASSIC_BASE_WIDTH * (1 / (1 + z * CLASSIC_PERSP_K));
 }
 
+// Projects a world-X position to screen-space at a given world-Z distance.
+// roadCenterX: screen-space X of the road center (defaults to W/2)
 function worldToScreenX(worldX, z, roadCenterX) {
   const scale = 1 / (1 + z * CLASSIC_PERSP_K);
   return (roadCenterX || W * 0.5) + worldX * scale;
@@ -8894,7 +8902,7 @@ function drawRoadClassicV2() {
   _drawClassicRoadSurface(rc);
   _drawClassicRoadMarkings(rc);
   _drawClassicSideBarriers(rc);
-  _drawClassicDashesAndGuides(rc);
+  _drawClassicRoadDashes(rc);
   _drawClassicAsphaltDetail(rc);
   _drawClassicRoadsideDetails(rc);
 }
@@ -9069,8 +9077,8 @@ function _drawClassicSideBarriers(rc) {
   }
 }
 
-// --- Sub-renderer: dashes & lane guide overlays (drawn after barriers) ---
-function _drawClassicDashesAndGuides(rc) {
+// --- Sub-renderer: dashed centre line + lane guide overlays ---
+function _drawClassicRoadDashes(rc) {
   const { t, w, horizonYEff, vpX } = rc;
 
   // Dashed centre line — perspective scaled, follows the curve.
