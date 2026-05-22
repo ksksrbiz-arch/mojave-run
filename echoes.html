@@ -105,7 +105,7 @@
   }
 
   /* genre chips */
-  .genre-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .genre-row { display: flex; gap: 8px; flex-wrap: wrap; list-style: none; }
 
   .genre-chip {
     padding: 6px 16px; border-radius: 999px; font-size: 12px;
@@ -284,11 +284,11 @@
         bookstore.
       </p>
 
-      <div class="genre-row" role="list" aria-label="Genres">
-        <span class="genre-chip active"  role="listitem">Romance</span>
-        <span class="genre-chip inactive" role="listitem">Crime Noir</span>
-        <span class="genre-chip inactive" role="listitem">Paranormal</span>
-      </div>
+      <ul class="genre-row" aria-label="Genres">
+        <li class="genre-chip active">Romance</li>
+        <li class="genre-chip inactive">Crime Noir</li>
+        <li class="genre-chip inactive">Paranormal</li>
+      </ul>
 
       <ul class="feature-list" aria-label="Key features">
         <li class="feature-item">
@@ -306,9 +306,9 @@
       </ul>
 
       <div class="cta-row">
-        <a href="#" class="btn-play" role="button">
+        <button class="btn-play" type="button">
           Play Echoes of Choice &nbsp;&rarr;
-        </a>
+        </button>
         <span class="cta-note">Free &middot; No download required</span>
       </div>
 
@@ -348,7 +348,7 @@
 
         <div class="choices" role="group" aria-label="Story choices">
           <button class="choice-btn choice-active" type="button">
-            <span class="choice-icon" aria-hidden="true">➖</span>
+            <span class="choice-icon" aria-hidden="true">→</span>
             Step forward into the light
           </button>
           <button class="choice-btn choice-inactive" type="button">
