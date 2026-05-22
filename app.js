@@ -3917,6 +3917,13 @@ function getWindingRoadShift(y = H * 0.5) {
 // =====================================================================
 const CLASSIC_CURVE_SEG_LEN = 700;
 const CLASSIC_HILL_SEG_LEN  = 950;
+const CLASSIC_ROAD_VISUAL_SPEED_REF = 540;
+const CLASSIC_ROAD_VISUAL_BOOST_REF = 0.85;
+const CLASSIC_PLAYER_SHADOW_SPEED_REF = 520; // shadow tightening starts slightly earlier than road streak peak
+const CLASSIC_TEXTURE_SEED_A = 73;
+const CLASSIC_TEXTURE_SEED_B = 97;
+const CLASSIC_TEXTURE_SEED_MOD = 997;
+const GOLDEN_RATIO_CONJUGATE = 0.6180339887;
 function _classicSegHash(i) {
   let h = (i | 0) ^ 0xDEADBEEF;
   h = Math.imul(h ^ (h >>> 15), 0x85EBCA77);
@@ -8812,8 +8819,8 @@ function drawRoadClassicV2() {
   const t = activeBiomeTheme();
   const { w } = roadBounds();                // straight road width (stable)
   const horizonY = H * 0.42;
-  const speedN = clamp((Game.speed || 0) / 540, 0, 1);
-  const boostN = clamp((Game.classicBoostT || 0) / 0.85, 0, 1);
+  const speedN = clamp((Game.speed || 0) / CLASSIC_ROAD_VISUAL_SPEED_REF, 0, 1);
+  const boostN = clamp((Game.classicBoostT || 0) / CLASSIC_ROAD_VISUAL_BOOST_REF, 0, 1);
   // Vanishing point: player lean + smoothed curve at the horizon.
   const playerLean = Game.player ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
   // Boost slightly amplifies the lean for that hot-corner cinematic kick.
@@ -9074,8 +9081,8 @@ function drawRoadClassicV2() {
       }
       const specks = tMid > 0.72 ? 4 : tMid > 0.45 ? 3 : 2;
       for (let gi = 0; gi < specks; gi++) {
-        const seed = (ti * 73 + gi * 97 + Math.floor((Game.laneOffset || 0) * 0.22)) % 997;
-        const frac = (((seed * 0.6180339887) % 1) - 0.5) * 1.5;
+        const seed = (ti * CLASSIC_TEXTURE_SEED_A + gi * CLASSIC_TEXTURE_SEED_B + Math.floor((Game.laneOffset || 0) * 0.22)) % CLASSIC_TEXTURE_SEED_MOD;
+        const frac = (((seed * GOLDEN_RATIO_CONJUGATE) % 1) - 0.5) * 1.5;
         const gwT = Math.max(1, hwT * (0.025 + ((seed % 7) * 0.003)));
         const gwB = Math.max(gwT + 0.3, hwB * (0.026 + ((seed % 5) * 0.004)));
         const xTop = cxT + hwT * frac;
@@ -12280,8 +12287,8 @@ function drawPlayerGroundShadow() {
   if (!p) return;
   if (Settings.particles <= 0.05) return;
   const pw = p.w + 14;
-  const speedN = clamp((Game.speed || 0) / 520, 0, 1);
-  const boostN = clamp((Game.classicBoostT || 0) / 0.85, 0, 1);
+  const speedN = clamp((Game.speed || 0) / CLASSIC_PLAYER_SHADOW_SPEED_REF, 0, 1);
+  const boostN = clamp((Game.classicBoostT || 0) / CLASSIC_ROAD_VISUAL_BOOST_REF, 0, 1);
   const slant = 5 + clamp(Math.abs(p.vx || 0) / 460, 0, 1) * 9;
   const cx = p.x + slant * 0.25;
   const cy = p.y + p.h / 2 + 7;
