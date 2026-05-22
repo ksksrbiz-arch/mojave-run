@@ -8752,6 +8752,192 @@ function drawRoadClassicV2() {
   }
 }
 
+// =====================================================================
+// Phase 3 Classic Dirt5 × OutRun — sky/parallax/headlight/wet/chromatic.
+// Three small overlay helpers gated to Classic + visualQualityLevel().
+//   drawClassicHorizon()       — layered parallax silhouettes (back of sky)
+//   drawClassicRoadOverlays()  — headlight cone (night/midnight) + wet road
+//   drawClassicEdgeFringe()    — peak-speed chromatic fringe & vignette pulse
+// All are pure draw-time effects; nothing mutates game state.
+// =====================================================================
+
+// Cheap biome → palette for parallax silhouettes.
+function _classicHorizonPalette() {
+  const b = (Game && Game.biome) || 'wastes';
+  switch (b) {
+    case 'neonruins':
+      return { far: '#3a1a4a', mid: '#5a1a4a', near: '#1a0a18',
+               glowA: 'rgba(255,90,180,0.35)', glowB: 'rgba(120,80,255,0.18)' };
+    case 'frostwaste':
+      return { far: '#1a2a3a', mid: '#2a3a4a', near: '#0a1018',
+               glowA: 'rgba(120,200,255,0.30)', glowB: 'rgba(170,90,255,0.15)' };
+    case 'irradiated':
+      return { far: '#2a3a18', mid: '#3a4a18', near: '#0e1408',
+               glowA: 'rgba(160,255,90,0.30)', glowB: 'rgba(90,220,90,0.18)' };
+    case 'midnight':
+      return { far: '#101428', mid: '#1a1a3a', near: '#070818',
+               glowA: 'rgba(80,160,255,0.22)', glowB: 'rgba(140,90,200,0.16)' };
+    case 'thunderplains':
+      return { far: '#2a2230', mid: '#3a2a38', near: '#100a14',
+               glowA: 'rgba(200,180,255,0.22)', glowB: 'rgba(140,130,200,0.15)' };
+    case 'canyon':
+      return { far: '#7a3a1a', mid: '#5a2a18', near: '#1a0c08',
+               glowA: 'rgba(255,170,90,0.32)', glowB: 'rgba(220,90,60,0.18)' };
+    default: // wastes
+      return { far: '#4a2a18', mid: '#3a2010', near: '#180e08',
+               glowA: 'rgba(255,180,100,0.28)', glowB: 'rgba(220,110,60,0.16)' };
+  }
+}
+
+function drawClassicHorizon() {
+  if (Game.mode !== 'classic') return;
+  if (visualQualityLevel() < 1) return;
+  const pal = _classicHorizonPalette();
+  const horizonY = H * 0.42 - ((Game.classicHillSmooth || 0) * 12);
+  const curve = Game.classicCurveSmooth || 0;
+  // Glow band just above the horizon — biome-tinted sunset wash.
+  const gw = ctx.createLinearGradient(0, horizonY - H * 0.18, 0, horizonY + 6);
+  gw.addColorStop(0,    'rgba(0,0,0,0)');
+  gw.addColorStop(0.55, pal.glowB);
+  gw.addColorStop(1,    pal.glowA);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = gw;
+  ctx.fillRect(0, horizonY - H * 0.18, W, H * 0.18 + 6);
+  ctx.restore();
+  // Three silhouette layers — distant mountains/cityscape, mid hills, near.
+  // Each layer scrolls at a different rate and shifts with the curve.
+  const scrollFar  = (Game.bgScroll * 0.00010) % 1;
+  const scrollMid  = (Game.bgScroll * 0.00022) % 1;
+  const scrollNear = (Game.bgScroll * 0.00050) % 1;
+  _drawClassicHorizonLayer(horizonY, pal.far,  scrollFar,  curve * W * 0.06, 0,  10, 0.45, pal);
+  _drawClassicHorizonLayer(horizonY, pal.mid,  scrollMid,  curve * W * 0.10, 8,  18, 0.85, pal);
+  _drawClassicHorizonLayer(horizonY, pal.near, scrollNear, curve * W * 0.16, 18, 26, 1.00, pal);
+}
+
+function _drawClassicHorizonLayer(horizonY, fill, scrollFrac, curveDx, yOff, peakH, alpha, pal) {
+  // 14 deterministic peaks per layer, tiled across 1.5× screen width so
+  // the wrap-around isn't obvious. Peak heights are pseudo-random but
+  // stable per index.
+  const N = 14;
+  const tileW = W * 1.5;
+  const baseY = horizonY + yOff;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(-20, baseY + peakH);
+  for (let i = 0; i <= N; i++) {
+    const fr = (i / N + scrollFrac) % 1;
+    const x  = -20 + fr * (W + 40) + curveDx;
+    // hash-ish but cheap: stable per i
+    const h  = ((i * 8761 + 13) % 100) / 100;
+    const ph = peakH * (0.5 + h * 0.9);
+    // alternating shapes — sharp triangle vs flat-top mesa
+    if ((i & 1) === 0) {
+      ctx.lineTo(x - 16, baseY - ph * 0.85);
+      ctx.lineTo(x,      baseY - ph);
+      ctx.lineTo(x + 18, baseY - ph * 0.7);
+    } else {
+      ctx.lineTo(x - 22, baseY - ph * 0.55);
+      ctx.lineTo(x - 10, baseY - ph * 0.92);
+      ctx.lineTo(x + 12, baseY - ph * 0.92);
+      ctx.lineTo(x + 22, baseY - ph * 0.45);
+    }
+  }
+  ctx.lineTo(W + 20, baseY + peakH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawClassicRoadOverlays() {
+  if (Game.mode !== 'classic') return;
+  const p = Game.player;
+  if (!p) return;
+  const vq = visualQualityLevel();
+  const horizonY = H * 0.42 - ((Game.classicHillSmooth || 0) * 12);
+  // ---- Headlight cone (night / midnight biome) ----
+  // Soft elliptical light spilling onto the road, follows the player vx so
+  // it sweeps with steering. Quality-gated.
+  if (vq >= 1 && (Game.isNight || Game.biome === 'midnight')) {
+    const sweep = clamp((p.vx || 0) / 460, -1, 1);
+    const apexX = p.x + sweep * 80;
+    const apexY = p.y - 18;
+    const reachY = horizonY + (H - horizonY) * 0.18;
+    const coneCx = (apexX + (apexX + sweep * 120) * 0.85) / 2;
+    const coneCy = (apexY + reachY) / 2;
+    const coneR  = (apexY - reachY) * -1.1; // distance from player to mid
+    const grad = ctx.createRadialGradient(coneCx, coneCy + 30, 8, coneCx, coneCy, coneR);
+    grad.addColorStop(0,    'rgba(255,240,200,0.40)');
+    grad.addColorStop(0.45, 'rgba(255,230,170,0.18)');
+    grad.addColorStop(1,    'rgba(255,220,150,0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = grad;
+    // Use a clipped ellipse to keep the light on the road plane.
+    ctx.beginPath();
+    ctx.ellipse(coneCx, coneCy + 20, Math.max(60, coneR * 0.9), Math.max(80, coneR * 1.1), 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // ---- Wet road reflection (storm) ----
+  // Vertical streaks of sky-tinted highlights on the road surface; scales
+  // with rain intensity. Cheap: a handful of soft vertical gradients.
+  if (vq >= 1 && Game.isStorm) {
+    const intensity = clamp((Game.rainIntensity || 0.6), 0.2, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const streaks = vq >= 2 ? 9 : 5;
+    for (let i = 0; i < streaks; i++) {
+      const seed = (i * 137 + Math.floor(Game.bgScroll * 0.4)) % 1000;
+      const xN = ((seed * 0.6173) % 1);
+      const x = W * 0.5 + (xN - 0.5) * W * 0.55 + ((Game.classicCurveSmooth || 0) * W * 0.08);
+      const yTop = horizonY + 4;
+      const yBot = H;
+      const lg = ctx.createLinearGradient(x, yTop, x, yBot);
+      const a = (0.05 + (seed % 7) * 0.012) * intensity;
+      lg.addColorStop(0,   'rgba(170,200,235,0)');
+      lg.addColorStop(0.5, `rgba(180,210,240,${a})`);
+      lg.addColorStop(1,   'rgba(220,235,250,0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(x - 8, yTop, 16, yBot - yTop);
+    }
+    ctx.restore();
+  }
+}
+
+function drawClassicEdgeFringe() {
+  if (Game.mode !== 'classic') return;
+  if (visualQualityLevel() < 1) return;
+  const speedN = clamp((Game.speed || 0) / 520, 0, 1);
+  const boost  = (Game.classicBoostT || 0) > 0 ? 1 : 0;
+  const trigger = Math.max(boost ? 0.6 : 0, (speedN - 0.78) / 0.22);
+  if (trigger <= 0) return;
+  const k = Math.min(1, trigger);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // Subtle red+cyan edge fringe (chromatic aberration cue).
+  const eW = Math.round(W * (0.06 + k * 0.06));
+  const lg1 = ctx.createLinearGradient(0, 0, eW, 0);
+  lg1.addColorStop(0, `rgba(255,80,80,${0.10 * k})`);
+  lg1.addColorStop(1, 'rgba(255,80,80,0)');
+  ctx.fillStyle = lg1;
+  ctx.fillRect(0, 0, eW, H);
+  const lg2 = ctx.createLinearGradient(W, 0, W - eW, 0);
+  lg2.addColorStop(0, `rgba(80,220,255,${0.10 * k})`);
+  lg2.addColorStop(1, 'rgba(80,220,255,0)');
+  ctx.fillStyle = lg2;
+  ctx.fillRect(W - eW, 0, eW, H);
+  ctx.restore();
+  // Phase 5 hook: boost flashes hot white briefly.
+  if (boost) {
+    const bAlpha = 0.10 * Math.min(1, Game.classicBoostT);
+    ctx.fillStyle = `rgba(255,255,255,${bAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
 function drawDecor() {
   const t = activeBiomeTheme();
   // Classic/campaign/gauntlet use OutRun perspective — scale decor by depth.
@@ -12887,7 +13073,11 @@ function render() {
     // input + speed-driven zoom. Self-gated by Settings.cinematic.
     if (typeof Cinematic !== 'undefined') Cinematic.preTransform(ctx);
     drawBackground();
+    // Phase 3 Classic — parallax horizon silhouettes (between sky & road).
+    if (Game.mode === 'classic') drawClassicHorizon();
     drawRoad();
+    // Phase 3 Classic — headlight cone + wet road reflection over the road.
+    if (Game.mode === 'classic') drawClassicRoadOverlays();
     drawSkidMarks();
     drawDecor();
     drawDustDevils();
@@ -12997,6 +13187,8 @@ function render() {
 
     // ── Phase 6A: Motion-blur speed lines (screen-space, outside world transform)
     if (Game.mode !== 'arena') drawSpeedLines();
+    // Phase 3 Classic — chromatic-fringe edge cue at peak speed + boost flash.
+    if (Game.mode === 'classic') drawClassicEdgeFringe();
     // ── Phase 5C + 6C: Biome colour grading
     if (Game.state === 'playing' || Game.state === 'replay') drawBiomeColorGrade();
 
