@@ -6956,8 +6956,11 @@ const SUSP_DAMPING_C = 18;      // damping coefficient (controls oscillation)
 const SUSP_MAX = 28;            // max compression (px)
 const SUSP_ROLL_LERP = 0.18;    // body roll interpolation speed
 const SUSP_ROLL_MAX = 5.5;      // max roll degrees
+const SUSP_TURN_THRESHOLD = 0.08;
+const SUSP_TURN_VX_SCALE = 320;
 
 function updateCarSuspension(deltaTime, speed = Game.speed || 0, isTurning = null, isBoosting = null, isDrifting = null, hitBump = null) {
+  // Cap the Euler integration step so low-FPS spikes do not destabilize the spring.
   const dt = Math.min(Math.max(deltaTime || 0, 0), 0.033);
   const p = Game.player;
   if (!p) return;
@@ -6965,8 +6968,8 @@ function updateCarSuspension(deltaTime, speed = Game.speed || 0, isTurning = nul
   if (isDrifting === null) isDrifting = !!Game.classicDrifting;
   if (hitBump === null) hitBump = (Game.classicCrestTriggerT || 0) > 0.4;
   if (isTurning === null) {
-    const turnSignal = Math.abs(p.steerSmooth || 0) > 0.08 ? p.steerSmooth : (p.vx || 0) / 320;
-    isTurning = turnSignal < -0.08 ? 'left' : turnSignal > 0.08 ? 'right' : null;
+    const turnSignal = Math.abs(p.steerSmooth || 0) > SUSP_TURN_THRESHOLD ? p.steerSmooth : (p.vx || 0) / SUSP_TURN_VX_SCALE;
+    isTurning = turnSignal < -SUSP_TURN_THRESHOLD ? 'left' : turnSignal > SUSP_TURN_THRESHOLD ? 'right' : null;
   }
 
   // -- target ride height/compression based on current state --
