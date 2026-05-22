@@ -4054,6 +4054,15 @@ const SPINOUT_ROT_DECAY   = 0.18; // pow base for angular velocity exponential d
 const SPINOUT_OSC_FREQ    = 4.8;  // oscillation frequency (rad/s) of the side-to-side drift
 const SKID_SPAWN_INTERVAL = 0.033; // ~30 Hz throttle for visual skid-mark emitters
 const HITCHHIKER_DRIFT_SPEED = 5; // px/s at which hitchhikers wander toward the road center
+const ZOMBIE_ROAD_MARGIN_MIN = 18;
+const ZOMBIE_ROAD_MARGIN_WIDTH_MUL = 0.45;
+const NORMAL_STEER_SPEED_REF = 540;
+// Visual feel — edge-scrape sparks, tire dust, speed lines
+const EDGE_SCRAPE_SPARK_COUNT = 5;
+const EDGE_SCRAPE_SHAKE = 0.22;
+const TIRE_DUST_VX_THRESHOLD = 140; // lateral speed above which tires kick dust
+const SPEED_LINE_THRESHOLD = 380;   // road speed above which speed lines appear
+const SPEED_LINE_CHANCE = 0.55;     // per-frame spawn chance at full speed
 const CIVILIAN_WARNING_HITS = 1;
 const CIVILIAN_MANHUNT_HITS = 3;
 const CIVILIAN_INFAMY_HITS = 5;
@@ -6127,9 +6136,10 @@ function spawnEnemy(forceKind, forceElite) {
       else def = ZOMBIE_DEF_BY_ID.walker;
     }
     const { x0: zx0, x1: zx1 } = roadBounds();
-    // spawn zombies spread across the full width, including shoulders
-    const spread = W * 0.12;
-    const cx = rand(Math.max(def.w, zx0 - spread), Math.min(W - def.w, zx1 + spread));
+    // keep zombie spawns road-centered; only drones should feel truly off-road.
+    // Margin scales with zombie width so larger variants don't clip shoulders.
+    const zxMargin = Math.max(ZOMBIE_ROAD_MARGIN_MIN, def.w * ZOMBIE_ROAD_MARGIN_WIDTH_MUL);
+    const cx = rand(zx0 + zxMargin, zx1 - zxMargin);
     const count = waveDiff > 2.5 ? irand(2,4) : waveDiff > 1.5 ? irand(1,3) : 1;
     for (let z = 0; z < count; z++) {
       const zx = clamp(cx + (z - (count-1)/2) * (def.w + 8) + rand(-8,8), def.w, W - def.w);
@@ -6217,11 +6227,8 @@ function spawnEnemy(forceKind, forceElite) {
       }, forceElite || !!(Game.activeEvent && Game.activeEvent.id === 'ambush')));
     }
   } else if (pick === 'mortar') {
-    // stationary roadside emplacement that arcs shells
-    const side = Math.random() < 0.5 ? 'L' : 'R';
-    const x = side === 'L'
-      ? rand(8, Math.max(12, x0 - 12))
-      : rand(x1 + 12, W - 12);
+    // stationary lane emplacement that arcs shells
+    const x = rand(x0 + margin + 14, x1 - margin - 14);
     Game.enemies.push(maybeEliteEnemy({
       kind:'mortar', x, y: -40, w: 30, h: 30,
       vx: 0, vy: 0, hp: 3, fireT: rand(1.4, 2.4),
@@ -7367,13 +7374,23 @@ function update(dt) {
     updateClassicHandling(dt, p, stats);
   } else {
     // ---- normal steering ----
+    // Speed-sensitive lane handling: higher speed trims steering authority and
+    // increases self-centering drag so lateral motion feels weighted, not twitchy.
+    const NORMAL_STEER_MAX_GRIP_REDUCTION = 0.26;
+    const NORMAL_STEER_BASE_DRAG = 5.8;
+    const NORMAL_STEER_SPEED_DRAG = 3.2;
+    // Touch steering blends toward target lateral velocity a bit slower than
+    // keyboard steer to preserve an analog "car drift" feel on swipes.
+    const NORMAL_TOUCH_VX_BLEND = 12;
     const accel = stats.accel;
     const maxV = stats.maxV;
-    const drag = 6.5;
+    const speedFrac = clamp((Game.speed || 0) / NORMAL_STEER_SPEED_REF, 0, 1);
+    const steerGrip = 1 - speedFrac * NORMAL_STEER_MAX_GRIP_REDUCTION;
+    const drag = NORMAL_STEER_BASE_DRAG + speedFrac * NORMAL_STEER_SPEED_DRAG;
     const keyAxis = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     if (keyAxis !== 0) {
       p.steerSmooth = expEase(p.steerSmooth || 0, keyAxis, 20, dt);
-      p.vx += p.steerSmooth * accel * dt;
+      p.vx += p.steerSmooth * accel * steerGrip * dt;
     } else {
       if (input.touchTargetX !== null) {
         const target = clamp(input.touchTargetX, 0, W);
@@ -7382,8 +7399,8 @@ function update(dt) {
         if (Math.abs(dx) > 16) {
           const steerTarget = clamp((dx * 14) / maxV, -1, 1);
           p.steerSmooth = expEase(p.steerSmooth || 0, steerTarget, 18, dt);
-          const desiredV = p.steerSmooth * maxV;
-          p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
+          const desiredV = p.steerSmooth * maxV * steerGrip;
+          p.vx += (desiredV - p.vx) * Math.min(1, NORMAL_TOUCH_VX_BLEND * dt);
         } else {
           p.steerSmooth = expEase(p.steerSmooth || 0, 0, 18, dt);
           p.vx -= p.vx * Math.min(1, drag * dt);
@@ -7429,15 +7446,26 @@ function update(dt) {
     const { x0, x1 } = roadBounds();
     if (p.x - p.w/2 < x0 + 4) {
       p.x = x0 + 4 + p.w/2;
+      const hitSpeed = Math.abs(p.vx);
       p.vx = Math.max(0, p.vx * 0.18);
       p.steerSmooth = Math.max(0, (p.steerSmooth || 0) * 0.35);
-      Game.shake = Math.max(Game.shake, 0.08);
+      Game.shake = Math.max(Game.shake, EDGE_SCRAPE_SHAKE);
+      // sparks fly when scraping the barrier at speed
+      if (hitSpeed > 60 && !Settings.reducedMotion) {
+        emit(p.x - p.w/2, p.y + rand(-p.h*0.3, p.h*0.3), EDGE_SCRAPE_SPARK_COUNT,
+          { color:'#ffd86b', speed:180 + hitSpeed*0.4, life:0.28, size:2, shape:'spark', spread:Math.PI*0.6 });
+      }
     }
     if (p.x + p.w/2 > x1 - 4) {
       p.x = x1 - 4 - p.w/2;
+      const hitSpeed = Math.abs(p.vx);
       p.vx = Math.min(0, p.vx * 0.18);
       p.steerSmooth = Math.min(0, (p.steerSmooth || 0) * 0.35);
-      Game.shake = Math.max(Game.shake, 0.08);
+      Game.shake = Math.max(Game.shake, EDGE_SCRAPE_SHAKE);
+      if (hitSpeed > 60 && !Settings.reducedMotion) {
+        emit(p.x + p.w/2, p.y + rand(-p.h*0.3, p.h*0.3), EDGE_SCRAPE_SPARK_COUNT,
+          { color:'#ffd86b', speed:180 + hitSpeed*0.4, life:0.28, size:2, shape:'spark', spread:Math.PI*0.6 });
+      }
     }
     p.y = H - 110;
   }
@@ -7601,7 +7629,7 @@ function update(dt) {
       e.x = e.baseX + Math.sin(e.wave) * e.waveAmp;
       e.y += (e.vy + Game.speed * 0.18) * dt;
     } else if (e.kind === 'mortar') {
-      // stationary roadside; scrolls with road
+      // stationary lane emplacement; scrolls with road
       e.y += Game.speed * dt;
     } else if (e.kind === 'zombie') {
       // Zombies shuffle or lunge toward the player and wobble side-to-side
@@ -7623,8 +7651,10 @@ function update(dt) {
         clearEnemyShotsFrom(e);
         continue;
       }
-      // zombies can wander slightly off-road
-      e.x = clamp(e.x, e.w, W - e.w);
+      // zombies stay within the road corridor
+      const { x0:zx0, x1:zx1 } = roadBounds();
+      const zombieRoadMargin = Math.max(ZOMBIE_ROAD_MARGIN_MIN, e.w * ZOMBIE_ROAD_MARGIN_WIDTH_MUL);
+      e.x = clamp(e.x, zx0 + zombieRoadMargin, zx1 - zombieRoadMargin);
     } else if (e.kind === 'drone') {
       // fast diagonal flier — bounces off road edges
       e.y += (e.vy + Game.speed * 0.12) * dt;
@@ -7636,8 +7666,8 @@ function update(dt) {
       e.y += (e.vy + Game.speed * 0.15) * dt;
       e.x += e.vx * dt;
     }
-    // road clamp (skipped for mortar off-road; drone/zombie use own movement logic)
-    if (e.kind !== 'mortar' && e.kind !== 'drone' && e.kind !== 'zombie') {
+    // road clamp (drone/zombie use their own movement logic)
+    if (e.kind !== 'drone' && e.kind !== 'zombie') {
       const { x0:rx0, x1:rx1 } = roadBounds();
       if (e.x < rx0 + 24) { e.x = rx0 + 24; if (e.vx) e.vx = Math.abs(e.vx); }
       if (e.x > rx1 - 24) { e.x = rx1 - 24; if (e.vx) e.vx = -Math.abs(e.vx); }
@@ -7997,10 +8027,40 @@ function update(dt) {
   if (Game.boss) updateBoss(dt);
 
   // ---- exhaust ----
-  if (Math.random() < 0.6) {
-    const ex = '#a86a2e';
-    emit(p.x - 10 + rand(-2,2), p.y + p.h/2 - 4, 1, { color:'rgba(80,60,40,0.6)', speed:30, life:0.5, size:4, spread:Math.PI/4 });
-    emit(p.x + 10 + rand(-2,2), p.y + p.h/2 - 4, 1, { color:'rgba(80,60,40,0.6)', speed:30, life:0.5, size:4, spread:Math.PI/4 });
+  // Exhaust frequency and size scale with forward speed — idle barely smokes,
+  // full speed billows twin plumes.
+  {
+    const speedN = clamp((Game.speed || 0) / NORMAL_STEER_SPEED_REF, 0, 1);
+    const exhaustChance = 0.18 + speedN * 0.52;
+    if (Math.random() < exhaustChance) {
+      const count = speedN > 0.7 ? 2 : 1;
+      emitExhaustTrail(p.x - 10 + rand(-2,2), p.y + p.h/2 - 4, count);
+      emitExhaustTrail(p.x + 10 + rand(-2,2), p.y + p.h/2 - 4, count);
+    }
+  }
+
+  // ---- tire dust when steering hard ----
+  if (!Settings.reducedMotion && Math.abs(p.vx) > TIRE_DUST_VX_THRESHOLD) {
+    const dustIntensity = clamp((Math.abs(p.vx) - TIRE_DUST_VX_THRESHOLD) / 200, 0, 1);
+    if (Math.random() < 0.3 + dustIntensity * 0.4) {
+      const side = p.vx > 0 ? -1 : 1;
+      emit(p.x + side * (p.w * 0.42), p.y + p.h * 0.38, 1,
+        { color:'rgba(160,130,85,0.45)', speed:50 + dustIntensity * 60, life:0.4, size:4 + dustIntensity * 3, spread:Math.PI*0.5 });
+    }
+  }
+
+  // ---- high-speed road lines ----
+  if (!Settings.reducedMotion && (Game.speed || 0) > SPEED_LINE_THRESHOLD) {
+    const slFrac = clamp(((Game.speed || 0) - SPEED_LINE_THRESHOLD) / 200, 0, 1);
+    if (Math.random() < SPEED_LINE_CHANCE * slFrac) {
+      const sx = rand(p.x - 60, p.x + 60);
+      Game.particles.push({
+        x: sx, y: p.y + p.h * 0.45,
+        vx: 0, vy: 600 + slFrac * 500,
+        life: 0.12 + slFrac * 0.08, max: 0.20,
+        size: 1, color: `rgba(255,255,255,${0.15 + slFrac * 0.15})`,
+      });
+    }
   }
 
   // ---- objective check ----
@@ -10258,7 +10318,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
   const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
-  const lean = clamp(vx / 460, -1, 1) * (0.12 + speedN * 0.12) + idleRock;
+  const lean = clamp(vx / 460, -1, 1) * (0.16 + speedN * 0.16) + idleRock;
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
   const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0)) + hitPunch * 0.08;
@@ -13347,10 +13407,9 @@ function render() {
     if (Game.state === 'dying') {
       drawWreck();
     } else if (Game.player && Game.state !== 'gameover') {
-      if (Game.state === 'playing' && Math.random() < 0.22) {
-        emitExhaustTrail(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1);
-        emitExhaustTrail(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1);
-      }
+      // Exhaust is now emitted from update() with speed-proportional intensity;
+      // no duplicate render-time emit needed.
+
       // Soft elliptical ground shadow — replaces the harsh square shadow that
       // used to sit behind the chassis. Quality-gated via Settings.particles
       // so very-low quality skips the extra fill.
