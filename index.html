@@ -1122,6 +1122,18 @@
   }
   #sw-update-toast.show{transform:translateX(-50%) translateY(0);pointer-events:auto;}
   #sw-update-toast:focus-visible{outline:2px solid var(--gold);outline-offset:3px;}
+
+  /* Shop */
+  .shop-card{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:rgba(30,20,12,0.85);border:1px solid rgba(245,215,110,0.15);border-radius:8px;
+    padding:12px 14px;}
+  .shop-card.owned{opacity:0.7;}
+  .shop-info{flex:1;min-width:0;}
+  .shop-name{font-size:14px;font-weight:bold;color:var(--gold);text-transform:uppercase;letter-spacing:1px;}
+  .shop-desc{font-size:11px;color:rgba(245,215,110,0.6);margin-top:2px;}
+  .shop-action{flex-shrink:0;}
+  .shop-owned{font-size:13px;color:#5b5;letter-spacing:1px;font-weight:bold;}
+  .shop-buy{font-size:13px;padding:6px 16px;min-width:auto;}
 </style>
 
 <!-- SVG color-blind filter definitions (zero render cost when unused) -->
@@ -1236,7 +1248,7 @@
       <button class="btn" data-act="menu-settings">SETTINGS</button>
       <button class="btn" data-act="menu-platform">✦ PLATFORM <span class="sub">PRESTIGE · SEASON · RIVALS</span></button>
       <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">SHARED CO-OP</span></button>
-      <button class="btn" data-act="menu-supporter">★ SUPPORTER PACK <span class="sub">COMING SOON</span></button>
+      <button class="btn" data-act="menu-shop">★ SHOP <span class="sub">COSMETICS & PACKS</span></button>
       <div style="height:20px"></div>
       <div class="btn-row">
         <button class="btn" data-act="back-title" style="font-size:12px">◄ TITLE</button>
@@ -1350,25 +1362,18 @@
     </div>
   </div>
 
-  <!-- ===== SUPPORTER PACK (placeholder) ===== -->
-  <div class="screen" id="screen-supporter">
+  <!-- ===== SHOP ===== -->
+  <div class="screen" id="screen-shop">
     <div class="inner">
       <div class="profile-bar">
-        <div class="name">★ SUPPORTER PACK</div>
-        <div class="scrap small">COMING SOON</div>
+        <div class="name">★ SHOP</div>
+        <div class="scrap small">COSMETICS & PACKS</div>
       </div>
-      <h1 style="font-size:30px;margin-top:8px">COMING SOON</h1>
-      <div class="small" style="line-height:1.6">
-        WE'RE PLANNING AN OPTIONAL <b>SUPPORTER PACK</b> WITH COSMETIC-ONLY EXTRAS:
-        PAINT JOBS, HORN SOUNDS, AND TRAIL EFFECTS.
-        <br/><br/>
-        NO PAY-TO-WIN. NO LOOT BOXES. NO ADS.
-        ALL GAMEPLAY CONTENT WILL REMAIN UNLOCKABLE WITH IN-GAME SCRAP.
-        <br/><br/>
-        STORE INTEGRATION IS NOT YET ENABLED — THIS PAGE IS A PLACEHOLDER.
-        WHEN PURCHASES GO LIVE THEY WILL BE HANDLED THROUGH AN OFFICIAL STOREFRONT
-        WITH A PUBLISHED REFUND POLICY AND PRIVACY NOTICE.
+      <h1 style="font-size:30px;margin-top:8px">SHOP</h1>
+      <div class="small" style="line-height:1.4;margin-bottom:10px">
+        NO PAY-TO-WIN. ALL GAMEPLAY CONTENT REMAINS UNLOCKABLE WITH SCRAP.
       </div>
+      <div id="shop-list" style="display:flex;flex-direction:column;gap:10px"></div>
       <div style="height:14px"></div>
       <button class="btn" data-act="back-menu">◄ BACK TO MENU</button>
     </div>

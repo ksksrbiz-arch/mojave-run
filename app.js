@@ -13920,6 +13920,43 @@ const UI = {
     this.show('menu');
   },
 
+  // ---- SHOP ----
+  showShop() {
+    const list = document.getElementById('shop-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const cloudConnected = !!(safeLocalStorage.getItem(CLOUD_ID_KEY) && safeLocalStorage.getItem(CLOUD_TOKEN_KEY));
+
+    SHOP_ITEMS.forEach(item => {
+      const owned = isShopItemOwned(item);
+      const card = document.createElement('div');
+      card.className = 'shop-card' + (owned ? ' owned' : '');
+      card.innerHTML = `
+        <div class="shop-info">
+          <div class="shop-name">${item.name}</div>
+          <div class="shop-desc small">${item.desc}</div>
+        </div>
+        <div class="shop-action">
+          ${owned
+            ? '<span class="shop-owned">✓ OWNED</span>'
+            : `<button class="btn primary shop-buy" data-act="shop-buy" data-data="${item.priceId}">${item.price}</button>`
+          }
+        </div>
+      `;
+      list.appendChild(card);
+    });
+
+    if (!cloudConnected) {
+      const notice = document.createElement('div');
+      notice.className = 'small center';
+      notice.style.cssText = 'padding:12px 0;color:var(--gold);';
+      notice.textContent = '⚠ CLOUD ACCOUNT REQUIRED — USE MULTIPLAYER → CLOUD SAVE FIRST';
+      list.prepend(notice);
+    }
+
+    this.show('shop');
+  },
+
   // ---- CHARACTER SELECT ----
   // mode: 'new'    — choosing for a brand-new profile (then prompts for callsign)
   //       'change' — changing the active profile's character
@@ -14922,12 +14959,6 @@ const UI = {
       case 'menu-settings':
         UI._settingsFrom = 'menu';
         UI.showSettings();
-        break;
-      case 'menu-supporter':
-        // Cosmetic-only placeholder — no purchase flow, no external link.
-        // Real monetization (if/when it ships) will live behind an official
-        // storefront with a published refund/privacy policy.
-        UI.show('supporter');
         break;
       case 'pause-resume':
         if (Game.state === 'playing') Game.paused = false;
@@ -17506,11 +17537,119 @@ function cloudRestore() {
   });
 }
 
+// ============================================================
+// SHOP — Stripe-powered monetization (cosmetics, convenience, subscription)
+// ============================================================
+const SHOP_ITEMS = [
+  { priceId: 'price_paint_rust_chrome', name: 'RUST & CHROME PAINT PACK',        price: '$2.99', desc: '4 PREMIUM PAINT JOBS',            type: 'cosmetic', ids: ['paint-sunfire','paint-blacktop','paint-rift','paint-warlord'] },
+  { priceId: 'price_trail_neon_horn',   name: 'NEON WAKE TRAIL + HORN BUNDLE',   price: '$4.99', desc: 'NEON TRAIL, GHOST TRAIL & WARCRY HORN', type: 'cosmetic', ids: ['trail-neon','horn-warcry','trail-ghost'] },
+  { priceId: 'price_legend_skins',      name: 'WASTELAND LEGEND SKINS',          price: '$9.99', desc: 'ELITE PAINTS, TRAIL & HORN',      type: 'cosmetic', ids: ['paint-rift','paint-warlord','trail-ghost','horn-raider'] },
+  { priceId: 'price_v23_visuals',       name: 'v2.3 EMPIRE VISUAL PACK',         price: '$6.99', desc: 'SUNFIRE PAINT + NEON TRAIL',       type: 'cosmetic', ids: ['paint-sunfire','trail-neon'] },
+  { priceId: 'price_extra_drivers',     name: 'EXTRA DRIVER SLOTS (+3)',          price: '$3.99', desc: 'CREATE 3 MORE DRIVER PROFILES',   type: 'feature', feature: 'extraDriverSlots' },
+  { priceId: 'price_reset_tokens',      name: 'STAT RESET TOKEN PACK (x5)',       price: '$2.99', desc: 'RESET ANY STAT 5 TIMES',          type: 'feature', feature: 'statResetTokens' },
+  { priceId: 'price_pass_monthly',      name: 'WASTELAND DRIVER PASS (MONTHLY)', price: '$4.99/mo', desc: 'MONTHLY XP BOOST + EXCLUSIVE COSMETICS', type: 'subscription' },
+  { priceId: 'price_pass_yearly',       name: 'WASTELAND DRIVER PASS (YEARLY)',  price: '$49.99/yr', desc: 'YEARLY — SAVE 2 MONTHS!',      type: 'subscription' },
+];
+
+async function purchaseWithStripe(priceId) {
+  const cloudId = safeLocalStorage.getItem(CLOUD_ID_KEY);
+  const cloudToken = safeLocalStorage.getItem(CLOUD_TOKEN_KEY);
+  if (!cloudId || !cloudToken) {
+    UI.toast('LOG INTO A CLOUD ACCOUNT FIRST (MULTIPLAYER → CLOUD SAVE)');
+    return;
+  }
+
+  try {
+    const base = cloudApiBase();
+    const res = await fetch(base + '/api/shop/create-checkout-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        priceId: priceId,
+        accountId: cloudId,
+        token: cloudToken,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.ok && data.url) {
+      window.location.href = data.url;
+    } else {
+      UI.toast('COULD NOT START PURCHASE — TRY AGAIN');
+    }
+  } catch (e) {
+    console.error('[shop] purchase error:', e);
+    UI.toast('PURCHASE FAILED — CHECK YOUR CONNECTION');
+  }
+}
+
+function isShopItemOwned(item) {
+  const p = Profile.active();
+  if (!p) return false;
+  if (item.type === 'cosmetic' && item.ids) {
+    const owned = (p.cosmetics && p.cosmetics.owned) || [];
+    return item.ids.every(id => owned.includes(id));
+  }
+  if (item.type === 'feature' && item.feature) {
+    return !!(p.premiumFeatures && p.premiumFeatures[item.feature]);
+  }
+  if (item.type === 'subscription') {
+    return !!(p.premiumFeatures && p.premiumFeatures.driverPassActive);
+  }
+  return false;
+}
+
+function hasPremiumFeature(feature) {
+  const p = Profile.active();
+  return !!(p && p.premiumFeatures && p.premiumFeatures[feature]);
+}
+
+function handlePurchaseReturn() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('purchase') === 'success') {
+      const cloudId = safeLocalStorage.getItem(CLOUD_ID_KEY);
+      if (cloudId) {
+        // Refresh entitlements from cloud
+        const base = cloudApiBase();
+        const cloudToken = safeLocalStorage.getItem(CLOUD_TOKEN_KEY);
+        if (base && cloudToken) {
+          fetch(base + '/api/accounts/load?id=' + encodeURIComponent(cloudId) + '&token=' + encodeURIComponent(cloudToken))
+            .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+            .then(resp => {
+              if (resp.data && Array.isArray(resp.data.profiles)) {
+                const merged = Profile._data;
+                const existing = new Map(merged.profiles.map(pp => [pp.id, pp]));
+                resp.data.profiles.forEach(pp => {
+                  normalizeGarageProfileState(pp);
+                  existing.set(pp.id, pp);
+                });
+                merged.profiles = Array.from(existing.values());
+                Profile.save();
+              }
+              UI.toast('PURCHASE SUCCESSFUL! CHECK YOUR GARAGE FOR NEW ITEMS.');
+            })
+            .catch(() => UI.toast('PURCHASE COMPLETE — REFRESH IF ITEMS ARE MISSING'));
+        } else {
+          UI.toast('PURCHASE SUCCESSFUL!');
+        }
+      }
+      // Clean the URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('purchase') === 'cancel') {
+      UI.toast('PURCHASE CANCELLED');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  } catch (_) {}
+}
+
 // Wire cloud actions into UI.act
 const _origActCloud = UI.act.bind(UI);
 UI.act = function(action, data) {
   if (action === 'cloud-save') { SFX.click(); cloudSave(); return; }
   if (action === 'cloud-restore') { SFX.click(); cloudRestore(); return; }
+  if (action === 'menu-shop') { SFX.click(); UI.showShop(); return; }
+  if (action === 'shop-buy') { SFX.click(); purchaseWithStripe(data); return; }
   return _origActCloud(action, data);
 };
 
@@ -17522,6 +17661,8 @@ function boot() {
   resize();
   Settings.applyBodyClass();
   Profile.load();
+  // Handle return from Stripe Checkout
+  handlePurchaseReturn();
   // seed decor for menu backdrop
   Game.player = { x: W * 0.5, y: H - 110, w: 42, h: 64, vx: 0, steerSmooth: 0 };
   for (let i = 0; i < 36; i++) Game.decor.push(makeDecor(Math.random() * H));

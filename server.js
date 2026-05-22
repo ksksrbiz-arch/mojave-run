@@ -29,6 +29,31 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { WebSocketServer } = require('ws');
 
+// ============================================================
+// STRIPE — browser monetization (cosmetics, convenience, subscriptions)
+// ============================================================
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? require('stripe')(process.env.STRIPE_SECRET_KEY)
+  : null;
+
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+
+const PREMIUM_PRICE_MAP = {
+  // === COSMETICS ===
+  'price_paint_rust_chrome': { type: 'cosmetic', ids: ['paint-sunfire', 'paint-blacktop', 'paint-rift', 'paint-warlord'] },
+  'price_trail_neon_horn':   { type: 'cosmetic', ids: ['trail-neon', 'horn-warcry', 'trail-ghost'] },
+  'price_legend_skins':      { type: 'cosmetic', ids: ['paint-rift', 'paint-warlord', 'trail-ghost', 'horn-raider'] },
+  'price_v23_visuals':       { type: 'cosmetic', ids: ['paint-sunfire', 'trail-neon'] },
+
+  // === FEATURES ===
+  'price_extra_drivers':     { type: 'feature', feature: 'extraDriverSlots', value: 3 },
+  'price_reset_tokens':      { type: 'feature', feature: 'statResetTokens', value: 5 },
+
+  // === SUBSCRIPTION ===
+  'price_pass_monthly':      { type: 'subscription', feature: 'driverPassActive', value: true },
+  'price_pass_yearly':       { type: 'subscription', feature: 'driverPassActive', value: true },
+};
+
 const PORT = parseInt(process.env.PORT, 10) || 8787;
 const ROOT = __dirname;
 
@@ -588,6 +613,135 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ---- Stripe Shop: Create Checkout Session ----
+  if (urlPathApi === '/api/shop/create-checkout-session' && req.method === 'POST') {
+    if (!stripe) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'payments not configured' }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => {
+      if (body.length + chunk.length > 4096) { req.destroy(); return; }
+      body += chunk;
+    });
+    req.on('end', () => {
+      (async () => {
+        const { priceId, accountId, token } = JSON.parse(body);
+        if (!priceId || !accountId || !token) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'missing fields' }));
+          return;
+        }
+
+        const normId = parseCredential(accountId, 6);
+        const normTok = parseCredential(token, 6);
+        const acc = accounts[normId];
+
+        if (!acc || !safeEqual(acc.token, normTok)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'invalid credentials' }));
+          return;
+        }
+
+        const safePriceId = String(priceId).slice(0, 128);
+        const isSubscription = safePriceId.startsWith('price_pass_');
+
+        const origin = req.headers.origin || req.headers.referer || '';
+        const baseUrl = origin.replace(/\/+$/, '');
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          line_items: [{ price: safePriceId, quantity: 1 }],
+          mode: isSubscription ? 'subscription' : 'payment',
+          success_url: `${baseUrl}/?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/?purchase=cancel`,
+          metadata: {
+            accountId: normId,
+            priceId: safePriceId,
+          },
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, url: session.url }));
+      })().catch(err => {
+        console.error('[shop] create-checkout-session error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'internal error' }));
+      });
+    });
+    req.on('error', () => {});
+    return;
+  }
+
+  // ---- Stripe Webhook (fulfillment) ----
+  if (urlPathApi === '/api/shop/webhook' && req.method === 'POST') {
+    if (!stripe) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'payments not configured' }));
+      return;
+    }
+    const chunks = [];
+    req.on('data', chunk => {
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      const rawBody = Buffer.concat(chunks);
+      const sig = req.headers['stripe-signature'];
+      let event;
+      try {
+        event = stripe.webhooks.constructEvent(rawBody, sig, STRIPE_WEBHOOK_SECRET);
+      } catch (err) {
+        console.error('[webhook] Signature verification failed:', err.message);
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Webhook Error: ' + err.message);
+        return;
+      }
+
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+        const { accountId, priceId } = session.metadata || {};
+
+        if (accountId && priceId && accounts[accountId]) {
+          const acc = accounts[accountId];
+          const mapping = PREMIUM_PRICE_MAP[priceId];
+
+          if (mapping) {
+            acc.data = acc.data || {};
+
+            if (mapping.type === 'cosmetic') {
+              acc.data.cosmetics = acc.data.cosmetics || { owned: [] };
+              const ownedSet = new Set(acc.data.cosmetics.owned);
+              mapping.ids.forEach(id => ownedSet.add(id));
+              acc.data.cosmetics.owned = Array.from(ownedSet);
+            } else if (mapping.type === 'feature') {
+              acc.data.premiumFeatures = acc.data.premiumFeatures || {};
+              acc.data.premiumFeatures[mapping.feature] = mapping.value;
+            } else if (mapping.type === 'subscription') {
+              acc.data.premiumFeatures = acc.data.premiumFeatures || {};
+              acc.data.premiumFeatures[mapping.feature] = mapping.value;
+              acc.data.subscription = acc.data.subscription || {};
+              acc.data.subscription.active = true;
+              acc.data.subscription.priceId = priceId;
+              acc.data.subscription.currentPeriodEnd = session.expires_at || null;
+            }
+
+            acc.savedAt = Date.now();
+            saveAccountsDebounced();
+            console.log('[shop] Successfully granted ' + priceId + ' to account ' + accountId);
+          }
+        }
+      }
+
+      // TODO: Handle customer.subscription.updated / customer.subscription.deleted for cancellations
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ received: true }));
+    });
+    req.on('error', () => {});
+    return;
+  }
+
+  let urlPath = urlPathApi;
   if (urlPath === '/') urlPath = '/index.html';
   // prevent path traversal
   const filePath = path.normalize(path.join(ROOT, urlPath));
