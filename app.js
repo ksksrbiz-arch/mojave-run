@@ -6944,58 +6944,72 @@ function updateVictory(dt) {
 }
 
 // =========================================================================
-// Spring-based car suspension physics.
-// Replaces the sinusoidal suspensionBob in drawVehicle with a real spring
-// simulation driven by speed, boost, drift, hill crests, and damage.
+// Mass-spring-damper car suspension physics.
+// Replaces the sinusoidal suspensionBob in drawVehicle with a tunable physical
+// simulation driven by speed, boost, drift, hill crests, and impacts.
 // State lives on Game (suspOffset, suspVelocity, suspBodyRoll).
-// Called once per frame from updateClassicHandling (classic mode) and from
-// the legacy steering path for other modes.
+// Called once per frame from the main update loop for non-arena modes.
 // =========================================================================
-const SUSP_SPRING = 0.24;        // spring stiffness
-const SUSP_DAMP   = 0.80;        // damping (lower = bouncier)
-const SUSP_MAX    = 18;          // max compression (px)
-const SUSP_ROLL_LERP = 0.15;    // body roll interpolation speed
-const SUSP_ROLL_MAX  = 5;       // max roll degrees
+const SUSP_MASS = 1.0;          // car "mass" (lower = more responsive)
+const SUSP_SPRING_K = 85;       // spring stiffness (higher = stiffer)
+const SUSP_DAMPING_C = 18;      // damping coefficient (controls oscillation)
+const SUSP_MAX = 28;            // max compression (px)
+const SUSP_ROLL_LERP = 0.18;    // body roll interpolation speed
+const SUSP_ROLL_MAX = 5.5;      // max roll degrees
+const SUSP_TURN_THRESHOLD = 0.08;
+const SUSP_TURN_VX_SCALE = 320;
 
-function updateCarSuspension(dt) {
-  const dtN = dt * 60;                                  // normalise to 60 fps
-  const speed = Game.speed || 0;
-  const speedN = clamp(speed / 460, 0, 1);
+function updateCarSuspension(deltaTime, speed = Game.speed || 0, isTurning = null, isBoosting = null, isDrifting = null, hitBump = null) {
+  // Cap the Euler integration step so low-FPS spikes do not destabilize the spring.
+  const dt = Math.min(Math.max(deltaTime || 0, 0), 0.033);
   const p = Game.player;
   if (!p) return;
+  if (isBoosting === null) isBoosting = (Game.classicBoostT || 0) > 0;
+  if (isDrifting === null) isDrifting = !!Game.classicDrifting;
+  if (hitBump === null) hitBump = (Game.classicCrestTriggerT || 0) > 0.4;
+  if (isTurning === null) {
+    const turnSignal = Math.abs(p.steerSmooth || 0) > SUSP_TURN_THRESHOLD ? p.steerSmooth : (p.vx || 0) / SUSP_TURN_VX_SCALE;
+    isTurning = turnSignal < -SUSP_TURN_THRESHOLD ? 'left' : turnSignal > SUSP_TURN_THRESHOLD ? 'right' : null;
+  }
 
-  // -- target compression based on current state --
-  let target = 0;
-  if (speed > 40) target = 3 + (speed - 40) * 0.035;
-  if ((Game.classicBoostT || 0) > 0) target += 6;
-  if (Game.classicDrifting) target += 4;
+  // -- target ride height/compression based on current state --
+  let target = 6 + (speed > 55 ? (speed - 55) * 0.035 : 0);
+  if (isBoosting) target += 9;
+  if (isDrifting) target += 5;
+  if (hitBump) target += 7;
 
   // Damage sag: heavy damage makes the chassis sag slightly
   const dmgR = 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1);
   target += dmgR * 4;
+  target = clamp(target, 2, 26);
 
-  // Hill crests inject an upward impulse (suspension extends, then rebounds)
-  if ((Game.classicCrestTriggerT || 0) > 0.4) {
-    Game.suspVelocity -= 3.5;  // kick upward
-  }
-
-  // Biome roughness adds a small oscillating perturbation at speed
+  // Small random road vibration at high speed, scaled by biome roughness.
   const biomeRough = CLASSIC_ROAD_ROUGHNESS[Game.biome] || 0.12;
-  if (speedN > 0.35) {
-    const roughOsc = Math.sin((Game.t || 0) * (14 + speedN * 22)) * biomeRough * speedN * 2.8;
-    target += roughOsc;
+  if (speed > 80 && (!Settings || !Settings.reducedMotion) && Math.random() < 0.15) {
+    Game.suspVelocity += (Math.random() - 0.5) * 1.2 * (0.6 + biomeRough * 2);
   }
 
-  // -- spring simulation --
-  Game.suspVelocity += (target - Game.suspOffset) * SUSP_SPRING * dtN;
-  Game.suspVelocity *= SUSP_DAMP;
-  Game.suspOffset += Game.suspVelocity * dtN;
-  Game.suspOffset = clamp(Game.suspOffset, -3, SUSP_MAX);
+  // -- Hooke's Law + damping, integrated with capped Euler steps --
+  const displacement = (Game.suspOffset || 0) - target;
+  const springForce = -SUSP_SPRING_K * displacement;
+  const dampingForce = -SUSP_DAMPING_C * (Game.suspVelocity || 0);
+  const acceleration = (springForce + dampingForce) / SUSP_MASS;
+
+  Game.suspVelocity = (Game.suspVelocity || 0) + acceleration * dt;
+  Game.suspOffset = (Game.suspOffset || 0) + Game.suspVelocity * dt;
+
+  // -- soft limits + gentle bounce at extremes --
+  if (Game.suspOffset < 0) {
+    Game.suspOffset = 0;
+    Game.suspVelocity *= -0.35;
+  }
+  if (Game.suspOffset > SUSP_MAX) {
+    Game.suspOffset = SUSP_MAX;
+    Game.suspVelocity *= -0.3;
+  }
 
   // -- body roll (lean into turns) --
-  const vx = p.vx || 0;
-  const turnDir = clamp(vx / 320, -1, 1);
-  const targetRoll = turnDir * SUSP_ROLL_MAX * (Game.classicDrifting ? 1.5 : 1);
+  const targetRoll = isTurning ? (isTurning === 'left' ? -SUSP_ROLL_MAX : SUSP_ROLL_MAX) : 0;
   Game.suspBodyRoll = Game.suspBodyRoll * (1 - SUSP_ROLL_LERP) + targetRoll * SUSP_ROLL_LERP;
 
   // Sync camera shake with strong suspension movements
@@ -7242,9 +7256,6 @@ function updateClassicHandling(dt, p, stats) {
     Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
     Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
   }
-
-  // -- spring-based suspension physics --
-  updateCarSuspension(dt);
 }
 
 function update(dt) {
