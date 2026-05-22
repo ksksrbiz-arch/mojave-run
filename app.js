@@ -5403,6 +5403,10 @@ function startRun(mode, level) {
   Game.classicCrestTriggerT = 0;     // edge-trigger for crest SFX (Phase 5)
   Game.topSpeed = 0;                 // run-scope, surfaced in Phase 5 overlay
   Game.bestDriftCharge = 0;          // peak drift charge banked
+  // === Suspension physics state (spring-based, replaces sinusoidal bob) ===
+  Game.suspOffset = 0;               // current vertical compression (px)
+  Game.suspVelocity = 0;             // spring velocity
+  Game.suspBodyRoll = 0;             // lean into turns (degrees)
   Game._lastNearMissFeedbackT = 0;
   Game.civiliansHit = 0;
   Game.latestReplayDate = null;
@@ -6940,6 +6944,68 @@ function updateVictory(dt) {
 }
 
 // =========================================================================
+// Spring-based car suspension physics.
+// Replaces the sinusoidal suspensionBob in drawVehicle with a real spring
+// simulation driven by speed, boost, drift, hill crests, and damage.
+// State lives on Game (suspOffset, suspVelocity, suspBodyRoll).
+// Called once per frame from updateClassicHandling (classic mode) and from
+// the legacy steering path for other modes.
+// =========================================================================
+const SUSP_SPRING = 0.24;        // spring stiffness
+const SUSP_DAMP   = 0.80;        // damping (lower = bouncier)
+const SUSP_MAX    = 18;          // max compression (px)
+const SUSP_ROLL_LERP = 0.15;    // body roll interpolation speed
+const SUSP_ROLL_MAX  = 5;       // max roll degrees
+
+function updateCarSuspension(dt) {
+  const dtN = dt / (1 / 60);                      // normalise to 60 fps
+  const speed = Game.speed || 0;
+  const speedN = clamp(speed / 460, 0, 1);
+  const p = Game.player;
+  if (!p) return;
+
+  // -- target compression based on current state --
+  let target = 0;
+  if (speed > 40) target = 3 + (speed - 40) * 0.035;
+  if ((Game.classicBoostT || 0) > 0) target += 6;
+  if (Game.classicDrifting) target += 4;
+
+  // Damage sag: heavy damage makes the chassis sag slightly
+  const dmgR = 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1);
+  target += dmgR * 4;
+
+  // Hill crests inject an upward impulse (suspension extends, then rebounds)
+  if ((Game.classicCrestTriggerT || 0) > 0.4) {
+    Game.suspVelocity -= 3.5;  // kick upward
+  }
+
+  // Biome roughness adds a small oscillating perturbation at speed
+  const biomeRough = CLASSIC_ROAD_ROUGHNESS[Game.biome] || 0.12;
+  if (speedN > 0.35) {
+    const roughOsc = Math.sin((Game.t || 0) * (14 + speedN * 22)) * biomeRough * speedN * 2.8;
+    target += roughOsc;
+  }
+
+  // -- spring simulation --
+  Game.suspVelocity += (target - Game.suspOffset) * SUSP_SPRING * dtN;
+  Game.suspVelocity *= SUSP_DAMP;
+  Game.suspOffset += Game.suspVelocity * dtN;
+  Game.suspOffset = clamp(Game.suspOffset, -3, SUSP_MAX);
+
+  // -- body roll (lean into turns) --
+  const vx = p.vx || 0;
+  const turnDir = clamp(vx / 320, -1, 1);
+  const targetRoll = turnDir * SUSP_ROLL_MAX * (Game.classicDrifting ? 1.5 : 1);
+  Game.suspBodyRoll = Game.suspBodyRoll * (1 - SUSP_ROLL_LERP) + targetRoll * SUSP_ROLL_LERP;
+
+  // Sync camera shake with strong suspension movements
+  if (Settings && !Settings.reducedMotion) {
+    const suspImpact = Math.abs(Game.suspVelocity) * 0.006;
+    if (suspImpact > 0.06) Game.shake = Math.max(Game.shake, suspImpact);
+  }
+}
+
+// =========================================================================
 // Classic Dirt5 × OutRun handling (Phase 1) — mode-isolated to 'classic'.
 // Replaces the direct vx-clamp steering with an accel/grip model + drift
 // state machine. Reuses Game.driftCharge / Game.driftLastDir. All extra
@@ -7176,6 +7242,9 @@ function updateClassicHandling(dt, p, stats) {
     Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
     Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
   }
+
+  // -- spring-based suspension physics --
+  updateCarSuspension(dt);
 }
 
 function update(dt) {
@@ -7533,6 +7602,9 @@ function update(dt) {
     }
     p.y = H - 110;
   }
+
+  // -- suspension physics (runs for all non-arena modes) --
+  if (!Game.spinout) updateCarSuspension(dt);
 
   // ---- fire ----
   Game.fireCooldown -= dt;
@@ -8241,6 +8313,8 @@ function damagePlayer(amt) {
   Game.health -= amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
+  // Suspension impact kick — car jolts downward on hit
+  Game.suspVelocity = (Game.suspVelocity || 0) + 4.5;
   // taking damage breaks the combo and bounty chain
   Game.combo = 0;
   Game.bountyStreak = 0;
@@ -10629,12 +10703,19 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const { spawnN, hitN, storyN } = enemyAnimState(opts);
   const biomeRough = BIOME_ROUGHNESS_MAP[Game.biome] || 0.15;
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
-  const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
+  // Spring-based suspension: use real physics output for the player vehicle,
+  // fall back to sinusoidal bob for enemies/previews.
+  const isPlayerVehicle = (vehicle === Game.vehicle && !opts.ghost && !opts.isEnemy
+    && Game.player && x === Game.player.x && y === Game.player.y);
+  const suspensionBob = isPlayerVehicle
+    ? (Game.suspOffset || 0) * 0.55              // spring compression → visual downward shift
+    : Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
+  const springRoll = isPlayerVehicle ? (Game.suspBodyRoll || 0) * (Math.PI / 180) * 0.35 : 0;
   const lean = clamp(vx / 460, -1, 1) * (0.16 + speedN * 0.16) + idleRock;
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
-  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0)) + hitPunch * 0.08;
+  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + (opts.extraTilt || 0)) + hitPunch * 0.08;
   const wheelSpin = t * (5.5 + speedN * 30);
   const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
   const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
@@ -12433,33 +12514,41 @@ function drawPlayerGroundShadow() {
   const speedN = clamp((Game.speed || 0) / CLASSIC_PLAYER_SHADOW_SPEED_REF, 0, 1);
   const boostN = clamp((Game.classicBoostT || 0) / CLASSIC_ROAD_VISUAL_BOOST_REF, 0, 1);
   const slant = 5 + clamp(Math.abs(p.vx || 0) / 460, 0, 1) * 9;
+  // Shadow offset syncs with suspension: when the spring compresses (car
+  // squats), the shadow sits tighter/wider; when the spring extends (car
+  // lifts), the shadow shrinks and gains a slight gap.
+  const suspComp = clamp((Game.suspOffset || 0) / SUSP_MAX, 0, 1);
+  const suspShadowScale = 1 + suspComp * 0.12;       // wider when squatting
+  const suspShadowGap = (1 - suspComp) * 2;           // small gap when lifted
   const cx = p.x + slant * 0.25;
-  const cy = p.y + p.h / 2 + 7;
+  const cy = p.y + p.h / 2 + 7 + suspShadowGap;
   ctx.save();
   ctx.translate(cx, cy);
   if (PerfMon.quality > 0.5) {
     ctx.save();
     // Angled shadow — larger/softer radial gradient with forward slant
-    const sg = ctx.createRadialGradient(slant * 0.3, 0, 0, slant * 0.3, 0, pw * 0.62);
+    const sR = pw * 0.62 * suspShadowScale;
+    const sg = ctx.createRadialGradient(slant * 0.3, 0, 0, slant * 0.3, 0, sR);
     sg.addColorStop(0, 'rgba(0,0,0,0.46)');
     sg.addColorStop(0.5, 'rgba(0,0,0,0.18)');
     sg.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = sg;
     ctx.scale(1.0, 0.38);
     ctx.beginPath();
-    ctx.ellipse(slant * 0.3, 0, pw * 0.62, pw * 0.62 * 0.75, 0, 0, Math.PI * 2);
+    ctx.ellipse(slant * 0.3, 0, sR, sR * 0.75, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   } else {
     ctx.save();
     ctx.scale(1, 0.45);
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, pw * 0.58);
+    const sR2 = pw * 0.58 * suspShadowScale;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, sR2);
     g.addColorStop(0, 'rgba(0,0,0,0.44)');
     g.addColorStop(0.6, 'rgba(0,0,0,0.17)');
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(0, 0, pw * 0.58, (p.h + 12) * 0.34, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, sR2, (p.h + 12) * 0.34, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
