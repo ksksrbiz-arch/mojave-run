@@ -3923,6 +3923,9 @@ const CLASSIC_PLAYER_SHADOW_SPEED_REF = 520; // shadow tightening starts slightl
 const CLASSIC_TEXTURE_SEED_A = 73;
 const CLASSIC_TEXTURE_SEED_B = 97;
 const CLASSIC_TEXTURE_SEED_MOD = 997;
+const CLASSIC_TEXTURE_DETAIL_HIGH_T = 0.72;
+const CLASSIC_TEXTURE_DETAIL_MED_T = 0.45;
+const CLASSIC_TEXTURE_SCROLL_RATE = 0.22;
 const GOLDEN_RATIO_CONJUGATE = 0.6180339887;
 function _classicSegHash(i) {
   let h = (i | 0) ^ 0xDEADBEEF;
@@ -9079,9 +9082,9 @@ function drawRoadClassicV2() {
         ctx.closePath();
         ctx.fill();
       }
-      const specks = tMid > 0.72 ? 4 : tMid > 0.45 ? 3 : 2;
+      const specks = tMid > CLASSIC_TEXTURE_DETAIL_HIGH_T ? 4 : tMid > CLASSIC_TEXTURE_DETAIL_MED_T ? 3 : 2;
       for (let gi = 0; gi < specks; gi++) {
-        const seed = (ti * CLASSIC_TEXTURE_SEED_A + gi * CLASSIC_TEXTURE_SEED_B + Math.floor((Game.laneOffset || 0) * 0.22)) % CLASSIC_TEXTURE_SEED_MOD;
+        const seed = (ti * CLASSIC_TEXTURE_SEED_A + gi * CLASSIC_TEXTURE_SEED_B + Math.floor((Game.laneOffset || 0) * CLASSIC_TEXTURE_SCROLL_RATE)) % CLASSIC_TEXTURE_SEED_MOD;
         const frac = (((seed * GOLDEN_RATIO_CONJUGATE) % 1) - 0.5) * 1.5;
         const gwT = Math.max(1, hwT * (0.025 + ((seed % 7) * 0.003)));
         const gwB = Math.max(gwT + 0.3, hwB * (0.026 + ((seed % 5) * 0.004)));
@@ -12294,8 +12297,8 @@ function drawPlayerGroundShadow() {
   const cy = p.y + p.h / 2 + 7;
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.save();
   if (PerfMon.quality > 0.5) {
+    ctx.save();
     // Angled shadow — larger/softer radial gradient with forward slant
     const sg = ctx.createRadialGradient(slant * 0.3, 0, 0, slant * 0.3, 0, pw * 0.62);
     sg.addColorStop(0, 'rgba(0,0,0,0.46)');
@@ -12306,7 +12309,9 @@ function drawPlayerGroundShadow() {
     ctx.beginPath();
     ctx.ellipse(slant * 0.3, 0, pw * 0.62, pw * 0.62 * 0.75, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   } else {
+    ctx.save();
     ctx.scale(1, 0.45);
     const g = ctx.createRadialGradient(0, 0, 0, 0, 0, pw * 0.58);
     g.addColorStop(0, 'rgba(0,0,0,0.44)');
@@ -12316,8 +12321,8 @@ function drawPlayerGroundShadow() {
     ctx.beginPath();
     ctx.ellipse(0, 0, pw * 0.58, (p.h + 12) * 0.34, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
-  ctx.restore();
   // Contact patches under the tyres anchor the car to the road plane once
   // the softer body shadow is stretched out by speed.
   ctx.globalAlpha = 0.16 + speedN * 0.10;
@@ -12460,7 +12465,7 @@ function drawSpeedLines() {
   for (let li = 0; li < lineCount; li++) {
     // Spread across road width, animated with speed.
     const frac = ((li / lineCount) + tOff * 0.06) % 1;
-    const laneFrac = frac * 2 - 1;
+    const normalizedX = frac * 2 - 1;
     const dy = H - horizonY;
     // Per-line depth 0..1 from horizon to bottom, animated.
     const d0 = ((li * 0.371 + tOff * 0.04) % 1) * 0.72 + 0.08;
@@ -12473,8 +12478,8 @@ function drawSpeedLines() {
     const c1 = vpX + (classicMode ? getClassicRoadShift(ey) : 0);
     const hw0 = roadW * p0 * 0.5;
     const hw1 = roadW * p1 * 0.5;
-    const sx = c0 + hw0 * laneFrac * 0.92;
-    const ex = c1 + hw1 * laneFrac * 0.92;
+    const sx = c0 + hw0 * normalizedX * 0.92;
+    const ex = c1 + hw1 * normalizedX * 0.92;
     // Lines near the road edges and close to the player appear brighter.
     const edgeBoost = Math.abs(frac - 0.5) * 2;
     const lineA = intensity * (0.04 + edgeBoost * 0.055) * (0.3 + d0 * 0.7);
