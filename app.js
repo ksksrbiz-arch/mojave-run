@@ -3717,6 +3717,82 @@ function getWindingRoadShift(y = H * 0.5) {
   return (swayA * WINDING_PRIMARY_WAVE_WEIGHT + swayB * WINDING_SECONDARY_WAVE_WEIGHT) * amp + drift;
 }
 
+// =====================================================================
+// Phase 2 Classic Dirt5/OutRun — procedural curve & hill generators.
+// Pure functions of distance; deterministic per-segment via xorshift hash.
+// Curve ∈ [-1, 1] (negative = bends left at horizon, positive = right).
+// Hill ∈ [-1, 1]  (positive = crest, negative = dip).
+// These drive both the render-time per-row offset AND a small lateral
+// force on the player in updateClassicHandling.
+// =====================================================================
+const CLASSIC_CURVE_SEG_LEN = 700;
+const CLASSIC_HILL_SEG_LEN  = 950;
+function _classicSegHash(i) {
+  let h = (i | 0) ^ 0xDEADBEEF;
+  h = Math.imul(h ^ (h >>> 15), 0x85EBCA77);
+  h = Math.imul(h ^ (h >>> 13), 0xC2B2AE3D);
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h / 4294967295;
+}
+function _classicCurveTarget(i) {
+  const h = _classicSegHash(i);
+  if (h < 0.30) return 0;                                // 30% straights
+  const dir = h < 0.65 ? -1 : 1;
+  const magH = _classicSegHash(i ^ 0x5BD1E995);
+  const mag  = 0.25 + magH * 0.65;                       // 0.25..0.90
+  const biome = (typeof Game !== 'undefined' && Game && Game.biome) || 'wastes';
+  let bMul = 1;
+  switch (biome) {
+    case 'canyon': case 'neonruins': bMul = 1.25; break; // sharper
+    case 'frostwaste': case 'wastes': bMul = 0.7;  break; // long straights
+    case 'irradiated': bMul = 1.15; break;
+    case 'thunderplains': case 'midnight': bMul = 1.0; break;
+  }
+  return clamp(dir * mag * bMul, -1, 1);
+}
+function _classicHillTarget(i) {
+  const h = _classicSegHash((i + 7777) | 0);
+  if (h < 0.55) return 0;                                // mostly flat
+  const magH = _classicSegHash((i ^ 0xC6A4A793) | 0);
+  return (h < 0.78 ? -1 : 1) * (0.30 + magH * 0.65);
+}
+function getClassicCurveAt(distance) {
+  const idx = (distance || 0) / CLASSIC_CURVE_SEG_LEN;
+  const i0 = Math.floor(idx);
+  const t  = idx - i0;
+  const tt = t * t * (3 - 2 * t);                        // smoothstep
+  return _classicCurveTarget(i0) * (1 - tt) + _classicCurveTarget(i0 + 1) * tt;
+}
+function getClassicHillAt(distance) {
+  const idx = (distance || 0) / CLASSIC_HILL_SEG_LEN + 0.37;
+  const i0 = Math.floor(idx);
+  const t  = idx - i0;
+  const tt = t * t * (3 - 2 * t);
+  return _classicHillTarget(i0) * (1 - tt) + _classicHillTarget(i0 + 1) * tt;
+}
+// Render-only per-row horizontal shift (pixels). Zero at the player row,
+// quadratic ramp up to max at the horizon. Used by drawRoadClassicV2.
+function getClassicRoadShift(y) {
+  if (!Game || Game.mode !== 'classic') return 0;
+  const horizonY = H * 0.42;
+  const c = Game.classicCurveSmooth || 0;
+  if (y <= horizonY) return c * W * 0.20;
+  const tFrac = (y - horizonY) / Math.max(1, H - horizonY);
+  const wq = (1 - tFrac) * (1 - tFrac);
+  return c * wq * W * 0.20;
+}
+// Render-only per-row vertical hill offset (pixels). Negative = crest
+// (road sits a bit higher / horizon appears lower); positive = dip.
+function getClassicRoadHillDy(y) {
+  if (!Game || Game.mode !== 'classic') return 0;
+  const horizonY = H * 0.42;
+  const h = Game.classicHillSmooth || 0;
+  if (y <= horizonY) return -h * 16;
+  const tFrac = (y - horizonY) / Math.max(1, H - horizonY);
+  const wq = (1 - tFrac) * (1 - tFrac);
+  return -h * wq * 16;
+}
+
 function emit(x, y, n, opts = {}) {
   n = Math.max(1, Math.round(n * PARTICLE_SCALE * Settings.particles));
   const { color='#f5d76e', speed=180, life=0.6, size=3, spread=Math.PI*2, gravity=0, shape } = opts;
@@ -5062,6 +5138,10 @@ function startRun(mode, level) {
   Game.classicLean = 0;              // smoothed lean (-1..1) for camera/VP cues
   Game.classicSurfaceGrip = 1;       // 1 = tarmac, <1 = dirt edge
   Game.classicDirtDustT = 0;         // throttle for edge dust emit
+  // Phase 2 — procedural curve+hill, render-only visual + lateral push
+  Game.classicCurveSmooth = 0;       // -1..1 smoothed curve at the player
+  Game.classicHillSmooth = 0;        // -1..1 smoothed hill (+ = crest)
+  Game.classicCrestTriggerT = 0;     // edge-trigger for crest SFX (Phase 5)
   Game.topSpeed = 0;                 // run-scope, surfaced in Phase 5 overlay
   Game.bestDriftCharge = 0;          // peak drift charge banked
   Game._lastNearMissFeedbackT = 0;
@@ -6610,6 +6690,13 @@ function updateVictory(dt) {
 function updateClassicHandling(dt, p, stats) {
   const accel = stats.accel;
   const maxV  = stats.maxV;
+  // -- Phase 2: smoothly track procedural curve & hill targets. The
+  // *_Smooth values are read by drawRoadClassicV2 each frame, and the
+  // curve drives a small lateral push so corners "pull" the car.
+  const curveTarget = getClassicCurveAt(Game.distance);
+  Game.classicCurveSmooth = expEase(Game.classicCurveSmooth || 0, curveTarget, 2.4, dt);
+  const hillTarget = getClassicHillAt(Game.distance);
+  Game.classicHillSmooth = expEase(Game.classicHillSmooth || 0, hillTarget, 2.0, dt);
   // -- read steering input (keyboard + touch target) --
   const keyAxis = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   let steerInput = 0;
@@ -6709,6 +6796,12 @@ function updateClassicHandling(dt, p, stats) {
   // Clamp; allow ~25% overshoot when drifting (the "loose" feel)
   const vxCap = maxV * (Game.classicDrifting ? 1.25 : 1.0);
   p.vx = clamp(p.vx, -vxCap, vxCap);
+  // Phase 2: lateral "centripetal" force — corners pull the car outward.
+  // Scaled by speed so it only bites at pace; multiplied by surface grip
+  // (less push on dirt) and softened during drift (you're sliding anyway).
+  const corneringMul = Game.classicDrifting ? 0.55 : 1.0;
+  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.55 * corneringMul * surfGrip;
+  p.vx -= lateralPush * dt;
   p.x  += p.vx * dt;
 
   // -- drift-charge accumulation (reuses existing Game.driftCharge) --
@@ -8117,6 +8210,9 @@ function drawBackground() {
 }
 
 function drawRoad() {
+  // Phase 2 — Classic mode gets its own curve+hill renderer; other modes
+  // (winding, campaign, gauntlet, etc.) keep the legacy straight render.
+  if (Game.mode === 'classic') { drawRoadClassicV2(); return; }
   const t = activeBiomeTheme();
   const { x0, x1, w } = roadBounds();
   if (Game.mode === 'winding') {
@@ -8398,6 +8494,256 @@ function drawRoad() {
       const pw    = Math.max(4, phw * 0.09);
       const ph    = Math.max(2, tFrac * 4);
       const px2   = vpX + ((pi * 53 + patchSeed * 7) % Math.max(1, Math.round(phw * 1.4))) - phw * 0.7;
+      ctx.globalAlpha = 0.055 + tFrac * 0.03;
+      ctx.fillStyle = '#1a1208';
+      ctx.fillRect(px2, py2, pw, ph);
+    }
+    ctx.restore();
+  }
+}
+
+// =====================================================================
+// Phase 2 Classic Dirt5 × OutRun road renderer.
+// Per-row scanline render integrating procedural curve+hill so the road
+// bends and crests. The vanishing point shifts with player lean *and*
+// the current curve; rumble strips / dashes / cracks / oil patches all
+// re-project through getClassicRoadShift(y). Mode-isolated — strictly
+// called only when Game.mode === 'classic'.
+// =====================================================================
+function drawRoadClassicV2() {
+  const t = activeBiomeTheme();
+  const { w } = roadBounds();                // straight road width (stable)
+  const horizonY = H * 0.42;
+  // Vanishing point: player lean + smoothed curve at the horizon.
+  const playerLean = Game.player ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
+  // Boost slightly amplifies the lean for that hot-corner cinematic kick.
+  const boostKick = (Game.classicBoostT || 0) > 0 ? 1.18 : 1.0;
+  const curveHoriz = (Game.classicCurveSmooth || 0);
+  const vpX = W * 0.5 - playerLean * W * 0.055 * boostKick + curveHoriz * W * 0.10;
+  const hillHorizonOffset = -(Game.classicHillSmooth || 0) * 12;
+  const horizonYEff = horizonY + hillHorizonOffset;
+
+  // Ground fill (shoulder) — full screen from horizon to bottom.
+  ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
+  ctx.fillRect(0, horizonYEff, W, H - horizonYEff);
+
+  // Per-row road-surface strips (cheap horizontal trapezoids).
+  // STRIPS controls density: ~64 strips is plenty for a smooth curve.
+  const STRIPS = (PerfMon.quality > 0.5) ? 72 : 44;
+  const stripH = (H - horizonYEff) / STRIPS;
+  for (let si = 0; si < STRIPS; si++) {
+    const yTop = horizonYEff + si * stripH;
+    const yBot = yTop + stripH;
+    const tT = si / STRIPS;
+    const tB = (si + 1) / STRIPS;
+    // Center for this strip = vpX + per-row curve offset (use mid-row).
+    const yMid = (yTop + yBot) * 0.5;
+    const cx = vpX + getClassicRoadShift(yMid);
+    const hwT = w * tT * 0.5;
+    const hwB = w * tB * 0.5;
+    // Stripe banding for depth — alternates per row (OutRun staple).
+    const band = si & 1;
+    if (Game.isNight) {
+      ctx.fillStyle = band ? t.roadNightA : shade(t.roadNightB, 6);
+    } else {
+      ctx.fillStyle = band ? t.roadDayA : shade(t.roadDayB, 12);
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx - hwT, yTop);
+    ctx.lineTo(cx + hwT, yTop);
+    ctx.lineTo(cx + hwB, yBot + 0.6);
+    ctx.lineTo(cx - hwB, yBot + 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Rumble strips — red/white alternating at road edges, brighter under nitro.
+  const nitroBoost = isPowerupActive && isPowerupActive('nitro') ? 1 : 0;
+  const rumbleRed   = nitroBoost ? '#ff4040' : '#b01818';
+  const rumbleWhite = nitroBoost ? '#ffffff' : '#d4d4d4';
+  {
+    const RS = 30, rsH = (H - horizonYEff) / RS;
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.fillStyle = pass === 0 ? rumbleRed : rumbleWhite;
+      ctx.beginPath();
+      for (let ri = 0; ri < RS; ri++) {
+        const tFrac = (ri + 0.5) / RS;
+        const dist  = 1.0 / Math.max(0.001, tFrac);
+        if (Math.floor(dist * 5.2 + Game.laneOffset * 0.028) % 2 !== pass) continue;
+        const tTop = ri / RS, tBot = (ri + 1) / RS;
+        const hw0 = w * tTop / 2, hw1 = w * tBot / 2;
+        const rT = Math.max(0.5, hw0 * 0.046), rB = Math.max(0.5, hw1 * 0.046);
+        const y = horizonYEff + ri * rsH;
+        const cx0 = vpX + getClassicRoadShift(y + rsH * 0.5);
+        const cx1 = vpX + getClassicRoadShift(y + rsH * 1.5);
+        // left strip
+        ctx.moveTo(cx0 - hw0,      y);          ctx.lineTo(cx0 - hw0 + rT, y);
+        ctx.lineTo(cx1 - hw1 + rB, y + rsH);    ctx.lineTo(cx1 - hw1,      y + rsH);
+        ctx.closePath();
+        // right strip
+        ctx.moveTo(cx0 + hw0 - rT, y);          ctx.lineTo(cx0 + hw0,      y);
+        ctx.lineTo(cx1 + hw1,      y + rsH);    ctx.lineTo(cx1 + hw1 - rB, y + rsH);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
+  }
+
+  // Road-edge yellow lines — series of short segments per strip, each
+  // anchored to the curved row centers (gives a clean bending edge).
+  {
+    const EDGE = 28, eH = (H - horizonYEff) / EDGE;
+    ctx.strokeStyle = '#f5d76e';
+    ctx.lineWidth = Math.max(1.2, w * 0.0042);
+    ctx.beginPath();
+    for (let ei = 0; ei < EDGE; ei++) {
+      const tTop = ei / EDGE, tBot = (ei + 1) / EDGE;
+      const yTop = horizonYEff + ei * eH;
+      const yBot = yTop + eH;
+      const cT = vpX + getClassicRoadShift(yTop + eH * 0.5);
+      const cB = vpX + getClassicRoadShift(yBot - eH * 0.5);
+      const hwT = w * tTop / 2, hwB = w * tBot / 2;
+      ctx.moveTo(cT - hwT, yTop); ctx.lineTo(cB - hwB - 1, yBot);
+      ctx.moveTo(cT + hwT, yTop); ctx.lineTo(cB + hwB + 1, yBot);
+    }
+    ctx.stroke();
+  }
+
+  // Dashed centre line — perspective scaled, follows the curve.
+  {
+    const CDS = 28, cdH = (H - horizonYEff) / CDS;
+    ctx.fillStyle = Game.isNight ? t.lineNight : t.lineDay;
+    for (let ci = 0; ci < CDS; ci++) {
+      const tFrac = (ci + 0.5) / CDS;
+      const dist  = 1.0 / Math.max(0.001, tFrac);
+      if ((dist * 5.8 + Game.laneOffset * 0.02) % 1 > 0.52) continue;
+      const y     = horizonYEff + ci * cdH;
+      const dashW = Math.max(1, w * tFrac * 0.012);
+      const cx    = vpX + getClassicRoadShift(y + cdH * 0.5);
+      ctx.fillRect(cx - dashW / 2, y, dashW, cdH);
+    }
+  }
+
+  // Lane guide dashes at ⅓ and ⅔ — also follow the curve.
+  {
+    const LGS = 24, lgH = (H - horizonYEff) / LGS;
+    const lineAlpha = Game.isNight ? 0.30 : 0.18;
+    ctx.fillStyle = `rgba(245,215,110,${lineAlpha})`;
+    for (let li = 0; li < LGS; li++) {
+      const tFrac = (li + 0.5) / LGS;
+      const dist  = 1.0 / Math.max(0.001, tFrac);
+      if ((dist * 4.8 + Game.laneOffset * 0.015) % 1 > 0.38) continue;
+      const y    = horizonYEff + li * lgH;
+      const hw   = w * tFrac / 2;
+      const lw   = Math.max(0.5, hw * 0.008);
+      const cx   = vpX + getClassicRoadShift(y + lgH * 0.5);
+      ctx.fillRect(cx - hw / 3 - lw / 2, y, lw, lgH);
+      ctx.fillRect(cx + hw / 3 - lw / 2, y, lw, lgH);
+    }
+  }
+
+  // Road surface cracks — perspective + curve.
+  {
+    const crackSeed = Math.floor(Game.laneOffset * 4);
+    ctx.fillStyle = Game.isNight ? t.crackNight : t.crackDay;
+    for (let i = 0; i < 10; i++) {
+      const tFrac = clamp(((i * 73 + crackSeed) % Math.max(1, Math.round(H - horizonYEff))) / (H - horizonYEff), 0.06, 1);
+      const cy    = horizonYEff + tFrac * (H - horizonYEff);
+      const hw    = w * tFrac / 2;
+      const crackW = Math.max(6, w * tFrac * 0.065);
+      const cx    = vpX + getClassicRoadShift(cy);
+      const cx2   = cx + ((i * 37) % Math.max(1, Math.round(hw * 1.6))) - hw * 0.8;
+      ctx.fillRect(cx2, cy, crackW, Math.max(1, tFrac * 3));
+    }
+  }
+
+  // Atmospheric haze — blends road into sky at the (effective) horizon.
+  {
+    const hazeG  = ctx.createLinearGradient(vpX, horizonYEff - 6, vpX, horizonYEff + H * 0.10);
+    const fogClr = Game.isNight
+      ? (t.fogNight || 'rgba(12,10,20,0.45)')
+      : (t.fogDay   || 'rgba(200,160,100,0.38)');
+    hazeG.addColorStop(0,    'rgba(0,0,0,0)');
+    hazeG.addColorStop(0.55, fogClr);
+    hazeG.addColorStop(1,    'rgba(0,0,0,0)');
+    ctx.fillStyle = hazeG;
+    ctx.fillRect(0, horizonYEff - 6, W, H * 0.10 + 6);
+  }
+
+  // Sun/VP glare bloom — sits on the curved vanishing point.
+  if (PerfMon.quality > 0.55 && !Game.isNight && !Game.isStorm) {
+    const glareG = ctx.createRadialGradient(vpX, horizonYEff, 0, vpX, horizonYEff, H * 0.20);
+    glareG.addColorStop(0,    'rgba(255,245,210,0.26)');
+    glareG.addColorStop(0.45, 'rgba(255,225,155,0.09)');
+    glareG.addColorStop(1,    'rgba(255,200,100,0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = glareG;
+    ctx.fillRect(vpX - H * 0.20, horizonYEff - H * 0.06, H * 0.40, H * 0.26);
+    ctx.restore();
+  }
+
+  // Heat shimmer — wavy bands just above the (effective) horizon.
+  if (!Game.isNight && !Game.isStorm && PerfMon.quality > 0.35) {
+    const shimT   = (Game.t || 0) * 1.8;
+    const shimBands = Math.round(3 + PerfMon.quality * 3);
+    const xL = vpX - w * 0.5 + getClassicRoadShift(horizonYEff + 4);
+    const xR = vpX + w * 0.5 + getClassicRoadShift(horizonYEff + 4);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let si = 0; si < shimBands; si++) {
+      const sy = horizonYEff + H * 0.012 * si;
+      const sAlpha = (0.04 - si * 0.006) * PerfMon.quality;
+      if (sAlpha <= 0) continue;
+      ctx.beginPath();
+      const pts = 18;
+      for (let pi = 0; pi <= pts; pi++) {
+        const fx = xL + (xR - xL) * (pi / pts);
+        const fy = sy + Math.sin(shimT + pi * 0.9 + si * 2.1) * (1.4 - si * 0.18);
+        pi === 0 ? ctx.moveTo(fx, fy) : ctx.lineTo(fx, fy);
+      }
+      ctx.lineTo(xR, sy + H * 0.012);
+      ctx.lineTo(xL, sy + H * 0.012);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(255,220,130,${sAlpha})`;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Oil-slick iridescence + asphalt patches — projected through the curve.
+  if (PerfMon.quality > 0.45) {
+    const oilSeed = Math.floor((Game.laneOffset || 0) * 0.7);
+    for (let oi = 0; oi < 4; oi++) {
+      const tFrac = clamp(((oi * 97 + oilSeed) % 100) / 100, 0.12, 0.95);
+      const oy    = horizonYEff + tFrac * (H - horizonYEff);
+      const ohw   = w * tFrac * 0.5;
+      const cx    = vpX + getClassicRoadShift(oy);
+      const ox    = cx + ((oi * 61 + oilSeed * 3) % Math.max(1, Math.round(ohw * 1.6))) - ohw * 0.8;
+      const oR    = Math.max(6, ohw * 0.07);
+      const hueShift = ((oi * 47 + oilSeed) % 360);
+      ctx.save();
+      ctx.globalAlpha = 0.07 + tFrac * 0.04;
+      const og = ctx.createRadialGradient(ox, oy, 0, ox, oy, oR * 2.2);
+      og.addColorStop(0,   `hsla(${hueShift},90%,65%,1)`);
+      og.addColorStop(0.4, `hsla(${(hueShift+80)%360},85%,55%,0.7)`);
+      og.addColorStop(1,   `hsla(${(hueShift+200)%360},70%,40%,0)`);
+      ctx.fillStyle = og;
+      ctx.beginPath();
+      ctx.ellipse(ox, oy, oR * 2.2, oR * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    const patchSeed = Math.floor((Game.laneOffset || 0) * 0.3);
+    ctx.save();
+    for (let pi = 0; pi < 5; pi++) {
+      const tFrac = clamp(((pi * 83 + patchSeed) % 100) / 100, 0.10, 0.98);
+      const py2   = horizonYEff + tFrac * (H - horizonYEff);
+      const phw   = w * tFrac * 0.5;
+      const pw    = Math.max(4, phw * 0.09);
+      const ph    = Math.max(2, tFrac * 4);
+      const cx    = vpX + getClassicRoadShift(py2);
+      const px2   = cx + ((pi * 53 + patchSeed * 7) % Math.max(1, Math.round(phw * 1.4))) - phw * 0.7;
       ctx.globalAlpha = 0.055 + tFrac * 0.03;
       ctx.fillStyle = '#1a1208';
       ctx.fillRect(px2, py2, pw, ph);
