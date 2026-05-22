@@ -4052,6 +4052,7 @@ const CIVILIAN_PENALTY = 200;   // score lost when hitting a civilian car
 const SPINOUT_DURATION    = 2.2;  // seconds the player is out of control
 const SPINOUT_ROT_DECAY   = 0.18; // pow base for angular velocity exponential decay per dt
 const SPINOUT_OSC_FREQ    = 4.8;  // oscillation frequency (rad/s) of the side-to-side drift
+const SKID_SPAWN_INTERVAL = 0.033; // ~30 Hz throttle for visual skid-mark emitters
 const HITCHHIKER_DRIFT_SPEED = 5; // px/s at which hitchhikers wander toward the road center
 const CIVILIAN_WARNING_HITS = 1;
 const CIVILIAN_MANHUNT_HITS = 3;
@@ -5022,9 +5023,10 @@ const Game = {
   powerups: { shield: null, triple: null, rapid: null, nitro: null, magnet: null, x2: null, overdrive: null, salvage: null, pulse: null, homing: null, armor: null, chainsaw: null, molotov: null, pipebomb: null, barricade: null, adrenaline: null },
   // tire skid marks (drawn under road decals)
   skidMarks: [],
-  // Phase 6 polish: throttle classic-drift skid spawns to ~30 Hz instead of
-  // per-frame Math.random(), and cache road-strip count keyed by quality.
+  // Phase 6 polish: throttle skid spawns to ~30 Hz instead of per-frame RNG.
   classicSkidSpawnT: 0,
+  legacySkidSpawnT: 0,
+  // Road-strip count cache keyed by PerfMon.quality.
   _classicStripsCache: { q: -1, n: 0 },
   // far parallax peaks (deepest layer)
   farPeaks: [],
@@ -5332,6 +5334,9 @@ function startRun(mode, level) {
   Game.classicLean = 0;              // smoothed lean (-1..1) for camera/VP cues
   Game.classicSurfaceGrip = 1;       // 1 = tarmac, <1 = dirt edge
   Game.classicDirtDustT = 0;         // throttle for edge dust emit
+  // Per-run cooldowns mirror the Game defaults but must reset between runs.
+  Game.classicSkidSpawnT = 0;
+  Game.legacySkidSpawnT = 0;
   // Phase 2 — procedural curve+hill, render-only visual + lateral push
   Game.classicCurveSmooth = 0;       // -1..1 smoothed curve at the player
   Game.classicHillSmooth = 0;        // -1..1 smoothed hill (+ = crest)
@@ -7096,7 +7101,7 @@ function updateClassicHandling(dt, p, stats) {
   // a real cost and per-frame Math.random() was wasteful.
   Game.classicSkidSpawnT = (Game.classicSkidSpawnT || 0) - dt;
   if (Game.classicDrifting && Math.abs(p.vx) > 180 && Game.classicSkidSpawnT <= 0) {
-    Game.classicSkidSpawnT = 0.033; // ~30 Hz
+    Game.classicSkidSpawnT = SKID_SPAWN_INTERVAL;
     Game.skidMarks.push({ x: p.x - 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
     Game.skidMarks.push({ x: p.x + 14, y: p.y + p.h/2 - 4, w: 5, h: 7, life: 1.7, max: 1.7 });
   }
@@ -7224,12 +7229,18 @@ function update(dt) {
     }
   }
 
-  // ---- skid marks: emitted when steering hard ----
-  const ph = Game.player;
-  const steerHard = ph && Math.abs(ph.vx) > 220;
-  if (steerHard && Math.random() < 0.85) {
-    Game.skidMarks.push({ x: ph.x - 13, y: ph.y + ph.h/2 - 4, w: 4, h: 6, life: 1.4, max: 1.4 });
-    Game.skidMarks.push({ x: ph.x + 13, y: ph.y + ph.h/2 - 4, w: 4, h: 6, life: 1.4, max: 1.4 });
+  // ---- skid marks: emitted when steering hard (legacy modes) ----
+  // Classic has its own drift-specific emitter inside updateClassicHandling;
+  // keep this path out of Classic to avoid duplicate tire marks and extra RNG.
+  if (Game.mode !== 'classic') {
+    const ph = Game.player;
+    const steerHard = ph && Math.abs(ph.vx) > 220;
+    Game.legacySkidSpawnT = (Game.legacySkidSpawnT || 0) - dt;
+    if (steerHard && Game.legacySkidSpawnT <= 0) {
+      Game.legacySkidSpawnT = SKID_SPAWN_INTERVAL;
+      Game.skidMarks.push({ x: ph.x - 13, y: ph.y + ph.h/2 - 4, w: 4, h: 6, life: 1.4, max: 1.4 });
+      Game.skidMarks.push({ x: ph.x + 13, y: ph.y + ph.h/2 - 4, w: 4, h: 6, life: 1.4, max: 1.4 });
+    }
   }
   // age skid marks (they scroll with road)
   for (let i = Game.skidMarks.length - 1; i >= 0; i--) {
