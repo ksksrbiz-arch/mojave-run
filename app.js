@@ -4057,6 +4057,12 @@ const HITCHHIKER_DRIFT_SPEED = 5; // px/s at which hitchhikers wander toward the
 const ZOMBIE_ROAD_MARGIN_MIN = 18;
 const ZOMBIE_ROAD_MARGIN_WIDTH_MUL = 0.45;
 const NORMAL_STEER_SPEED_REF = 540;
+// Visual feel — edge-scrape sparks, tire dust, speed lines
+const EDGE_SCRAPE_SPARK_COUNT = 5;
+const EDGE_SCRAPE_SHAKE = 0.22;
+const TIRE_DUST_VX_THRESHOLD = 140; // lateral speed above which tires kick dust
+const SPEED_LINE_THRESHOLD = 380;   // road speed above which speed lines appear
+const SPEED_LINE_CHANCE = 0.55;     // per-frame spawn chance at full speed
 const CIVILIAN_WARNING_HITS = 1;
 const CIVILIAN_MANHUNT_HITS = 3;
 const CIVILIAN_INFAMY_HITS = 5;
@@ -7440,15 +7446,26 @@ function update(dt) {
     const { x0, x1 } = roadBounds();
     if (p.x - p.w/2 < x0 + 4) {
       p.x = x0 + 4 + p.w/2;
+      const hitSpeed = Math.abs(p.vx);
       p.vx = Math.max(0, p.vx * 0.18);
       p.steerSmooth = Math.max(0, (p.steerSmooth || 0) * 0.35);
-      Game.shake = Math.max(Game.shake, 0.08);
+      Game.shake = Math.max(Game.shake, EDGE_SCRAPE_SHAKE);
+      // sparks fly when scraping the barrier at speed
+      if (hitSpeed > 60 && !Settings.reducedMotion) {
+        emit(p.x - p.w/2, p.y + rand(-p.h*0.3, p.h*0.3), EDGE_SCRAPE_SPARK_COUNT,
+          { color:'#ffd86b', speed:180 + hitSpeed*0.4, life:0.28, size:2, shape:'spark', spread:Math.PI*0.6 });
+      }
     }
     if (p.x + p.w/2 > x1 - 4) {
       p.x = x1 - 4 - p.w/2;
+      const hitSpeed = Math.abs(p.vx);
       p.vx = Math.min(0, p.vx * 0.18);
       p.steerSmooth = Math.min(0, (p.steerSmooth || 0) * 0.35);
-      Game.shake = Math.max(Game.shake, 0.08);
+      Game.shake = Math.max(Game.shake, EDGE_SCRAPE_SHAKE);
+      if (hitSpeed > 60 && !Settings.reducedMotion) {
+        emit(p.x + p.w/2, p.y + rand(-p.h*0.3, p.h*0.3), EDGE_SCRAPE_SPARK_COUNT,
+          { color:'#ffd86b', speed:180 + hitSpeed*0.4, life:0.28, size:2, shape:'spark', spread:Math.PI*0.6 });
+      }
     }
     p.y = H - 110;
   }
@@ -8010,10 +8027,40 @@ function update(dt) {
   if (Game.boss) updateBoss(dt);
 
   // ---- exhaust ----
-  if (Math.random() < 0.6) {
-    const ex = '#a86a2e';
-    emit(p.x - 10 + rand(-2,2), p.y + p.h/2 - 4, 1, { color:'rgba(80,60,40,0.6)', speed:30, life:0.5, size:4, spread:Math.PI/4 });
-    emit(p.x + 10 + rand(-2,2), p.y + p.h/2 - 4, 1, { color:'rgba(80,60,40,0.6)', speed:30, life:0.5, size:4, spread:Math.PI/4 });
+  // Exhaust frequency and size scale with forward speed — idle barely smokes,
+  // full speed billows twin plumes.
+  {
+    const speedN = clamp((Game.speed || 0) / NORMAL_STEER_SPEED_REF, 0, 1);
+    const exhaustChance = 0.18 + speedN * 0.52;
+    if (Math.random() < exhaustChance) {
+      const count = speedN > 0.7 ? 2 : 1;
+      emitExhaustTrail(p.x - 10 + rand(-2,2), p.y + p.h/2 - 4, count);
+      emitExhaustTrail(p.x + 10 + rand(-2,2), p.y + p.h/2 - 4, count);
+    }
+  }
+
+  // ---- tire dust when steering hard ----
+  if (!Settings.reducedMotion && Math.abs(p.vx) > TIRE_DUST_VX_THRESHOLD) {
+    const dustIntensity = clamp((Math.abs(p.vx) - TIRE_DUST_VX_THRESHOLD) / 200, 0, 1);
+    if (Math.random() < 0.3 + dustIntensity * 0.4) {
+      const side = p.vx > 0 ? -1 : 1;
+      emit(p.x + side * (p.w * 0.42), p.y + p.h * 0.38, 1,
+        { color:'rgba(160,130,85,0.45)', speed:50 + dustIntensity * 60, life:0.4, size:4 + dustIntensity * 3, spread:Math.PI*0.5 });
+    }
+  }
+
+  // ---- high-speed road lines ----
+  if (!Settings.reducedMotion && (Game.speed || 0) > SPEED_LINE_THRESHOLD) {
+    const slFrac = clamp(((Game.speed || 0) - SPEED_LINE_THRESHOLD) / 200, 0, 1);
+    if (Math.random() < SPEED_LINE_CHANCE * slFrac) {
+      const sx = rand(p.x - 60, p.x + 60);
+      Game.particles.push({
+        x: sx, y: p.y + p.h * 0.45,
+        vx: 0, vy: 600 + slFrac * 500,
+        life: 0.12 + slFrac * 0.08, max: 0.20,
+        size: 1, color: `rgba(255,255,255,${0.15 + slFrac * 0.15})`,
+      });
+    }
   }
 
   // ---- objective check ----
@@ -10271,7 +10318,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const roughness = biomeRough + (opts.roughness || 0) + (damageR * 0.35);
   const suspensionBob = Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
-  const lean = clamp(vx / 460, -1, 1) * (0.12 + speedN * 0.12) + idleRock;
+  const lean = clamp(vx / 460, -1, 1) * (0.16 + speedN * 0.16) + idleRock;
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
   const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + (opts.extraTilt || 0)) + hitPunch * 0.08;
@@ -13360,10 +13407,9 @@ function render() {
     if (Game.state === 'dying') {
       drawWreck();
     } else if (Game.player && Game.state !== 'gameover') {
-      if (Game.state === 'playing' && Math.random() < 0.22) {
-        emitExhaustTrail(Game.player.x - 10, Game.player.y + Game.player.h/2 - 4, 1);
-        emitExhaustTrail(Game.player.x + 10, Game.player.y + Game.player.h/2 - 4, 1);
-      }
+      // Exhaust is now emitted from update() with speed-proportional intensity;
+      // no duplicate render-time emit needed.
+
       // Soft elliptical ground shadow — replaces the harsh square shadow that
       // used to sit behind the chassis. Quality-gated via Settings.particles
       // so very-low quality skips the extra fill.
