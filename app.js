@@ -2419,6 +2419,9 @@ const Profile = {
         if (typeof p.bestArenaWave !== 'number') { p.bestArenaWave = 0; dirty = true; }
         // Batch v3 — arena leaderboard (top runs)
         if (!Array.isArray(p.arenaLeaderboard)) { p.arenaLeaderboard = []; dirty = true; }
+        // Living Road + Vehicle Wear & Tear vertical slice
+        if (!p.vehicleCondition || typeof p.vehicleCondition !== 'object') { p.vehicleCondition = {}; dirty = true; }
+        if (!('lastTuneUpDate' in p)) { p.lastTuneUpDate = null; dirty = true; }
       });
       if (dirty) this.save();
     }
@@ -2508,6 +2511,9 @@ const Profile = {
       milestonesClaimed: [],       // run-count milestones already rewarded (e.g. [10, 25, 50])
       bestArenaWave: 0,            // Phase 5: highest arena wave reached
       arenaLeaderboard: [],        // Batch v3: top runs [{wave,score,kills,when}]
+      // Living Road + Vehicle Wear & Tear vertical slice
+      vehicleCondition: {},        // { vehicleId: 0.35..1 }  1 = pristine
+      lastTuneUpDate: null,        // YYYY-MM-DD of last claimed free tune-up
     };
     // migrate legacy best score on first profile
     if (this._data.profiles.length === 0) {
@@ -4774,6 +4780,16 @@ window.addEventListener('keydown', e => {
     SFX.click && SFX.click();
   }
   if (key === 'p' && Game.state === 'playing') togglePause();
+  // Living Road: [R] spends scrap to repave the road under the player. Only
+  // while a run is actually in progress (and not paused, and not arena). The
+  // existing 'r' handler below the gameover-screen branch still works because
+  // we early-return only on successful repair, leaving the rest of the chain
+  // intact for non-playing states.
+  if (key === 'r' && Game.state === 'playing' && !Game.paused && livingRoadModeEnabled()) {
+    tryManualRoadRepair();
+    e.preventDefault();
+    return;
+  }
   if (key === 'escape') {
     const modal = document.getElementById('modal');
     const cloudModal = document.getElementById('cloud-modal');
@@ -5187,6 +5203,14 @@ const Game = {
   arenaDangerPulseT: 0,        // increasing while HP critical (drives edge pulse)
   arenaHeartbeatT: 0,          // throttle for low-HP heartbeat SFX
   arenaEliteMinionsPending: 0, // queued elite minions to spawn alongside the next boss
+  // === Living Road + Vehicle Wear & Tear vertical slice ===
+  roadCondition: 0,            // 0 = pristine, 1 = ruined (run-scoped)
+  roadDebris: [],              // [{x,y,w,h,t,rot,shade}] active concrete chunks
+  roadDebrisT: 0,              // seconds until next debris-spawn attempt
+  roadRepairCD: 0,             // cooldown on manual [R] repair (seconds)
+  roadCrackDmgT: 0,            // accumulator for high-wear chip damage
+  runDamageTaken: 0,           // total HP lost this run (drives vehicle wear)
+  runRepairsMade: 0,           // telemetry for future Driver Pass objectives
 };
 
 function addPopup(text, x, y, color = '#f5d76e', size = 14) {
@@ -5416,6 +5440,10 @@ function startRun(mode, level) {
   Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
   Game.activeWeaponSpec = getActiveWeaponSpec();
   stats = applyRunStatLayers(stats, profile, mode);
+  // Vehicle Wear & Tear: low-condition rides suffer handling/HP penalties.
+  // Applied AFTER perk/branch layers so the multiplicative penalty is
+  // honest about the player's actually-effective stats.
+  applyVehicleConditionPenalty(stats);
   Game.maxHealth = Math.round(stats.maxHp);
   Game.health = Game.maxHealth;
   Game.fireCooldown = 0;
@@ -5435,6 +5463,9 @@ function startRun(mode, level) {
   Game.particles.length = 0; Game.shockwaves.length = 0;
   Game.popups.length = 0;
   Game.decor.length = 0;
+  // Living Road + Vehicle Wear & Tear: reset run-scoped road state. The
+  // road helpers internally no-op for arena/winding modes.
+  initLivingRoadForRun();
   Game.laneOffset = 0;
   if (mode === 'winding') {
     const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
@@ -5875,6 +5906,8 @@ function endRun(reason /* 'death' | 'victory' | 'time' */) {
   // Zombie mode: cap scrap to prevent high-combo sessions from breaking the economy
   if (Game.mode === 'zombie') Game.scrapEarned = Math.min(Game.scrapEarned, ZOMBIE_SCRAP_CAP);
   Profile.earn(Game.scrapEarned);
+  // Vehicle Wear & Tear: commit per-run condition delta based on damage taken.
+  commitVehicleWearForRun(reason);
   flushV23RunCounters();
   // record stats
   const runResult = {
@@ -6404,6 +6437,13 @@ function spawnPickup() {
   else if (r < 0.28) kind = 'repair';
   else if (r < 0.40) kind = 'cache';
   else kind = 'scrap';
+  // Living Road: small chance to override into a Repair Beacon when the
+  // current road is actually worn enough to benefit from one. Skips arena
+  // and winding (which have their own pickup pipelines / pacing).
+  if (livingRoadModeEnabled() && (Game.roadCondition || 0) > 0.2 &&
+      Math.random() < LIVING_ROAD_BEACON_CHANCE) {
+    kind = LIVING_ROAD_BEACON_KIND;
+  }
   const pk = { kind, x: rand(x0+30, x1-30), y:-30, w:22, h:22, t:0 };
   if (kind === 'powerup') {
     pk.power = Game.mode === 'zombie' ? ZOMBIE_POWERUP_KEYS[Math.floor(Math.random() * ZOMBIE_POWERUP_KEYS.length)] : rollPowerup();
@@ -6415,6 +6455,8 @@ function spawnPickup() {
     // Assign the banked power-up type now (so the visual can show it)
     const eligible = POWERUP_KEYS.filter(k => !SPECIAL_POWERUP_KEYS[k]);
     pk.power = eligible[Math.floor(Math.random() * eligible.length)];
+    pk.w = 28; pk.h = 28;
+  } else if (kind === LIVING_ROAD_BEACON_KIND) {
     pk.w = 28; pk.h = 28;
   }
   Game.pickups.push(pk);
@@ -7301,6 +7343,10 @@ function update(dt) {
   Game.flash = Math.max(0, Game.flash - dt * 3);
   if (Game.muzzleT > 0) Game.muzzleT -= dt;
 
+  // Living Road: decay surface, spawn/move debris, apply crack chip damage,
+  // tick manual-repair cooldown. Internally no-ops for arena/winding modes.
+  updateLivingRoad(dt);
+
   if (Game.activeEvent) {
     Game.activeEvent.t -= dt;
     if (Game.activeEvent.id === 'stormfront' && Game.activeEvent.t <= 0 && !Game.runMutators.some(m => m.id === 'volatile')) {
@@ -8074,6 +8120,9 @@ function update(dt) {
         addPopup('BANKED: ' + (def ? def.name : pk.power), pk.x, pk.y - 16, '#ffb3ff', 13);
         SFX.powerUp();
         Haptics.pickup();
+      } else if (pk.kind === LIVING_ROAD_BEACON_KIND) {
+        // Living Road: repave the road ahead of the player.
+        applyRepairBeacon(pk.x, pk.y);
       }
       Game.pickups.splice(i,1);
     }
@@ -8322,6 +8371,8 @@ function damagePlayer(amt) {
   if (Game.mode === 'arena' && Game.arenaDmgTakenMul) amt *= Game.arenaDmgTakenMul;
   if (Settings.damageNumbers) addPopup('-' + Math.ceil(amt), Game.player.x, Game.player.y - 36, '#ff8a8a', 12);
   Game.health -= amt;
+  // Vehicle Wear & Tear: accumulate hull damage to commit at run end.
+  Game.runDamageTaken = (Game.runDamageTaken || 0) + amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
   // Suspension impact kick — car jolts downward on hit
@@ -12093,6 +12144,46 @@ function drawPickup(pk) {
     ctx.textBaseline = 'top';
     ctx.fillText('NEXT RUN', pk.x, pk.y + bob + 16);
     ctx.restore();
+  } else if (pk.kind === LIVING_ROAD_BEACON_KIND) {
+    // Repair Beacon — pulsing cyan tetrahedron-on-tarmac glyph.
+    const pulse = 0.5 + 0.5 * Math.sin(pk.t * 5.5);
+    ctx.save();
+    ctx.translate(pk.x, pk.y + bob);
+    // aura
+    ctx.globalAlpha = 0.22 + 0.18 * pulse;
+    ctx.fillStyle = '#80f0ff';
+    ctx.beginPath(); ctx.arc(0, 0, 22 + pulse * 5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // pad
+    ctx.fillStyle = '#0a1e26';
+    ctx.fillRect(-12, -10, 24, 20);
+    ctx.fillStyle = '#80f0ff';
+    ctx.fillRect(-10, -8, 20, 16);
+    // wrench-like glyph
+    ctx.fillStyle = '#0a1e26';
+    ctx.fillRect(-7, -2, 14, 4);
+    ctx.beginPath();
+    ctx.arc(7, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#80f0ff';
+    ctx.beginPath();
+    ctx.arc(7, 0, 2, 0, Math.PI * 2);
+    ctx.fill();
+    if (detail >= 1) {
+      ctx.strokeStyle = 'rgba(160,240,255,0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 16 + pulse * 2, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+    // label
+    ctx.save();
+    ctx.globalAlpha = 0.65 + 0.2 * pulse;
+    ctx.fillStyle = '#80f0ff';
+    ctx.font = 'bold 7px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('REPAIR BEACON', pk.x, pk.y + bob + 16);
+    ctx.restore();
   }
 }
 
@@ -13083,6 +13174,9 @@ function drawHUD() {
     ctx.textAlign = 'center';
     ctx.fillText(label, W / 2, y);
   }
+  // Living Road: integrity chip near the score line. Internally no-ops for
+  // arena/winding modes.
+  drawRoadIntegrityHUD();
 }
 
 // ── Mobile on-canvas touch control overlay ──────────────────────────────────
@@ -13839,6 +13933,10 @@ function render() {
     drawRoad();
     // Phase 3 Classic — headlight cone + wet road reflection over the road.
     if (Game.mode === 'classic') drawClassicRoadOverlays();
+    // Living Road: wear tint + crack/pothole overlay + debris chunks.
+    // Drawn between the road and skid/decor so the wear sits on the surface
+    // but skid marks (which carry meaningful gameplay info) stay visible on top.
+    drawLivingRoadOverlay();
     drawSkidMarks();
     drawDecor();
     drawDustDevils();
@@ -14559,6 +14657,27 @@ const UI = {
         : (v.masteryUnlock ? '👑 FULL MASTERY UNLOCK'
           : v.apexVehicle ? '★ PRESTIGE ' + (v.prestigeUnlock || APEX_VEHICLE_MIN_PRESTIGE) + '+ REQUIRED'
           : 'COST <b>' + v.cost + '</b> SCRAP');
+      // Wear & Tear: per-vehicle condition row + repair / tune-up actions.
+      const condition = owned ? getVehicleConditionFor(v.id) : 1;
+      const condPct = Math.round(condition * 100);
+      const condColor = condition > 0.85 ? '#7af07a' : condition > 0.6 ? '#f5d76e' : '#ff8a8a';
+      const repairCost = owned ? vehicleRepairCostFor(v.id) : 0;
+      const tuneUpAvailable = owned && canClaimFreeTuneUp() && condition < 0.999;
+      let conditionBlock = '';
+      if (owned) {
+        const repairBtn = (condition < 0.999)
+          ? `<button class="btn" data-vact="repair" data-vid="${v.id}" ${p.scrap < repairCost ? 'disabled' : ''}>REPAIR · ${repairCost} SCRAP</button>`
+          : '';
+        const tuneBtn = tuneUpAvailable
+          ? `<button class="btn" data-vact="tuneup" data-vid="${v.id}">FREE TUNE-UP</button>`
+          : '';
+        conditionBlock = `
+          <div class="vt-condition" style="margin:4px 0;font-size:11px;color:${condColor};">
+            CONDITION ${condPct}%${condition <= 0.5 ? ' · HANDLING IMPAIRED' : ''}
+          </div>
+          ${(repairBtn || tuneBtn) ? `<div class="btn-row" style="margin-bottom:4px;">${repairBtn}${tuneBtn}</div>` : ''}
+        `;
+      }
       const buyBtn = owned
         ? (selected
             ? '<button class="btn primary" data-vact="upgrade" data-vid="'+v.id+'">UPGRADE ▲</button>'
@@ -14585,6 +14704,7 @@ const UI = {
           <div class="stat-bar s-fire"><div class="lbl">FIRE</div><div class="bar"><div class="fill" style="width:${fireN}%"></div></div><div class="num">${(1/stats.fireRate).toFixed(1)}</div></div>
           <div class="stat-bar s-dmg"><div class="lbl">DAMAGE</div><div class="bar"><div class="fill" style="width:${dmgN}%"></div></div><div class="num">${stats.dmg}×${stats.guns}</div></div>
         </div>
+        ${conditionBlock}
         ${buyBtn}
       `;
       list.appendChild(tile);
@@ -16079,6 +16199,20 @@ document.addEventListener('click', e => {
       if (Profile.selectVehicle(vid)) { UI.toast('EQUIPPED ' + VEHICLE_BY_ID[vid].name); UI.showGarage(); }
     } else if (act === 'upgrade') {
       UI.showUpgrade(vid);
+    } else if (act === 'repair') {
+      if (repairVehiclePaid(vid)) {
+        UI.toast('REPAIRED ' + VEHICLE_BY_ID[vid].name);
+        UI.showGarage();
+      } else {
+        UI.toast('NOT ENOUGH SCRAP');
+      }
+    } else if (act === 'tuneup') {
+      if (claimFreeTuneUp(vid)) {
+        UI.toast('FREE TUNE-UP APPLIED');
+        UI.showGarage();
+      } else {
+        UI.toast('TUNE-UP UNAVAILABLE');
+      }
     }
     return;
   }
@@ -24996,6 +25130,464 @@ function drawArenaTurretBulletTrails() {
 
 // ============================================================
 // === END BATCH v4 ===
+// ============================================================
+
+
+// ============================================================
+// === LIVING ROAD + VEHICLE WEAR & TEAR — vertical slice ===
+// Pillar 1A/1B + Pillar 2C from the Living Road & Vehicle Identity plan.
+// Self-contained: constants, state init, update, render, input hooks, and
+// profile/garage helpers. Hook sites elsewhere call these via small calls.
+// All road code is mode-isolated to forward-scrolling modes (skips arena
+// and winding). Wear & Tear is global on the active profile.
+// ============================================================
+
+// --- Tunables ---------------------------------------------------------
+const LIVING_ROAD_MAX_WEAR        = 1.0;      // 1.0 = fully ruined road
+const LIVING_ROAD_DECAY_PER_M     = 1 / 6000; // ~ruined after 6 km without repair
+const LIVING_ROAD_DEBRIS_HP       = 1;        // 1 hit clears a debris chunk
+const LIVING_ROAD_DEBRIS_MIN_INT  = 2.8;      // seconds between debris spawn checks
+const LIVING_ROAD_DEBRIS_MAX_INT  = 5.5;
+const LIVING_ROAD_DEBRIS_W        = 26;
+const LIVING_ROAD_DEBRIS_H        = 18;
+const LIVING_ROAD_DEBRIS_DMG      = 6;        // hull damage on contact
+const LIVING_ROAD_CRACK_DMG_PS    = 4;        // hull dps over wear=0.6+ (light)
+const LIVING_ROAD_CRACK_DMG_WEAR_THRESHOLD = 0.6;   // wear above which cracks start chipping
+const LIVING_ROAD_CRACK_DMG_WEAR_OFFSET    = 0.5;   // baseline for dmg scaling above threshold
+const LIVING_ROAD_TRACTION_AT_MAX = 0.7;      // multiplier on lateral steer at full wear
+const LIVING_ROAD_BEACON_CHANCE   = 0.06;     // share of new pickup spawns
+const LIVING_ROAD_BEACON_RESTORE  = 0.6;      // how much wear a beacon removes
+const LIVING_ROAD_REPAIR_COST_BASE   = 18;    // scrap floor when road is barely damaged
+const LIVING_ROAD_REPAIR_COST_SCALE  = 60;    // extra scrap at full wear
+const LIVING_ROAD_REPAIR_COOLDOWN = 4.5;      // seconds between manual repairs
+
+// Biome decay scalars: harsher biomes wear the road faster. Defaults to 1.
+const LIVING_ROAD_BIOME_DECAY_MUL = {
+  wastes: 1.0, saltflats: 0.85, ash: 1.25, redcanyon: 1.05, midnight: 0.95,
+  neonruins: 0.9, irradiated: 1.35, scraparch: 1.4, thunderplains: 1.15, frostwaste: 1.1,
+};
+
+// Wear & tear -----
+const VEHICLE_COND_MIN            = 0.35;     // can never drop below this
+const VEHICLE_COND_LOSS_PER_DMG   = 1 / 2200; // tiny per-HP-of-damage loss
+const VEHICLE_COND_DEATH_PENALTY  = 0.04;     // extra hit when the run ends in death
+const VEHICLE_COND_REPAIR_COST_FULL = 500;    // scrap to fully repair from MIN
+const VEHICLE_COND_TUNEUP_FREE_DAILY = true;  // free partial tune-up once per day
+const VEHICLE_COND_TUNEUP_RESTORE = 0.25;     // free tune-up bumps by this
+const VEHICLE_COND_HANDLING_PENALTY = {
+  // At condition=1 → no effect. At condition=MIN → scale stats by these.
+  accel: 0.78, maxV: 0.92, maxHp: 0.88,
+};
+
+const LIVING_ROAD_BEACON_KIND = 'repairbeacon';
+
+// --- Helpers ---------------------------------------------------------
+function livingRoadModeEnabled() {
+  // Arena uses its own pipeline; winding has its own complex curving road
+  // that already paints a stylized procedural surface and would visually
+  // fight a wear overlay. Everything else (classic, gauntlet, campaign,
+  // timeattack, bossrush, zombie, ironthrone, wastelandrun, extraction,
+  // custom, daily) is forward-scrolling and accepts the overlay cleanly.
+  return Game && Game.mode && Game.mode !== 'arena' && Game.mode !== 'winding';
+}
+
+function livingRoadBiomeMul() {
+  return LIVING_ROAD_BIOME_DECAY_MUL[(Game && Game.biome) || 'wastes'] || 1.0;
+}
+
+function initLivingRoadForRun() {
+  Game.roadCondition  = 0;            // 0 = pristine, 1 = ruined
+  Game.roadDebris     = [];
+  Game.roadDebrisT    = rand(LIVING_ROAD_DEBRIS_MIN_INT, LIVING_ROAD_DEBRIS_MAX_INT) * 1.5;
+  Game.roadRepairCD   = 0;
+  Game.roadCrackDmgT  = 0;
+  Game.runDamageTaken = 0;
+  Game.runRepairsMade = 0;
+}
+
+function updateLivingRoad(dt) {
+  if (!livingRoadModeEnabled()) return;
+  // --- Decay scales with distance + biome + difficulty ---
+  // Distance is already advanced in update(); use Game.speed as a proxy for
+  // per-frame meters travelled (it's already nitro-scaled there too).
+  const metres = Game.speed * dt;
+  const diff = (Game.levelData && Game.levelData.diff) ? Game.levelData.diff : 1;
+  Game.roadCondition = Math.min(
+    LIVING_ROAD_MAX_WEAR,
+    (Game.roadCondition || 0) + metres * LIVING_ROAD_DECAY_PER_M * livingRoadBiomeMul() * (0.8 + diff * 0.08)
+  );
+
+  // --- Traction penalty: scale player steer responsiveness ---
+  // We don't mutate vehicleStats here — we read Game.roadCondition where it
+  // matters. Keeping it data-driven avoids fighting other handling layers.
+  // The player handling code multiplies by livingRoadTractionMul() opportunistically.
+
+  // --- Light damage from cracks once wear is high ---
+  if (Game.roadCondition >= LIVING_ROAD_CRACK_DMG_WEAR_THRESHOLD && Game.health > 0) {
+    Game.roadCrackDmgT += dt;
+    const tickEvery = 1.0; // 1 dps tick
+    if (Game.roadCrackDmgT >= tickEvery) {
+      Game.roadCrackDmgT = 0;
+      const dmg = LIVING_ROAD_CRACK_DMG_PS * (Game.roadCondition - LIVING_ROAD_CRACK_DMG_WEAR_OFFSET) * 2;
+      if (dmg > 0) {
+        // Apply directly without the regular hit shake/flash spam — this is
+        // an ambient drain, not a punch.
+        Game.health = Math.max(0, Game.health - dmg);
+        Game.runDamageTaken = (Game.runDamageTaken || 0) + dmg;
+        if (Game.health <= 0) { triggerPlayerDeath(); }
+      }
+    }
+  } else {
+    Game.roadCrackDmgT = 0;
+  }
+
+  // --- Debris spawn cadence: scales with wear (more debris on worn road) ---
+  Game.roadDebrisT -= dt;
+  if (Game.roadDebrisT <= 0) {
+    if (Game.roadCondition > 0.25 && !Game.boss && Game.state === 'playing') {
+      spawnRoadDebris();
+    }
+    const wearK = 1 - 0.6 * Game.roadCondition; // worn road → spawns more often
+    Game.roadDebrisT = rand(LIVING_ROAD_DEBRIS_MIN_INT, LIVING_ROAD_DEBRIS_MAX_INT) * wearK;
+  }
+
+  // --- Debris move/collide ---
+  for (let i = Game.roadDebris.length - 1; i >= 0; i--) {
+    const d = Game.roadDebris[i];
+    d.y += Game.speed * dt;
+    d.t  = (d.t || 0) + dt;
+    if (d.y > H + 30) { Game.roadDebris.splice(i, 1); continue; }
+    if (Game.player && Game.state === 'playing' &&
+        Math.abs(d.x - Game.player.x) * 2 < (LIVING_ROAD_DEBRIS_W + Game.player.w) &&
+        Math.abs(d.y - Game.player.y) * 2 < (LIVING_ROAD_DEBRIS_H + Game.player.h)) {
+      // Hitting debris damages the hull a little and consumes the chunk.
+      damagePlayer(LIVING_ROAD_DEBRIS_DMG);
+      emit(d.x, d.y, 10, { color:'rgba(160,140,110,0.75)', speed:160, life:0.45, size:3 });
+      Game.roadDebris.splice(i, 1);
+      Game.shake = Math.max(Game.shake, 0.18);
+      continue;
+    }
+    // Player bullets can clear debris too (cheap obstacle clearing).
+    if (Game.bullets && Game.bullets.length) {
+      for (let bi = Game.bullets.length - 1; bi >= 0; bi--) {
+        const b = Game.bullets[bi];
+        if (!b || b.owner !== 'p') continue;
+        if (Math.abs(b.x - d.x) * 2 < (LIVING_ROAD_DEBRIS_W + (b.w || 4)) &&
+            Math.abs(b.y - d.y) * 2 < (LIVING_ROAD_DEBRIS_H + (b.h || 8))) {
+          Game.bullets.splice(bi, 1);
+          emit(d.x, d.y, 6, { color:'rgba(180,160,130,0.7)', speed:120, life:0.35, size:2 });
+          Game.roadDebris.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  // --- Manual repair cooldown ---
+  if (Game.roadRepairCD > 0) Game.roadRepairCD = Math.max(0, Game.roadRepairCD - dt);
+}
+
+function spawnRoadDebris() {
+  const { x0, x1 } = roadBounds();
+  // Spawn slightly inside lane bounds with a small lateral cluster.
+  const x = rand(x0 + 18, x1 - 18);
+  const y = -20 - rand(0, 40);
+  Game.roadDebris.push({
+    x, y, w: LIVING_ROAD_DEBRIS_W, h: LIVING_ROAD_DEBRIS_H,
+    t: 0, rot: rand(0, Math.PI * 2),
+    shade: rand(0.55, 1.0),
+  });
+}
+
+function drawRoadDebris() {
+  if (!livingRoadModeEnabled() || !Game.roadDebris || !Game.roadDebris.length) return;
+  ctx.save();
+  for (const d of Game.roadDebris) {
+    const s = perspectiveScale ? perspectiveScale(d.y) : 1;
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(d.rot + d.t * 0.6);
+    ctx.scale(s, s);
+    // Concrete chunk with a darker interior + light edge highlight.
+    ctx.fillStyle = `rgba(${Math.floor(120 * d.shade)}, ${Math.floor(105 * d.shade)}, ${Math.floor(85 * d.shade)}, 0.95)`;
+    ctx.fillRect(-LIVING_ROAD_DEBRIS_W / 2, -LIVING_ROAD_DEBRIS_H / 2, LIVING_ROAD_DEBRIS_W, LIVING_ROAD_DEBRIS_H);
+    ctx.fillStyle = 'rgba(40,30,20,0.55)';
+    ctx.fillRect(-LIVING_ROAD_DEBRIS_W / 2 + 3, -LIVING_ROAD_DEBRIS_H / 2 + 3,
+                 LIVING_ROAD_DEBRIS_W - 6, LIVING_ROAD_DEBRIS_H - 6);
+    // Pebbles around the chunk.
+    ctx.fillStyle = 'rgba(70,55,40,0.85)';
+    for (let pi = 0; pi < 3; pi++) {
+      const px = (pi - 1) * 8 + (d.t * (pi + 1) * 4) % 6;
+      ctx.fillRect(px - 1, LIVING_ROAD_DEBRIS_H / 2 + 1, 3, 2);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawLivingRoadOverlay() {
+  if (!livingRoadModeEnabled()) return;
+  const wear = Math.min(1, Math.max(0, Game.roadCondition || 0));
+  if (wear < 0.05) return;
+  // Darken / desaturate the road in proportion to wear.
+  const { x0, x1 } = roadBounds(H * 0.5);
+  // Tint pass — keeps the legacy road art intact but adds a grimy filter.
+  ctx.save();
+  ctx.globalAlpha = 0.18 + 0.32 * wear;
+  ctx.fillStyle = '#181206';
+  // Approximate road area using mid bounds; legacy road draw already clips
+  // visually with shoulder fills, so a slight overdraw on the edges is fine.
+  ctx.fillRect(x0 - 4, 0, (x1 - x0) + 8, H);
+  ctx.restore();
+
+  // Crack overlay — scatter dark hairlines across the lane.
+  if (wear > 0.2) {
+    ctx.save();
+    ctx.strokeStyle = `rgba(20,14,8,${0.35 + 0.45 * wear})`;
+    ctx.lineWidth = 1.2;
+    const crackCount = Math.floor(6 + wear * 18);
+    const seed = Math.floor((Game.laneOffset || 0) * 1.2) % 9973;
+    for (let i = 0; i < crackCount; i++) {
+      const r1 = ((i * 9301 + seed * 49297) % 233280) / 233280;
+      const r2 = ((i * 4787 + seed * 7919)  % 233280) / 233280;
+      const r3 = ((i * 1597 + seed * 6151)  % 233280) / 233280;
+      const cy = (r1 * (H + 80) + (Game.laneOffset || 0) * 0.6) % (H + 80) - 40;
+      const b = roadBounds(cy);
+      const cx = b.x0 + r2 * b.w;
+      const len = 14 + r3 * 36 * wear;
+      const ang = (r3 - 0.5) * 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
+      ctx.stroke();
+      // Branching offshoot
+      if (wear > 0.5 && r2 > 0.6) {
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * len * 0.6, cy + Math.sin(ang) * len * 0.6);
+        ctx.lineTo(cx + Math.cos(ang + 1.1) * len * 0.6, cy + Math.sin(ang + 1.1) * len * 0.6);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Pothole splotches at high wear — dark filled blobs.
+  if (wear > 0.55) {
+    ctx.save();
+    ctx.fillStyle = `rgba(10,6,3,${0.45 + 0.35 * (wear - 0.55) / 0.45})`;
+    const seed2 = Math.floor((Game.laneOffset || 0) * 0.7) % 9181;
+    const blobCount = Math.floor(2 + (wear - 0.55) * 18);
+    for (let i = 0; i < blobCount; i++) {
+      const r1 = ((i * 12289 + seed2 * 8161) % 233280) / 233280;
+      const r2 = ((i * 5471  + seed2 * 3221) % 233280) / 233280;
+      const r3 = ((i * 9311  + seed2 * 1973) % 233280) / 233280;
+      const py = (r1 * (H + 60) + (Game.laneOffset || 0) * 0.4) % (H + 60) - 30;
+      const b = roadBounds(py);
+      const px = b.x0 + r2 * b.w;
+      const pr = 5 + r3 * 8;
+      ctx.beginPath();
+      ctx.ellipse(px, py, pr, pr * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Render debris on top of the overlay (so it sits visually on the road).
+  drawRoadDebris();
+}
+
+// HUD: tiny "ROAD" integrity chip placed under the score line, only when
+// living-road mode is active.
+function drawRoadIntegrityHUD() {
+  if (!livingRoadModeEnabled()) return;
+  const wear = Math.min(1, Math.max(0, Game.roadCondition || 0));
+  const intg = 1 - wear;
+  const hudH = W < 500 ? 48 : 56;
+  const x = 50;
+  const y = hudH + 6;
+  const cw = 110;
+  const ch = 10;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x - 4, y - 2, cw + 8, ch + 14);
+  ctx.fillStyle = '#3a2a14';
+  ctx.fillRect(x, y, cw, ch);
+  const critical = intg < 0.25;
+  const pulse = critical ? (0.6 + 0.4 * Math.sin((Game.t || 0) * 8)) : 1;
+  let col;
+  if (intg > 0.5) col = '#7af07a';
+  else if (intg > 0.25) col = '#f5d76e';
+  else col = `rgba(255,80,80,${pulse})`;
+  ctx.fillStyle = col;
+  ctx.fillRect(x, y, cw * intg, ch);
+  ctx.strokeStyle = '#f5d76e';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+  ctx.fillStyle = '#fff3b0';
+  ctx.font = 'bold 9px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('ROAD ' + Math.round(intg * 100) + '%', x, y + ch + 2);
+  // Hint about R-key repair when worn enough and player has scrap to afford it.
+  if (wear > 0.4) {
+    const p = Profile.active();
+    const cost = livingRoadRepairCost();
+    const canPay = p && p.scrap >= cost;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = canPay ? '#ffd86b' : 'rgba(255,170,90,0.55)';
+    ctx.fillText('[R] -' + cost, x + cw, y + ch + 2);
+  }
+  ctx.restore();
+}
+
+function livingRoadRepairCost() {
+  const wear = Math.min(1, Math.max(0, Game.roadCondition || 0));
+  return Math.max(1, Math.round(LIVING_ROAD_REPAIR_COST_BASE + LIVING_ROAD_REPAIR_COST_SCALE * wear));
+}
+
+// Returns a multiplier on lateral steering response based on road wear.
+// 1.0 when pristine, down to LIVING_ROAD_TRACTION_AT_MAX when ruined.
+function livingRoadTractionMul() {
+  if (!livingRoadModeEnabled()) return 1;
+  const wear = Math.min(1, Math.max(0, Game.roadCondition || 0));
+  return 1 - (1 - LIVING_ROAD_TRACTION_AT_MAX) * wear;
+}
+
+function applyRepairBeacon(x, y) {
+  // Restore a chunk of condition and clear any debris currently on screen
+  // ahead of the player so the road feels "freshly paved".
+  Game.roadCondition = Math.max(0, (Game.roadCondition || 0) - LIVING_ROAD_BEACON_RESTORE);
+  if (Game.roadDebris && Game.roadDebris.length) {
+    for (let i = Game.roadDebris.length - 1; i >= 0; i--) {
+      const d = Game.roadDebris[i];
+      if (d.y < Game.player.y) Game.roadDebris.splice(i, 1);
+    }
+  }
+  Game.runRepairsMade = (Game.runRepairsMade || 0) + 1;
+  emit(x, y, 22, { color:'#80f0ff', speed:240, life:0.6, size:4 });
+  shockwave(x, y, 'rgba(128,240,255,0.5)', 80);
+  addPopup('ROAD REPAIRED', x, y - 12, '#80f0ff', 13);
+  try { SFX.powerUp && SFX.powerUp(); } catch (_) {}
+  Haptics.pickup && Haptics.pickup();
+}
+
+function tryManualRoadRepair() {
+  if (!livingRoadModeEnabled()) return false;
+  if (Game.state !== 'playing' || Game.paused) return false;
+  if ((Game.roadCondition || 0) < 0.2) {
+    addPopup('ROAD ALREADY GOOD', Game.player.x, Game.player.y - 30, '#9ad0ff', 11);
+    return false;
+  }
+  if ((Game.roadRepairCD || 0) > 0) {
+    addPopup('REPAIR COOLDOWN', Game.player.x, Game.player.y - 30, '#ffaa66', 11);
+    return false;
+  }
+  const cost = livingRoadRepairCost();
+  if (!Profile.spend(cost)) {
+    addPopup('NEED ' + cost + ' SCRAP', Game.player.x, Game.player.y - 30, '#ff6f6f', 11);
+    return false;
+  }
+  // Successful spend → significant restore + brief cooldown.
+  Game.roadCondition = Math.max(0, (Game.roadCondition || 0) - 0.55);
+  Game.roadRepairCD = LIVING_ROAD_REPAIR_COOLDOWN;
+  Game.runRepairsMade = (Game.runRepairsMade || 0) + 1;
+  emit(Game.player.x, Game.player.y - 10, 20, { color:'#80f0ff', speed:200, life:0.55, size:4 });
+  shockwave(Game.player.x, Game.player.y - 10, 'rgba(128,240,255,0.5)', 70);
+  addPopup('REPAIR -' + cost, Game.player.x, Game.player.y - 30, '#80f0ff', 13);
+  try { SFX.powerUp && SFX.powerUp(); } catch (_) {}
+  return true;
+}
+
+// --- Vehicle wear & tear -------------------------------------------------
+function getActiveVehicleCondition() {
+  const p = Profile.active(); if (!p) return 1;
+  const vid = (Game.vehicle && Game.vehicle.id) || p.activeVehicle;
+  if (!p.vehicleCondition || typeof p.vehicleCondition[vid] !== 'number') return 1;
+  return Math.max(VEHICLE_COND_MIN, Math.min(1, p.vehicleCondition[vid]));
+}
+
+function getVehicleConditionFor(vid) {
+  const p = Profile.active(); if (!p) return 1;
+  if (!p.vehicleCondition || typeof p.vehicleCondition[vid] !== 'number') return 1;
+  return Math.max(VEHICLE_COND_MIN, Math.min(1, p.vehicleCondition[vid]));
+}
+
+function applyVehicleConditionPenalty(stats) {
+  if (!stats) return stats;
+  const cond = getActiveVehicleCondition();
+  if (cond >= 0.999) return stats;
+  // Lerp each affected stat from full performance at cond=1 down to the
+  // penalty floor at cond=MIN.
+  const t = (1 - cond) / (1 - VEHICLE_COND_MIN); // 0..1
+  const lerp = (target) => 1 + (target - 1) * t;
+  if (stats.accel) stats.accel *= lerp(VEHICLE_COND_HANDLING_PENALTY.accel);
+  if (stats.maxV)  stats.maxV  *= lerp(VEHICLE_COND_HANDLING_PENALTY.maxV);
+  if (stats.maxHp) stats.maxHp  = Math.max(20, stats.maxHp * lerp(VEHICLE_COND_HANDLING_PENALTY.maxHp));
+  return stats;
+}
+
+function commitVehicleWearForRun(reason) {
+  const p = Profile.active(); if (!p) return;
+  const vid = (Game.vehicle && Game.vehicle.id) || p.activeVehicle;
+  if (!vid) return;
+  if (!p.vehicleCondition || typeof p.vehicleCondition !== 'object') p.vehicleCondition = {};
+  let cur = (typeof p.vehicleCondition[vid] === 'number') ? p.vehicleCondition[vid] : 1;
+  const dmg = Math.max(0, Game.runDamageTaken || 0);
+  let loss = dmg * VEHICLE_COND_LOSS_PER_DMG;
+  if (reason === 'death') loss += VEHICLE_COND_DEATH_PENALTY;
+  // Long survival without damage forgives a small amount — keeps clean runs healthy.
+  if (dmg === 0 && reason === 'victory') loss = -0.02;
+  const next = Math.max(VEHICLE_COND_MIN, Math.min(1, cur - loss));
+  p.vehicleCondition[vid] = next;
+  Profile.save();
+}
+
+function vehicleRepairCostFor(vid) {
+  const cond = getVehicleConditionFor(vid);
+  // Linear: at MIN → full cost, at 1.0 → 0.
+  const t = (1 - cond) / (1 - VEHICLE_COND_MIN);
+  return Math.max(1, Math.round(VEHICLE_COND_REPAIR_COST_FULL * t));
+}
+
+function todayDateKey() {
+  // YYYY-MM-DD in UTC. Using toISOString() avoids manual zero-padding logic.
+  return new Date().toISOString().slice(0, 10);
+}
+
+function canClaimFreeTuneUp() {
+  if (!VEHICLE_COND_TUNEUP_FREE_DAILY) return false;
+  const p = Profile.active(); if (!p) return false;
+  return p.lastTuneUpDate !== todayDateKey();
+}
+
+function claimFreeTuneUp(vid) {
+  const p = Profile.active(); if (!p) return false;
+  if (!canClaimFreeTuneUp()) return false;
+  if (!p.ownedVehicles || !p.ownedVehicles[vid]) return false;
+  if (!p.vehicleCondition || typeof p.vehicleCondition !== 'object') p.vehicleCondition = {};
+  const cur = (typeof p.vehicleCondition[vid] === 'number') ? p.vehicleCondition[vid] : 1;
+  if (cur >= 0.999) return false;
+  p.vehicleCondition[vid] = Math.min(1, cur + VEHICLE_COND_TUNEUP_RESTORE);
+  p.lastTuneUpDate = todayDateKey();
+  Profile.save();
+  return true;
+}
+
+function repairVehiclePaid(vid) {
+  const p = Profile.active(); if (!p) return false;
+  if (!p.ownedVehicles || !p.ownedVehicles[vid]) return false;
+  if (!p.vehicleCondition || typeof p.vehicleCondition !== 'object') p.vehicleCondition = {};
+  const cond = getVehicleConditionFor(vid);
+  if (cond >= 0.999) return false;
+  const cost = vehicleRepairCostFor(vid);
+  if (!Profile.spend(cost)) return false;
+  p.vehicleCondition[vid] = 1;
+  Profile.save();
+  return true;
+}
+
+// ============================================================
+// === END LIVING ROAD + VEHICLE WEAR ===
 // ============================================================
 
 
