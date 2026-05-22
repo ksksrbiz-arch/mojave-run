@@ -3647,6 +3647,198 @@ const SFX = {
 };
 
 // ============================================================
+// ClassicAudio — Phase 4 Dirt5 × OutRun audio for Classic mode only.
+// Persistent engine loop, drift-skid loop, tyre-on-surface loop and a
+// simple dynamic music driver (biome-tinted arpeggio that fades in by
+// speed tier). Hooked from beginPlaying / endRun / updateClassicHandling.
+// All nodes route through audioSfxGain / audioMusicGain so existing
+// master/sfx/music sliders still apply. Strictly mode-isolated to
+// Game.mode === 'classic'. Safe no-op before the first user gesture.
+// ============================================================
+const ClassicAudio = {
+  active: false,
+  _nodes: null,
+  _t: 0,
+  _musicAcc: 0,
+  _lastBiome: null,
+  start() {
+    if (this.active) return;
+    ensureAudio && ensureAudio();
+    if (!audioCtx || !audioSfxGain) return;
+    const ctxA = audioCtx;
+    const now = ctxA.currentTime;
+    // ---- Engine: two detuned sawtooth oscs through a low-pass filter ----
+    const engGain = ctxA.createGain();
+    engGain.gain.setValueAtTime(0.0001, now);
+    engGain.gain.linearRampToValueAtTime(0.06, now + 0.25);
+    const engFilter = ctxA.createBiquadFilter();
+    engFilter.type = 'lowpass';
+    engFilter.frequency.setValueAtTime(900, now);
+    engFilter.Q.value = 0.7;
+    const osc1 = ctxA.createOscillator(); osc1.type = 'sawtooth';
+    const osc2 = ctxA.createOscillator(); osc2.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(72, now);
+    osc2.frequency.setValueAtTime(75, now);
+    const subOsc = ctxA.createOscillator(); subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(36, now);
+    const subGain = ctxA.createGain();
+    subGain.gain.setValueAtTime(0.0001, now);
+    osc1.connect(engFilter); osc2.connect(engFilter);
+    subOsc.connect(subGain); subGain.connect(engFilter);
+    engFilter.connect(engGain);
+    engGain.connect(audioSfxGain);
+    try { osc1.start(now); osc2.start(now); subOsc.start(now); } catch (_) {}
+    // ---- Tyre on surface: looped noise → low-pass (dirt vs tarmac) ----
+    const tyreBuf = getNoiseBuffer ? getNoiseBuffer(ctxA.sampleRate * 2, false) : null;
+    let tyreSrc = null, tyreFilter = null, tyreGain = null;
+    if (tyreBuf) {
+      tyreSrc = ctxA.createBufferSource();
+      tyreSrc.buffer = tyreBuf; tyreSrc.loop = true;
+      tyreFilter = ctxA.createBiquadFilter();
+      tyreFilter.type = 'lowpass';
+      tyreFilter.frequency.setValueAtTime(900, now);
+      tyreFilter.Q.value = 0.5;
+      tyreGain = ctxA.createGain();
+      tyreGain.gain.setValueAtTime(0.0001, now);
+      tyreSrc.connect(tyreFilter); tyreFilter.connect(tyreGain);
+      tyreGain.connect(audioSfxGain);
+      try { tyreSrc.start(now); } catch (_) {}
+    }
+    // ---- Drift skid: looped noise → band-pass, gated by classicDrifting ----
+    let skidSrc = null, skidFilter = null, skidGain = null;
+    if (tyreBuf) {
+      skidSrc = ctxA.createBufferSource();
+      skidSrc.buffer = tyreBuf; skidSrc.loop = true;
+      skidFilter = ctxA.createBiquadFilter();
+      skidFilter.type = 'bandpass';
+      skidFilter.frequency.setValueAtTime(2200, now);
+      skidFilter.Q.value = 4.5;
+      skidGain = ctxA.createGain();
+      skidGain.gain.setValueAtTime(0.0001, now);
+      skidSrc.connect(skidFilter); skidFilter.connect(skidGain);
+      skidGain.connect(audioSfxGain);
+      try { skidSrc.start(now); } catch (_) {}
+    }
+    this._nodes = { engGain, engFilter, osc1, osc2, subOsc, subGain,
+                    tyreSrc, tyreFilter, tyreGain,
+                    skidSrc, skidFilter, skidGain };
+    this.active = true;
+    this._t = 0;
+    this._musicAcc = 0;
+    this._lastBiome = null;
+  },
+  stop() {
+    if (!this.active || !this._nodes || !audioCtx) { this.active = false; this._nodes = null; return; }
+    const ctxA = audioCtx;
+    const now = ctxA.currentTime;
+    const n = this._nodes;
+    const fadeT = 0.4;
+    try {
+      if (n.engGain)  n.engGain.gain.cancelScheduledValues(now),  n.engGain.gain.setTargetAtTime(0.0001, now, 0.12);
+      if (n.subGain)  n.subGain.gain.cancelScheduledValues(now),  n.subGain.gain.setTargetAtTime(0.0001, now, 0.12);
+      if (n.tyreGain) n.tyreGain.gain.cancelScheduledValues(now), n.tyreGain.gain.setTargetAtTime(0.0001, now, 0.12);
+      if (n.skidGain) n.skidGain.gain.cancelScheduledValues(now), n.skidGain.gain.setTargetAtTime(0.0001, now, 0.12);
+    } catch (_) {}
+    // Stop oscillators / sources a moment later so the fade is audible.
+    setTimeout(() => {
+      try { n.osc1 && n.osc1.stop(); } catch (_) {}
+      try { n.osc2 && n.osc2.stop(); } catch (_) {}
+      try { n.subOsc && n.subOsc.stop(); } catch (_) {}
+      try { n.tyreSrc && n.tyreSrc.stop(); } catch (_) {}
+      try { n.skidSrc && n.skidSrc.stop(); } catch (_) {}
+    }, (fadeT + 0.2) * 1000);
+    this.active = false;
+    this._nodes = null;
+  },
+  // dt-driven mix: engine rpm, drift skid gate, tyre timbre, music pulse.
+  update(dt) {
+    if (!this.active || !this._nodes || !audioCtx) return;
+    const ctxA = audioCtx;
+    const now = ctxA.currentTime;
+    const n = this._nodes;
+    this._t += dt;
+    const speed = Game.speed || 0;
+    const tgt   = Math.max(160, Game.targetSpeed || 280);
+    const sN    = clamp(speed / 520, 0, 1);
+    const throttle = clamp((speed / Math.max(160, tgt)) , 0, 1.2);
+    const drifting = !!Game.classicDrifting;
+    const boost    = (Game.classicBoostT || 0) > 0;
+    const onDirt   = (Game.classicSurfaceGrip || 1) < 0.85;
+    // ---- Engine ----
+    // Base rpm sits ~70 Hz at idle, climbs to ~180 Hz at peak, +20 Hz boost.
+    const baseFreq = 70 + sN * 110 + (boost ? 22 : 0);
+    const detune   = 2.2 + sN * 1.2;
+    try {
+      n.osc1.frequency.setTargetAtTime(baseFreq, now, 0.05);
+      n.osc2.frequency.setTargetAtTime(baseFreq + detune, now, 0.05);
+      n.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, now, 0.08);
+      n.engFilter.frequency.setTargetAtTime(700 + sN * 1700 + (boost ? 400 : 0), now, 0.05);
+      // Engine louder under throttle + boost; quieter at very low speeds.
+      const engVol = 0.025 + sN * 0.05 + (boost ? 0.02 : 0);
+      n.engGain.gain.setTargetAtTime(engVol, now, 0.06);
+      // Sub swells with nitro / boost only.
+      const subVol = boost ? 0.05 : (isPowerupActive && isPowerupActive('nitro') ? 0.035 : 0.0001);
+      n.subGain.gain.setTargetAtTime(subVol, now, 0.10);
+    } catch (_) {}
+    // ---- Tyre on surface ----
+    if (n.tyreSrc && n.tyreFilter && n.tyreGain) {
+      try {
+        // Tarmac: rolling rumble around 600–900 Hz. Dirt: broader, brighter (~2200 Hz).
+        const tFreq = onDirt ? 2200 : (700 + sN * 200);
+        n.tyreFilter.frequency.setTargetAtTime(tFreq, now, 0.10);
+        const tVol = 0.012 + sN * 0.03 + (onDirt ? 0.025 : 0);
+        n.tyreGain.gain.setTargetAtTime(tVol, now, 0.08);
+      } catch (_) {}
+    }
+    // ---- Drift skid ----
+    if (n.skidSrc && n.skidFilter && n.skidGain) {
+      try {
+        const skidVol = drifting ? 0.04 + Math.abs((Game.player && Game.player.vx || 0)) / 6500 : 0.0001;
+        n.skidGain.gain.setTargetAtTime(skidVol, now, 0.04);
+        // Sweep band-pass with vx for a more "alive" skid timbre.
+        const sweep = 1800 + Math.min(2200, Math.abs((Game.player && Game.player.vx || 0)) * 3);
+        n.skidFilter.frequency.setTargetAtTime(sweep, now, 0.05);
+      } catch (_) {}
+    }
+    // ---- Dynamic music: a slow biome-themed arpeggio pulse ----
+    // Only fires when at-speed; spacing tightens with speed tier; pitch
+    // root shifts per biome. Routes through audioMusicGain so the music
+    // slider still applies. We deliberately keep this sparse to not
+    // compete with the existing music engine.
+    this._musicAcc += dt;
+    const musicEnabled = sN > 0.18 && audioMusicGain &&
+                         Settings && (Settings.music || 0) > 0.02;
+    if (musicEnabled) {
+      // 0.95s at low speed → ~0.42s at peak — gives a chase feel.
+      const step = 0.95 - sN * 0.53;
+      if (this._musicAcc >= step) {
+        this._musicAcc = 0;
+        const biome = (Game && Game.biome) || 'wastes';
+        if (biome !== this._lastBiome) this._lastBiome = biome;
+        // Per-biome scale (semitones from a root). OutRun-y minor scales.
+        const ROOTS = { wastes: 220, canyon: 196, neonruins: 247, frostwaste: 174,
+                        irradiated: 207, thunderplains: 185, midnight: 165 };
+        const root = ROOTS[biome] || 220;
+        const SCALES = [0, 3, 5, 7, 10, 12, 15];
+        const step1 = SCALES[Math.floor(Math.random() * SCALES.length)];
+        const note  = root * Math.pow(2, step1 / 12);
+        const noteVol = 0.025 + sN * 0.035;
+        const dur = step * 0.85;
+        try { tone(note,         dur, 'triangle', noteVol,        -8,  now,        audioMusicGain, 0.0006); } catch (_) {}
+        try { tone(note * 0.5,   dur, 'sine',     noteVol * 0.65, -4,  now + 0.01, audioMusicGain, 0.0006); } catch (_) {}
+        // A higher 5th sparkle when drifting or boosting — "danger" cue.
+        if (drifting || boost) {
+          try { tone(note * 1.5, dur * 0.5, 'square', noteVol * 0.45, -6, now + 0.02, audioMusicGain, 0.0006); } catch (_) {}
+        }
+      }
+    } else {
+      // Reset acc so we don't immediately fire on re-entry.
+      this._musicAcc = Math.min(this._musicAcc, 0.2);
+    }
+  },
+};
+
+// ============================================================
 // HELPERS
 // ============================================================
 const rand = (a,b) => a + Math.random() * (b - a);
@@ -5504,6 +5696,8 @@ function beginPlaying() {
   }
   if (Game.mode === 'extraction') announceEvent('ESCORT CONVOY TO EXTRACTION', '#7af07a');
   if (Game.mode === 'arena') announceEvent('WAVE 1 — ARENA 2.5D', '#7af0ff');
+  // Phase 4 — start the Classic-only Dirt5/OutRun audio module.
+  if (Game.mode === 'classic') { try { ClassicAudio.start(); } catch (_) {} }
   // Spawn boss right away in boss levels
   if (Game.mode === 'ironthrone') {
     spawnIronThroneBoss(Game.ironThroneStage);
@@ -5554,6 +5748,8 @@ function beginPlaying() {
 
 function endRun(reason /* 'death' | 'victory' | 'time' */) {
   if (Game.state !== 'playing' && Game.state !== 'dying' && Game.state !== 'victory') return;
+  // Phase 4 — fade out Classic audio module if it was running.
+  try { ClassicAudio.stop(); } catch (_) {}
   Game.state = reason === 'victory' ? 'victory' : 'gameover';
   // Always restore Math.random; daily mode's seeded RNG should never leak
   // into menus, garage previews, or subsequent non-daily runs.
@@ -6854,6 +7050,9 @@ function updateClassicHandling(dt, p, stats) {
 
   // -- track top speed (run-scope, Phase 5 surfaces it) --
   if ((Game.speed || 0) > (Game.topSpeed || 0)) Game.topSpeed = Game.speed;
+
+  // -- Phase 4: drive the persistent ClassicAudio mix (engine/skid/tyre/music) --
+  try { if (typeof ClassicAudio !== 'undefined') ClassicAudio.update(dt); } catch (_) {}
 
   // -- road-edge collision (kept consistent with legacy steering block) --
   const { x0, x1 } = rb;
