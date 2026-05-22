@@ -129,6 +129,10 @@
   .screen.active .inner > *:nth-child(6){animation-delay:.22s}
   .screen.active .inner > *:nth-child(7){animation-delay:.26s}
   .screen.active .inner > *:nth-child(8){animation-delay:.30s}
+  .screen.active .inner > *:nth-child(9){animation-delay:.34s}
+  .screen.active .inner > *:nth-child(10){animation-delay:.38s}
+  .screen.active .inner > *:nth-child(11){animation-delay:.42s}
+  .screen.active .inner > *:nth-child(12){animation-delay:.46s}
   @keyframes item-in{
     from{opacity:0;transform:translateY(8px)}
     to{opacity:1;transform:translateY(0)}
@@ -219,6 +223,50 @@
     outline-offset:2px;
     border-color:var(--gold);
     box-shadow:0 0 0 3px rgba(245,215,110,.2);
+  }
+
+  /* MENU SECTIONS — grouped layout for production menu */
+  .menu-section{
+    font-size:11px;letter-spacing:3px;
+    color:var(--rust);
+    border-bottom:1px solid rgba(168,106,46,.35);
+    padding-bottom:4px;margin:4px 0 -4px;
+    text-transform:uppercase;font-weight:bold;
+  }
+  .menu-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  }
+  .menu-grid .btn{
+    min-height:48px;padding:10px 8px;font-size:12px;
+    letter-spacing:1.5px;
+    flex-direction:column;
+  }
+  .menu-grid .btn .sub{margin-top:2px;font-size:9px}
+  .menu-footer{
+    display:flex;gap:8px;margin-top:6px;
+    border-top:1px solid var(--gold-faint);padding-top:10px;
+  }
+  .menu-footer .menu-sm{
+    flex:1;min-height:38px;padding:8px 6px;font-size:10px;letter-spacing:1px;
+  }
+  /* Title screen extras */
+  .title-brand{
+    font-size:9px;letter-spacing:3px;color:var(--rust);
+    text-align:center;opacity:.7;
+  }
+  .title-tagline{
+    font-size:10px;letter-spacing:2.5px;color:var(--gold-dim);
+    text-align:center;margin-top:-6px;opacity:.65;
+  }
+  .title-footer{
+    display:flex;align-items:center;justify-content:center;
+    gap:6px;font-size:9px;letter-spacing:1.5px;
+    color:var(--gold-dim);opacity:.5;margin-top:4px;
+  }
+  .title-sep{opacity:.4}
+  /* Single-column fallback for very narrow screens */
+  @media (max-width:320px){
+    .menu-grid{grid-template-columns:1fr}
   }
 
   /* PROFILE BAR (top of menu screens) */
@@ -1183,13 +1231,18 @@
   <!-- ===== TITLE ===== -->
   <div class="screen" id="screen-title">
     <div class="inner" style="margin:auto 0">
+      <div class="title-brand">◢ 1COMMERCE · PNW WASTELAND DIV. ◣</div>
       <h1>MOJAVE RUN</h1>
       <div class="subtitle">A WASTELAND ARCADE DRIVER</div>
-      <div style="height:18px"></div>
+      <div class="title-tagline">SURVIVE THE MOJAVE — DRIVE OR DIE</div>
+      <div style="height:14px"></div>
       <button class="btn primary" data-act="title-continue">CONTINUE</button>
       <button class="btn" data-act="title-profiles">CHANGE DRIVER</button>
-      <div style="height:24px"></div>
-      <div class="small center">1COMMERCE // PNW WASTELAND DIV.</div>
+      <div class="title-footer">
+        <span class="title-ver" id="title-version">v3.1</span>
+        <span class="title-sep">·</span>
+        <span>BROWSER · MOBILE · PWA</span>
+      </div>
     </div>
   </div>
 
@@ -1234,25 +1287,41 @@
         </div>
         <div class="scrap">SCRAP <b id="menu-scrap">0</b></div>
       </div>
-      <h1 style="font-size:36px;margin-top:8px">MOJAVE RUN</h1>
+
+      <!-- PRIMARY — the big calls to action -->
       <button class="btn primary" data-act="menu-play">▶ PLAY</button>
       <button class="btn" data-act="menu-campaign">CAMPAIGN <span class="sub">US ROAD STORY</span></button>
-      <button class="btn" data-act="menu-fleet">FLEET <span class="sub" id="menu-fleet-sub">OVERVIEW</span></button>
-      <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
-      <button class="btn" data-act="menu-fleet">FLEET <span class="sub" id="menu-fleet-sub">VIEW ALL RIDES</span></button>
-      <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
-      <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
-      <button class="btn" data-act="menu-stats">STATS</button>
-      <button class="btn" data-act="menu-scoreboard">🏆 SCOREBOARD</button>
-      <button class="btn" data-act="menu-achievements">BADGES <span class="sub" id="menu-ach-sub"></span></button>
-      <button class="btn" data-act="menu-settings">SETTINGS</button>
-      <button class="btn" data-act="menu-platform">✦ PLATFORM <span class="sub">PRESTIGE · SEASON · RIVALS</span></button>
-      <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">SHARED CO-OP</span></button>
-      <button class="btn" data-act="menu-shop">★ SHOP <span class="sub">COSMETICS & PACKS</span></button>
-      <div style="height:20px"></div>
-      <div class="btn-row">
-        <button class="btn" data-act="back-title" style="font-size:12px">◄ TITLE</button>
-        <button class="btn" data-act="menu-switch" style="font-size:12px">SWITCH DRIVER</button>
+
+      <!-- LOADOUT — customise your ride & crew -->
+      <h2 class="menu-section">LOADOUT</h2>
+      <div class="menu-grid">
+        <button class="btn" data-act="menu-garage">GARAGE <span class="sub" id="menu-garage-sub"></span></button>
+        <button class="btn" data-act="menu-fleet">FLEET <span class="sub" id="menu-fleet-sub">OVERVIEW</span></button>
+        <button class="btn" data-act="menu-character">WARRIOR <span class="sub" id="menu-character-sub">CHANGE FIGHTER</span></button>
+        <button class="btn" data-act="menu-sidekick">SIDEKICK <span class="sub" id="menu-sidekick-sub">NONE ◢</span></button>
+      </div>
+
+      <!-- COMPETE — multiplayer, rankings, platform -->
+      <h2 class="menu-section">COMPETE</h2>
+      <div class="menu-grid">
+        <button class="btn" data-act="menu-mp">MULTIPLAYER <span class="sub" id="menu-mp-sub">CO-OP</span></button>
+        <button class="btn" data-act="menu-scoreboard">🏆 SCOREBOARD</button>
+        <button class="btn" data-act="menu-platform">✦ PLATFORM <span class="sub">PRESTIGE · RIVALS</span></button>
+        <button class="btn" data-act="menu-shop">★ SHOP <span class="sub">COSMETICS</span></button>
+      </div>
+
+      <!-- PROGRESS — stats, badges -->
+      <h2 class="menu-section">PROGRESS</h2>
+      <div class="menu-grid">
+        <button class="btn" data-act="menu-stats">STATS</button>
+        <button class="btn" data-act="menu-achievements">BADGES <span class="sub" id="menu-ach-sub"></span></button>
+      </div>
+
+      <!-- SYSTEM — settings, switch driver -->
+      <div class="menu-footer">
+        <button class="btn menu-sm" data-act="menu-settings">⚙ SETTINGS</button>
+        <button class="btn menu-sm" data-act="menu-switch">SWITCH DRIVER</button>
+        <button class="btn menu-sm" data-act="back-title">◄ TITLE</button>
       </div>
     </div>
   </div>
@@ -1545,6 +1614,17 @@
       text-shadow:0 0 9px rgba(255,170,80,.46);
       letter-spacing:2.5px;
       border-bottom-color:rgba(255,185,95,.35);
+    }
+    body.cinematic-on .menu-section{
+      color:#ffb870;
+      border-bottom-color:rgba(255,185,95,.28);
+      text-shadow:0 0 6px rgba(255,150,60,.3);
+    }
+    body.cinematic-on .title-brand{
+      color:#ffb870;opacity:.55;
+    }
+    body.cinematic-on .title-tagline{
+      color:#ffd998;opacity:.5;
     }
 
     body.cinematic-on .btn{
