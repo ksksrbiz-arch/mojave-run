@@ -3996,6 +3996,36 @@ function classicRoadPerspectiveT(tFrac) {
   return Math.pow(clamp(tFrac, 0, 1), 1.08);
 }
 
+// === Z-based perspective helpers ===
+// These map world-Z distance (0 = player, increasing into horizon) to screen
+// coordinates. They share the same perspective strength (CLASSIC_PERSP_K) so
+// road surface, markings, barriers, and roadside detail all converge
+// identically. baseWidth is the pixel road width at Z = 0 (the player row).
+const CLASSIC_PERSP_K = 0.008;
+const CLASSIC_BASE_WIDTH = 280;
+
+function worldToScreenY(z, horizonY) {
+  const scale = 1 / (1 + z * CLASSIC_PERSP_K);
+  return horizonY + (H - horizonY) * (1 - scale);
+}
+
+function getRoadWidthAtZ(z) {
+  return CLASSIC_BASE_WIDTH * (1 / (1 + z * CLASSIC_PERSP_K));
+}
+
+function worldToScreenX(worldX, z, roadCenterX) {
+  const scale = 1 / (1 + z * CLASSIC_PERSP_K);
+  return (roadCenterX || W * 0.5) + worldX * scale;
+}
+
+// Speed-based road vibration amplitude — rougher biomes produce stronger
+// micro-shake at high speed, giving the surface a tactile rumble feel.
+const CLASSIC_ROAD_ROUGHNESS = {
+  wastes: 0.12, canyon: 0.22, neonruins: 0.10, thunderplains: 0.28,
+  frostwaste: 0.18, irradiated: 0.20, midnight: 0.06, scraparch: 0.25,
+};
+
+
 function emit(x, y, n, opts = {}) {
   n = Math.max(1, Math.round(n * PARTICLE_SCALE * Settings.particles));
   const { color='#f5d76e', speed=180, life=0.6, size=3, spread=Math.PI*2, gravity=0, shape } = opts;
@@ -7093,6 +7123,19 @@ function updateClassicHandling(dt, p, stats) {
     }
   }
 
+  // -- speed-based road vibration / camera bob --
+  // At high speed the surface micro-shakes proportionally to biome roughness,
+  // giving the road a tactile rumble feel without requiring explicit bumps.
+  if (Settings && !Settings.reducedMotion) {
+    const biomeRough = CLASSIC_ROAD_ROUGHNESS[Game.biome] || 0.12;
+    const speedFrac2 = clamp((Game.speed || 0) / 480, 0, 1);
+    if (speedFrac2 > 0.45) {
+      const vibIntensity = (speedFrac2 - 0.45) / 0.55;
+      const vibAmp = vibIntensity * biomeRough * 0.08;
+      Game.shake = Math.max(Game.shake, vibAmp);
+    }
+  }
+
   // -- track top speed (run-scope, Phase 5 surfaces it) --
   if ((Game.speed || 0) > (Game.topSpeed || 0)) Game.topSpeed = Game.speed;
 
@@ -8817,6 +8860,14 @@ function drawRoad() {
 // the current curve; rumble strips / dashes / cracks / oil patches all
 // re-project through getClassicRoadShift(y). Mode-isolated — strictly
 // called only when Game.mode === 'classic'.
+//
+// Modular architecture — drawRoadClassicV2 builds a shared context object
+// and delegates to focused sub-renderers:
+//   _drawClassicRoadSurface    — per-strip trapezoid banding + rumble strips
+//   _drawClassicRoadMarkings   — centre line, lane guides, edge lines
+//   _drawClassicSideBarriers   — concrete walls with faces, tops, posts
+//   _drawClassicAsphaltDetail  — tyre wear, grain specks, boost glow, cracks, oil, haze
+//   _drawClassicRoadsideDetails — small debris/rocks along road shoulders
 // =====================================================================
 function drawRoadClassicV2() {
   const t = activeBiomeTheme();
@@ -8833,10 +8884,24 @@ function drawRoadClassicV2() {
   const hillHorizonOffset = -(Game.classicHillSmooth || 0) * 12;
   const horizonYEff = horizonY + hillHorizonOffset;
 
+  // Shared render context passed to all sub-renderers.
+  const rc = { t, w, horizonY, horizonYEff, speedN, boostN, vpX };
+
   // Ground fill (shoulder) — full screen from horizon to bottom.
   ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
   ctx.fillRect(0, horizonYEff, W, H - horizonYEff);
 
+  _drawClassicRoadSurface(rc);
+  _drawClassicRoadMarkings(rc);
+  _drawClassicSideBarriers(rc);
+  _drawClassicDashesAndGuides(rc);
+  _drawClassicAsphaltDetail(rc);
+  _drawClassicRoadsideDetails(rc);
+}
+
+// --- Sub-renderer: road surface strips (alternating banding + rumble strips) ---
+function _drawClassicRoadSurface(rc) {
+  const { t, w, horizonYEff, vpX } = rc;
   // Per-row road-surface strips (cheap horizontal trapezoids).
   // STRIPS controls density: ~64 strips is plenty for a smooth curve.
   // Phase 6: cache the result keyed on PerfMon.quality so we don't
@@ -8905,6 +8970,11 @@ function drawRoadClassicV2() {
       ctx.fill();
     }
   }
+}
+
+// --- Sub-renderer: road markings (edge lines, centre dashes, lane guides) ---
+function _drawClassicRoadMarkings(rc) {
+  const { t, w, horizonYEff, vpX } = rc;
 
   // Road-edge yellow lines — series of short segments per strip, each
   // anchored to the curved row centers (gives a clean bending edge).
@@ -8925,6 +8995,11 @@ function drawRoadClassicV2() {
     }
     ctx.stroke();
   }
+}
+
+// --- Sub-renderer: side barriers (concrete walls with faces, tops, posts) ---
+function _drawClassicSideBarriers(rc) {
+  const { t, w, horizonYEff, speedN, boostN, vpX } = rc;
 
   // Side barriers — low concrete walls with visible tops so the road edges
   // have height and stronger depth cues instead of reading as flat stripes.
@@ -8992,6 +9067,11 @@ function drawRoadClassicV2() {
       }
     }
   }
+}
+
+// --- Sub-renderer: dashes & lane guide overlays (drawn after barriers) ---
+function _drawClassicDashesAndGuides(rc) {
+  const { t, w, horizonYEff, vpX } = rc;
 
   // Dashed centre line — perspective scaled, follows the curve.
   {
@@ -9051,6 +9131,11 @@ function drawRoadClassicV2() {
       }
     }
   }
+}
+
+// --- Sub-renderer: asphalt detail (tyre wear, grain, boost glow, cracks, haze, glare, shimmer, oil) ---
+function _drawClassicAsphaltDetail(rc) {
+  const { t, w, horizonYEff, speedN, boostN, vpX } = rc;
 
   // Streaming asphalt texture + tyre wear — cheap procedural detail that
   // makes the surface feel like it is rushing beneath the player.
@@ -9227,8 +9312,55 @@ function drawRoadClassicV2() {
   }
 }
 
-// =====================================================================
-// Phase 3 Classic Dirt5 × OutRun — sky/parallax/headlight/wet/chromatic.
+// --- Sub-renderer: roadside details (small debris, rocks along road edges) ---
+// Draws perspective-scaled rocks / rubble at the road shoulders. They scroll
+// with laneOffset and are seeded deterministically so they don't flicker.
+function _drawClassicRoadsideDetails(rc) {
+  if (PerfMon.quality < 0.35) return;
+  const { w, horizonYEff, vpX, speedN } = rc;
+  const count = PerfMon.quality > 0.6 ? 18 : 12;
+  const scrollSeed = Math.floor((Game.laneOffset || 0) * 0.18);
+  for (let di = 0; di < count; di++) {
+    const hash = ((di * 127 + scrollSeed * 31) % 499) / 499;
+    const tFrac = clamp(0.08 + hash * 0.82, 0.08, 0.90);
+    const pT = classicRoadPerspectiveT(tFrac);
+    const y = horizonYEff + tFrac * (H - horizonYEff);
+    const hw = w * pT * 0.5;
+    const cx = vpX + getClassicRoadShift(y);
+    const side = (di & 1) === 0 ? -1 : 1;
+    const offset = hw + Math.max(4, hw * (0.06 + ((di * 53 + scrollSeed) % 23) * 0.006));
+    const rx = cx + side * offset;
+    const sz = Math.max(1.5, pT * (3 + ((di * 37) % 5)));
+    const alpha = 0.08 + pT * 0.22;
+    // Rock shape — simple filled polygon with 2-3 jags.
+    ctx.fillStyle = Game.isNight
+      ? `rgba(70,65,58,${alpha})`
+      : `rgba(130,110,85,${alpha})`;
+    ctx.beginPath();
+    const jag = sz * 0.4 * (((di * 71) % 7) / 7 - 0.5);
+    ctx.moveTo(rx - sz, y);
+    ctx.lineTo(rx - sz * 0.5 + jag, y - sz * 0.8);
+    ctx.lineTo(rx + sz * 0.4, y - sz * 0.65);
+    ctx.lineTo(rx + sz, y);
+    ctx.closePath();
+    ctx.fill();
+    // Occasional larger debris (every 4th item, only at higher quality).
+    if ((di & 3) === 0 && PerfMon.quality > 0.55) {
+      const sz2 = sz * 1.6;
+      const rx2 = rx + side * sz * 1.1;
+      ctx.fillStyle = Game.isNight
+        ? `rgba(55,50,44,${alpha * 0.7})`
+        : `rgba(110,90,65,${alpha * 0.7})`;
+      ctx.beginPath();
+      ctx.moveTo(rx2 - sz2 * 0.6, y);
+      ctx.lineTo(rx2, y - sz2 * 0.55);
+      ctx.lineTo(rx2 + sz2 * 0.7, y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
 // Three small overlay helpers gated to Classic + visualQualityLevel().
 //   drawClassicHorizon()       — layered parallax silhouettes (back of sky)
 //   drawClassicRoadOverlays()  — headlight cone (night/midnight) + wet road
