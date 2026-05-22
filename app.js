@@ -3982,6 +3982,9 @@ function getClassicRoadHillDy(y) {
   const wq = (1 - tFrac) * (1 - tFrac);
   return -h * wq * 16;
 }
+function classicRoadPerspectiveT(tFrac) {
+  return Math.pow(clamp(tFrac, 0, 1), 1.08);
+}
 
 function emit(x, y, n, opts = {}) {
   n = Math.max(1, Math.round(n * PARTICLE_SCALE * Settings.particles));
@@ -8809,6 +8812,8 @@ function drawRoadClassicV2() {
   const t = activeBiomeTheme();
   const { w } = roadBounds();                // straight road width (stable)
   const horizonY = H * 0.42;
+  const speedN = clamp((Game.speed || 0) / 540, 0, 1);
+  const boostN = clamp((Game.classicBoostT || 0) / 0.85, 0, 1);
   // Vanishing point: player lean + smoothed curve at the horizon.
   const playerLean = Game.player ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
   // Boost slightly amplifies the lean for that hot-corner cinematic kick.
@@ -8841,8 +8846,8 @@ function drawRoadClassicV2() {
     // Center for this strip = vpX + per-row curve offset (use mid-row).
     const yMid = (yTop + yBot) * 0.5;
     const cx = vpX + getClassicRoadShift(yMid);
-    const hwT = w * tT * 0.5;
-    const hwB = w * tB * 0.5;
+    const hwT = w * classicRoadPerspectiveT(tT) * 0.5;
+    const hwB = w * classicRoadPerspectiveT(tB) * 0.5;
     // Stripe banding for depth — alternates per row (OutRun staple).
     const band = si & 1;
     if (Game.isNight) {
@@ -8873,7 +8878,7 @@ function drawRoadClassicV2() {
         const dist  = 1.0 / Math.max(0.001, tFrac);
         if (Math.floor(dist * 5.2 + Game.laneOffset * 0.028) % 2 !== pass) continue;
         const tTop = ri / RS, tBot = (ri + 1) / RS;
-        const hw0 = w * tTop / 2, hw1 = w * tBot / 2;
+        const hw0 = w * classicRoadPerspectiveT(tTop) / 2, hw1 = w * classicRoadPerspectiveT(tBot) / 2;
         const rT = Math.max(0.5, hw0 * 0.046), rB = Math.max(0.5, hw1 * 0.046);
         const y = horizonYEff + ri * rsH;
         const cx0 = vpX + getClassicRoadShift(y + rsH * 0.5);
@@ -8904,11 +8909,78 @@ function drawRoadClassicV2() {
       const yBot = yTop + eH;
       const cT = vpX + getClassicRoadShift(yTop + eH * 0.5);
       const cB = vpX + getClassicRoadShift(yBot - eH * 0.5);
-      const hwT = w * tTop / 2, hwB = w * tBot / 2;
+      const hwT = w * classicRoadPerspectiveT(tTop) / 2, hwB = w * classicRoadPerspectiveT(tBot) / 2;
       ctx.moveTo(cT - hwT, yTop); ctx.lineTo(cB - hwB - 1, yBot);
       ctx.moveTo(cT + hwT, yTop); ctx.lineTo(cB + hwB + 1, yBot);
     }
     ctx.stroke();
+  }
+
+  // Side barriers — low concrete walls with visible tops so the road edges
+  // have height and stronger depth cues instead of reading as flat stripes.
+  {
+    const WALL = 24, wallH = (H - horizonYEff) / WALL;
+    for (let wi = 0; wi < WALL; wi++) {
+      const tTop = wi / WALL, tBot = (wi + 1) / WALL;
+      const pTop = classicRoadPerspectiveT(tTop);
+      const pBot = classicRoadPerspectiveT(tBot);
+      const yTop = horizonYEff + wi * wallH;
+      const yBot = yTop + wallH;
+      const cT = vpX + getClassicRoadShift(yTop + wallH * 0.4);
+      const cB = vpX + getClassicRoadShift(yBot - wallH * 0.2);
+      const hwT = w * pTop * 0.5;
+      const hwB = w * pBot * 0.5;
+      const outT = Math.max(2, hwT * 0.085);
+      const outB = Math.max(3, hwB * 0.085);
+      const hT = Math.max(1.2, 1 + pTop * (7 + speedN * 5 + boostN * 3));
+      const hB = Math.max(1.5, 1 + pBot * (9 + speedN * 6 + boostN * 4));
+      const faceAlpha = 0.04 + pBot * 0.22;
+      const topAlpha = 0.05 + pBot * 0.18;
+      ctx.fillStyle = Game.isNight
+        ? `rgba(84,96,118,${faceAlpha})`
+        : `rgba(178,156,118,${faceAlpha})`;
+      ctx.beginPath();
+      ctx.moveTo(cT - hwT, yTop);
+      ctx.lineTo(cT - hwT - outT, yTop - hT);
+      ctx.lineTo(cB - hwB - outB, yBot - hB);
+      ctx.lineTo(cB - hwB, yBot);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cT + hwT, yTop);
+      ctx.lineTo(cT + hwT + outT, yTop - hT);
+      ctx.lineTo(cB + hwB + outB, yBot - hB);
+      ctx.lineTo(cB + hwB, yBot);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = Game.isNight
+        ? `rgba(160,184,220,${topAlpha})`
+        : `rgba(242,218,164,${topAlpha})`;
+      ctx.beginPath();
+      ctx.moveTo(cT - hwT - outT, yTop - hT);
+      ctx.lineTo(cT - hwT - outT * 1.32, yTop - hT * 1.25);
+      ctx.lineTo(cB - hwB - outB * 1.32, yBot - hB * 1.25);
+      ctx.lineTo(cB - hwB - outB, yBot - hB);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cT + hwT + outT, yTop - hT);
+      ctx.lineTo(cT + hwT + outT * 1.32, yTop - hT * 1.25);
+      ctx.lineTo(cB + hwB + outB * 1.32, yBot - hB * 1.25);
+      ctx.lineTo(cB + hwB + outB, yBot - hB);
+      ctx.closePath();
+      ctx.fill();
+      if (((wi + Math.floor(Game.laneOffset * 0.05)) & 1) === 0) {
+        const postA = 0.05 + pBot * 0.16;
+        ctx.fillStyle = Game.isNight
+          ? `rgba(255,245,215,${postA})`
+          : `rgba(96,72,44,${postA})`;
+        const postW = Math.max(1, outB * 0.42);
+        const postH = Math.max(2, hB * 0.9);
+        ctx.fillRect(cB - hwB - outB * 0.78, yBot - hB - postH * 0.1, postW, postH);
+        ctx.fillRect(cB + hwB + outB * 0.36, yBot - hB - postH * 0.1, postW, postH);
+      }
+    }
   }
 
   // Dashed centre line — perspective scaled, follows the curve.
@@ -8919,10 +8991,21 @@ function drawRoadClassicV2() {
       const tFrac = (ci + 0.5) / CDS;
       const dist  = 1.0 / Math.max(0.001, tFrac);
       if ((dist * 5.8 + Game.laneOffset * 0.02) % 1 > 0.52) continue;
-      const y     = horizonYEff + ci * cdH;
-      const dashW = Math.max(1, w * tFrac * 0.012);
-      const cx    = vpX + getClassicRoadShift(y + cdH * 0.5);
-      ctx.fillRect(cx - dashW / 2, y, dashW, cdH);
+      const yTop  = horizonYEff + ci * cdH;
+      const yBot  = yTop + cdH;
+      const pTop  = classicRoadPerspectiveT(ci / CDS);
+      const pBot  = classicRoadPerspectiveT((ci + 1) / CDS);
+      const dashWT = Math.max(1, w * pTop * 0.008);
+      const dashWB = Math.max(dashWT + 0.4, w * pBot * 0.012);
+      const cxT   = vpX + getClassicRoadShift(yTop + cdH * 0.2);
+      const cxB   = vpX + getClassicRoadShift(yBot - cdH * 0.2);
+      ctx.beginPath();
+      ctx.moveTo(cxT - dashWT / 2, yTop);
+      ctx.lineTo(cxT + dashWT / 2, yTop);
+      ctx.lineTo(cxB + dashWB / 2, yBot);
+      ctx.lineTo(cxB - dashWB / 2, yBot);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
@@ -8935,12 +9018,91 @@ function drawRoadClassicV2() {
       const tFrac = (li + 0.5) / LGS;
       const dist  = 1.0 / Math.max(0.001, tFrac);
       if ((dist * 4.8 + Game.laneOffset * 0.015) % 1 > 0.38) continue;
-      const y    = horizonYEff + li * lgH;
-      const hw   = w * tFrac / 2;
-      const lw   = Math.max(0.5, hw * 0.008);
-      const cx   = vpX + getClassicRoadShift(y + lgH * 0.5);
-      ctx.fillRect(cx - hw / 3 - lw / 2, y, lw, lgH);
-      ctx.fillRect(cx + hw / 3 - lw / 2, y, lw, lgH);
+      const yTop = horizonYEff + li * lgH;
+      const yBot = yTop + lgH;
+      const pTop = classicRoadPerspectiveT(li / LGS);
+      const pBot = classicRoadPerspectiveT((li + 1) / LGS);
+      const hwT  = w * pTop / 2;
+      const hwB  = w * pBot / 2;
+      const lwT  = Math.max(0.5, hwT * 0.008);
+      const lwB  = Math.max(0.8, hwB * 0.0085);
+      const cxT  = vpX + getClassicRoadShift(yTop + lgH * 0.2);
+      const cxB  = vpX + getClassicRoadShift(yBot - lgH * 0.2);
+      for (const laneMul of [-1 / 3, 1 / 3]) {
+        const xTop = cxT + hwT * laneMul;
+        const xBot = cxB + hwB * laneMul;
+        ctx.beginPath();
+        ctx.moveTo(xTop - lwT / 2, yTop);
+        ctx.lineTo(xTop + lwT / 2, yTop);
+        ctx.lineTo(xBot + lwB / 2, yBot);
+        ctx.lineTo(xBot - lwB / 2, yBot);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  // Streaming asphalt texture + tyre wear — cheap procedural detail that
+  // makes the surface feel like it is rushing beneath the player.
+  if (PerfMon.quality > 0.32) {
+    const TEX = PerfMon.quality > 0.6 ? 38 : 26;
+    const texH = (H - horizonYEff) / TEX;
+    for (let ti = 0; ti < TEX; ti++) {
+      const yTop = horizonYEff + ti * texH;
+      const yBot = yTop + texH;
+      const tTop = classicRoadPerspectiveT(ti / TEX);
+      const tBot = classicRoadPerspectiveT((ti + 1) / TEX);
+      const tMid = (tTop + tBot) * 0.5;
+      const cxT = vpX + getClassicRoadShift(yTop + texH * 0.2);
+      const cxB = vpX + getClassicRoadShift(yBot - texH * 0.2);
+      const hwT = w * tTop * 0.5;
+      const hwB = w * tBot * 0.5;
+      const wearWT = Math.max(1, hwT * 0.13);
+      const wearWB = Math.max(1.4, hwB * 0.13);
+      const wearA = (0.016 + tMid * 0.075) * (1 + speedN * 0.55);
+      ctx.fillStyle = `rgba(0,0,0,${wearA})`;
+      for (const laneMul of [-0.24, 0.24]) {
+        const xTop = cxT + hwT * laneMul;
+        const xBot = cxB + hwB * laneMul;
+        ctx.beginPath();
+        ctx.moveTo(xTop - wearWT / 2, yTop);
+        ctx.lineTo(xTop + wearWT / 2, yTop);
+        ctx.lineTo(xBot + wearWB / 2, yBot);
+        ctx.lineTo(xBot - wearWB / 2, yBot);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const specks = tMid > 0.72 ? 4 : tMid > 0.45 ? 3 : 2;
+      for (let gi = 0; gi < specks; gi++) {
+        const seed = (ti * 73 + gi * 97 + Math.floor((Game.laneOffset || 0) * 0.22)) % 997;
+        const frac = (((seed * 0.6180339887) % 1) - 0.5) * 1.5;
+        const gwT = Math.max(1, hwT * (0.025 + ((seed % 7) * 0.003)));
+        const gwB = Math.max(gwT + 0.3, hwB * (0.026 + ((seed % 5) * 0.004)));
+        const xTop = cxT + hwT * frac;
+        const xBot = cxB + hwB * frac * 1.02;
+        const grainA = (0.012 + tMid * 0.05) * (gi === 0 ? 1.3 : 1);
+        ctx.fillStyle = (gi & 1)
+          ? `rgba(255,255,255,${grainA * 0.24})`
+          : `rgba(0,0,0,${grainA})`;
+        ctx.beginPath();
+        ctx.moveTo(xTop - gwT / 2, yTop + texH * 0.12);
+        ctx.lineTo(xTop + gwT / 2, yTop + texH * 0.12);
+        ctx.lineTo(xBot + gwB / 2, yBot - texH * 0.08);
+        ctx.lineTo(xBot - gwB / 2, yBot - texH * 0.08);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (boostN > 0.08 && tMid > 0.25) {
+        const glowA = boostN * (0.01 + tMid * 0.03);
+        ctx.fillStyle = `rgba(255,190,110,${glowA})`;
+        ctx.beginPath();
+        ctx.moveTo(cxT - hwT * 0.08, yTop);
+        ctx.lineTo(cxT + hwT * 0.08, yTop);
+        ctx.lineTo(cxB + hwB * 0.11, yBot);
+        ctx.lineTo(cxB - hwB * 0.11, yBot);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 
@@ -8951,8 +9113,9 @@ function drawRoadClassicV2() {
     for (let i = 0; i < 10; i++) {
       const tFrac = clamp(((i * 73 + crackSeed) % Math.max(1, Math.round(H - horizonYEff))) / (H - horizonYEff), 0.06, 1);
       const cy    = horizonYEff + tFrac * (H - horizonYEff);
-      const hw    = w * tFrac / 2;
-      const crackW = Math.max(6, w * tFrac * 0.065);
+      const projT = classicRoadPerspectiveT(tFrac);
+      const hw    = w * projT / 2;
+      const crackW = Math.max(6, w * projT * 0.065);
       const cx    = vpX + getClassicRoadShift(cy);
       const cx2   = cx + ((i * 37) % Math.max(1, Math.round(hw * 1.6))) - hw * 0.8;
       ctx.fillRect(cx2, cy, crackW, Math.max(1, tFrac * 3));
@@ -12117,11 +12280,14 @@ function drawPlayerGroundShadow() {
   if (!p) return;
   if (Settings.particles <= 0.05) return;
   const pw = p.w + 14;
+  const speedN = clamp((Game.speed || 0) / 520, 0, 1);
+  const boostN = clamp((Game.classicBoostT || 0) / 0.85, 0, 1);
   const slant = 5 + clamp(Math.abs(p.vx || 0) / 460, 0, 1) * 9;
   const cx = p.x + slant * 0.25;
   const cy = p.y + p.h / 2 + 7;
   ctx.save();
   ctx.translate(cx, cy);
+  ctx.save();
   if (PerfMon.quality > 0.5) {
     // Angled shadow — larger/softer radial gradient with forward slant
     const sg = ctx.createRadialGradient(slant * 0.3, 0, 0, slant * 0.3, 0, pw * 0.62);
@@ -12142,6 +12308,29 @@ function drawPlayerGroundShadow() {
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.ellipse(0, 0, pw * 0.58, (p.h + 12) * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  // Contact patches under the tyres anchor the car to the road plane once
+  // the softer body shadow is stretched out by speed.
+  ctx.globalAlpha = 0.16 + speedN * 0.10;
+  ctx.fillStyle = 'rgba(0,0,0,0.82)';
+  const contactY = 1 + speedN * 2.5;
+  const contactW = pw * (0.13 + speedN * 0.02);
+  const contactH = (p.h + 12) * 0.075;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(side * pw * 0.24, contactY, contactW, contactH, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (boostN > 0) {
+    const exhaustG = ctx.createLinearGradient(-pw * 0.32, contactY + 4, pw * 0.32, contactY + 16);
+    exhaustG.addColorStop(0, 'rgba(255,170,90,0)');
+    exhaustG.addColorStop(0.5, `rgba(255,170,90,${0.07 + boostN * 0.10})`);
+    exhaustG.addColorStop(1, 'rgba(255,170,90,0)');
+    ctx.fillStyle = exhaustG;
+    ctx.beginPath();
+    ctx.ellipse(0, contactY + 10, pw * 0.34, contactH * 2.6, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -12241,9 +12430,10 @@ function drawSpeedLines() {
   }
 
   // Classic / perspective modes — road-surface streaks clipped to the trapezoid.
-  const horizonY = H * 0.42;
+  const classicMode = Game.mode === 'classic';
+  const horizonY = H * 0.42 - (classicMode ? ((Game.classicHillSmooth || 0) * 12) : 0);
   const playerLean = clamp((Game.player.vx || 0) / 460, -1, 1);
-  const vpX = W * 0.5 - playerLean * W * 0.055;
+  const vpX = W * 0.5 - playerLean * W * 0.055 + (classicMode ? (Game.classicCurveSmooth || 0) * W * 0.10 : 0);
   const roadW = Math.min(W * (W < 600 ? 0.86 : 0.74), 720);
   const x0bot = vpX - roadW / 2;
   const x1bot = vpX + roadW / 2;
@@ -12263,13 +12453,21 @@ function drawSpeedLines() {
   for (let li = 0; li < lineCount; li++) {
     // Spread across road width, animated with speed.
     const frac = ((li / lineCount) + tOff * 0.06) % 1;
-    const bx = x0bot + frac * roadW;
-    const dx = bx - vpX, dy = H - horizonY;
+    const laneFrac = frac * 2 - 1;
+    const dy = H - horizonY;
     // Per-line depth 0..1 from horizon to bottom, animated.
     const d0 = ((li * 0.371 + tOff * 0.04) % 1) * 0.72 + 0.08;
     const d1 = Math.min(1, d0 + 0.09 + intensity * 0.14);
-    const sx = vpX + dx * d0, sy = horizonY + dy * d0;
-    const ex = vpX + dx * d1, ey = horizonY + dy * d1;
+    const sy = horizonY + dy * d0;
+    const ey = horizonY + dy * d1;
+    const p0 = classicMode ? classicRoadPerspectiveT(d0) : d0;
+    const p1 = classicMode ? classicRoadPerspectiveT(d1) : d1;
+    const c0 = vpX + (classicMode ? getClassicRoadShift(sy) : 0);
+    const c1 = vpX + (classicMode ? getClassicRoadShift(ey) : 0);
+    const hw0 = roadW * p0 * 0.5;
+    const hw1 = roadW * p1 * 0.5;
+    const sx = c0 + hw0 * laneFrac * 0.92;
+    const ex = c1 + hw1 * laneFrac * 0.92;
     // Lines near the road edges and close to the player appear brighter.
     const edgeBoost = Math.abs(frac - 0.5) * 2;
     const lineA = intensity * (0.04 + edgeBoost * 0.055) * (0.3 + d0 * 0.7);
