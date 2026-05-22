@@ -4054,6 +4054,9 @@ const SPINOUT_ROT_DECAY   = 0.18; // pow base for angular velocity exponential d
 const SPINOUT_OSC_FREQ    = 4.8;  // oscillation frequency (rad/s) of the side-to-side drift
 const SKID_SPAWN_INTERVAL = 0.033; // ~30 Hz throttle for visual skid-mark emitters
 const HITCHHIKER_DRIFT_SPEED = 5; // px/s at which hitchhikers wander toward the road center
+const ZOMBIE_ROAD_MARGIN_MIN = 18;
+const ZOMBIE_ROAD_MARGIN_WIDTH_MUL = 0.45;
+const NORMAL_STEER_SPEED_REF = 540;
 const CIVILIAN_WARNING_HITS = 1;
 const CIVILIAN_MANHUNT_HITS = 3;
 const CIVILIAN_INFAMY_HITS = 5;
@@ -6127,9 +6130,10 @@ function spawnEnemy(forceKind, forceElite) {
       else def = ZOMBIE_DEF_BY_ID.walker;
     }
     const { x0: zx0, x1: zx1 } = roadBounds();
-    // spawn zombies spread across the full width, including shoulders
-    const spread = W * 0.12;
-    const cx = rand(Math.max(def.w, zx0 - spread), Math.min(W - def.w, zx1 + spread));
+    // keep zombie spawns road-centered; only drones should feel truly off-road.
+    // Margin scales with zombie width so larger variants don't clip shoulders.
+    const zxMargin = Math.max(ZOMBIE_ROAD_MARGIN_MIN, def.w * ZOMBIE_ROAD_MARGIN_WIDTH_MUL);
+    const cx = rand(zx0 + zxMargin, zx1 - zxMargin);
     const count = waveDiff > 2.5 ? irand(2,4) : waveDiff > 1.5 ? irand(1,3) : 1;
     for (let z = 0; z < count; z++) {
       const zx = clamp(cx + (z - (count-1)/2) * (def.w + 8) + rand(-8,8), def.w, W - def.w);
@@ -6217,11 +6221,8 @@ function spawnEnemy(forceKind, forceElite) {
       }, forceElite || !!(Game.activeEvent && Game.activeEvent.id === 'ambush')));
     }
   } else if (pick === 'mortar') {
-    // stationary roadside emplacement that arcs shells
-    const side = Math.random() < 0.5 ? 'L' : 'R';
-    const x = side === 'L'
-      ? rand(8, Math.max(12, x0 - 12))
-      : rand(x1 + 12, W - 12);
+    // stationary lane emplacement that arcs shells
+    const x = rand(x0 + margin + 14, x1 - margin - 14);
     Game.enemies.push(maybeEliteEnemy({
       kind:'mortar', x, y: -40, w: 30, h: 30,
       vx: 0, vy: 0, hp: 3, fireT: rand(1.4, 2.4),
@@ -7367,13 +7368,23 @@ function update(dt) {
     updateClassicHandling(dt, p, stats);
   } else {
     // ---- normal steering ----
+    // Speed-sensitive lane handling: higher speed trims steering authority and
+    // increases self-centering drag so lateral motion feels weighted, not twitchy.
+    const NORMAL_STEER_MAX_GRIP_REDUCTION = 0.26;
+    const NORMAL_STEER_BASE_DRAG = 5.8;
+    const NORMAL_STEER_SPEED_DRAG = 3.2;
+    // Touch steering blends toward target lateral velocity a bit slower than
+    // keyboard steer to preserve an analog "car drift" feel on swipes.
+    const NORMAL_TOUCH_VX_BLEND = 12;
     const accel = stats.accel;
     const maxV = stats.maxV;
-    const drag = 6.5;
+    const speedFrac = clamp((Game.speed || 0) / NORMAL_STEER_SPEED_REF, 0, 1);
+    const steerGrip = 1 - speedFrac * NORMAL_STEER_MAX_GRIP_REDUCTION;
+    const drag = NORMAL_STEER_BASE_DRAG + speedFrac * NORMAL_STEER_SPEED_DRAG;
     const keyAxis = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     if (keyAxis !== 0) {
       p.steerSmooth = expEase(p.steerSmooth || 0, keyAxis, 20, dt);
-      p.vx += p.steerSmooth * accel * dt;
+      p.vx += p.steerSmooth * accel * steerGrip * dt;
     } else {
       if (input.touchTargetX !== null) {
         const target = clamp(input.touchTargetX, 0, W);
@@ -7382,8 +7393,8 @@ function update(dt) {
         if (Math.abs(dx) > 16) {
           const steerTarget = clamp((dx * 14) / maxV, -1, 1);
           p.steerSmooth = expEase(p.steerSmooth || 0, steerTarget, 18, dt);
-          const desiredV = p.steerSmooth * maxV;
-          p.vx += (desiredV - p.vx) * Math.min(1, 18 * dt);
+          const desiredV = p.steerSmooth * maxV * steerGrip;
+          p.vx += (desiredV - p.vx) * Math.min(1, NORMAL_TOUCH_VX_BLEND * dt);
         } else {
           p.steerSmooth = expEase(p.steerSmooth || 0, 0, 18, dt);
           p.vx -= p.vx * Math.min(1, drag * dt);
@@ -7601,7 +7612,7 @@ function update(dt) {
       e.x = e.baseX + Math.sin(e.wave) * e.waveAmp;
       e.y += (e.vy + Game.speed * 0.18) * dt;
     } else if (e.kind === 'mortar') {
-      // stationary roadside; scrolls with road
+      // stationary lane emplacement; scrolls with road
       e.y += Game.speed * dt;
     } else if (e.kind === 'zombie') {
       // Zombies shuffle or lunge toward the player and wobble side-to-side
@@ -7623,8 +7634,10 @@ function update(dt) {
         clearEnemyShotsFrom(e);
         continue;
       }
-      // zombies can wander slightly off-road
-      e.x = clamp(e.x, e.w, W - e.w);
+      // zombies stay within the road corridor
+      const { x0:zx0, x1:zx1 } = roadBounds();
+      const zombieRoadMargin = Math.max(ZOMBIE_ROAD_MARGIN_MIN, e.w * ZOMBIE_ROAD_MARGIN_WIDTH_MUL);
+      e.x = clamp(e.x, zx0 + zombieRoadMargin, zx1 - zombieRoadMargin);
     } else if (e.kind === 'drone') {
       // fast diagonal flier — bounces off road edges
       e.y += (e.vy + Game.speed * 0.12) * dt;
@@ -7636,8 +7649,8 @@ function update(dt) {
       e.y += (e.vy + Game.speed * 0.15) * dt;
       e.x += e.vx * dt;
     }
-    // road clamp (skipped for mortar off-road; drone/zombie use own movement logic)
-    if (e.kind !== 'mortar' && e.kind !== 'drone' && e.kind !== 'zombie') {
+    // road clamp (drone/zombie use their own movement logic)
+    if (e.kind !== 'drone' && e.kind !== 'zombie') {
       const { x0:rx0, x1:rx1 } = roadBounds();
       if (e.x < rx0 + 24) { e.x = rx0 + 24; if (e.vx) e.vx = Math.abs(e.vx); }
       if (e.x > rx1 - 24) { e.x = rx1 - 24; if (e.vx) e.vx = -Math.abs(e.vx); }
