@@ -5417,6 +5417,7 @@ function startRun(mode, level) {
   Game.classicBoostT = 0;            // remaining drift-boost burst time
   Game.classicLean = 0;              // smoothed lean (-1..1) for camera/VP cues
   Game.classicSurfaceGrip = 1;       // 1 = tarmac, <1 = dirt edge
+  Game.classicTractionN = 1;         // smoothed tire grip (1 = planted, 0 = heavy slip)
   Game.classicDirtDustT = 0;         // throttle for edge dust emit
   // Per-run cooldowns mirror the Game defaults but must reset between runs.
   Game.classicSkidSpawnT = 0;
@@ -7000,6 +7001,24 @@ const SUSP_ROLL_LERP = 0.18;    // body roll interpolation speed
 const SUSP_ROLL_MAX = 5.5;      // max roll degrees
 const SUSP_TURN_THRESHOLD = 0.08;
 const SUSP_TURN_VX_SCALE = 320;
+const SUSP_TRACTION_LOSS_FACTOR = 3.2;
+const CLASSIC_TRACTION_LERP = 0.2;
+const CLASSIC_TRACTION_MIN_SLIP_DENOM = 120;
+const CLASSIC_TRACTION_SPEED_GRIP_DROP = 0.12;
+const CLASSIC_TRACTION_SLIP_THRESHOLD = 0.32;
+const CLASSIC_TRACTION_SLIP_PENALTY = 0.82;
+const CLASSIC_TRACTION_MIN = 0.28;
+const CLASSIC_GRIP_TRACTION_BASE = 0.82;
+const CLASSIC_GRIP_TRACTION_RANGE = 0.28;
+const CLASSIC_STEER_TRACTION_BASE = 0.88;
+const CLASSIC_STEER_TRACTION_RANGE = 0.22;
+const CLASSIC_LATERAL_TRACTION_BASE = 0.9;
+const CLASSIC_LATERAL_TRACTION_RANGE = 0.1;
+const VEHICLE_TRACTION_VX_NORM = 460;
+const VEHICLE_TRACTION_TILT_FACTOR = 0.10;
+const VEHICLE_TRACTION_Y_OFFSET = 0.9;
+const VEHICLE_SLIP_FORCE_AMPLIFIER = 1.35;
+const SHADOW_TRACTION_INTENSITY = 0.07;
 
 function updateCarSuspension(deltaTime, speed = Game.speed || 0, isTurning = null, isBoosting = null, isDrifting = null, hitBump = null) {
   // Cap the Euler integration step so low-FPS spikes do not destabilize the spring.
@@ -7019,6 +7038,7 @@ function updateCarSuspension(deltaTime, speed = Game.speed || 0, isTurning = nul
   if (isBoosting) target += 9;
   if (isDrifting) target += 5;
   if (hitBump) target += 7;
+  target += (1 - clamp(Game.classicTractionN || 1, 0, 1)) * SUSP_TRACTION_LOSS_FACTOR;
 
   // Damage sag: heavy damage makes the chassis sag slightly
   const dmgR = 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1);
@@ -7126,6 +7146,10 @@ function updateClassicHandling(dt, p, stats) {
     surfGrip = 0.55 + 0.45 * Math.max(0, minInset / dirtZone);
   }
   Game.classicSurfaceGrip = surfGrip;
+  const baseVCap = maxV * (Game.classicDrifting ? 1.25 : 1.0);
+  const slipN = clamp(Math.abs(p.vx || 0) / Math.max(CLASSIC_TRACTION_MIN_SLIP_DENOM, baseVCap), 0, 1.25);
+  const tractionTarget = clamp((surfGrip * (1 - speedFrac * CLASSIC_TRACTION_SPEED_GRIP_DROP)) - Math.max(0, slipN - CLASSIC_TRACTION_SLIP_THRESHOLD) * CLASSIC_TRACTION_SLIP_PENALTY, CLASSIC_TRACTION_MIN, 1);
+  Game.classicTractionN = (Game.classicTractionN || 1) * (1 - CLASSIC_TRACTION_LERP) + tractionTarget * CLASSIC_TRACTION_LERP;
 
   // -- drift state machine --
   // Enter drift when player holds hard steer at speed for >0.18s, or when
@@ -7183,7 +7207,7 @@ function updateClassicHandling(dt, p, stats) {
   // Surface dirt cuts a further bit.
   const baseGrip = 7.5 * (1 - speedFrac * 0.42);
   const driftGripMul = Game.classicDrifting ? 0.32 : 1.0;
-  const grip = Math.max(0.8, baseGrip * driftGripMul * surfGrip);
+  const grip = Math.max(0.8, baseGrip * driftGripMul * surfGrip * (CLASSIC_GRIP_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_GRIP_TRACTION_RANGE));
   const driftAccelMul = Game.classicDrifting ? 1.55 : 1.0;
   // brake (input.down): real speed cut, not just visual.
   if (input.down) {
@@ -7191,7 +7215,7 @@ function updateClassicHandling(dt, p, stats) {
     Game.speed = Math.max(160, (Game.speed || 0) - 320 * dt);
   }
   // Lateral force from steering input + drift amplification
-  p.vx += p.steerSmooth * accel * driftAccelMul * dt;
+  p.vx += p.steerSmooth * accel * driftAccelMul * (CLASSIC_STEER_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_STEER_TRACTION_RANGE) * dt;
   // Grip pulls vx toward 0 (per-second exponential)
   p.vx -= p.vx * Math.min(1, grip * dt);
   // Clamp; allow ~25% overshoot when drifting (the "loose" feel)
@@ -7201,7 +7225,7 @@ function updateClassicHandling(dt, p, stats) {
   // Scaled by speed so it only bites at pace; multiplied by surface grip
   // (less push on dirt) and softened during drift (you're sliding anyway).
   const corneringMul = Game.classicDrifting ? 0.55 : 1.0;
-  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.55 * corneringMul * surfGrip;
+  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.55 * corneringMul * surfGrip * (CLASSIC_LATERAL_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_LATERAL_TRACTION_RANGE);
   p.vx -= lateralPush * dt;
   p.x  += p.vx * dt;
 
@@ -10235,6 +10259,7 @@ const BRAKE_IDLE_BOOST = 0.4;
 const BRAKE_IDLE_SPEED_THRESHOLD = 0.16;
 const BRAKE_PULSE_AMPLITUDE = 0.2;
 const BRAKE_PULSE_RATE = 8;
+const BRAKE_SLIP_INTENSITY = 0.22;
 const MUZZLE_RECOIL_WINDOW = 0.08;
 // Enemy fire timing windows in seconds for visual recoil and flash reads.
 const ENEMY_FIRE_RECOIL_WINDOW = 0.26;
@@ -10615,10 +10640,12 @@ function drawVehicleLightsAndFx(w, h, c, detail, speedN, t, opts, visual, upgrad
   }
 
   const brakeForce = clamp(Math.abs(opts.brakeForce || 0), 0, 1);
+  const slipForce = clamp(Math.abs(opts.slipForce || 0), 0, 1);
   const brakeA = BRAKE_BASE_ALPHA
     + BRAKE_IDLE_BOOST * (speedN < BRAKE_IDLE_SPEED_THRESHOLD ? 1 : 0)
     + BRAKE_PULSE_AMPLITUDE * Math.max(0, Math.sin(t * BRAKE_PULSE_RATE))
-    + brakeForce * 0.4;
+    + brakeForce * 0.4
+    + slipForce * BRAKE_SLIP_INTENSITY;
   ctx.fillStyle = `rgba(255,70,60,${clamp(brakeA + damageR * 0.2, 0, 0.95)})`;
   pathRoundRect(-w * 0.29, h * 0.43, w * 0.14, h * 0.04, 2);
   ctx.fill();
@@ -10769,6 +10796,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   // fall back to sinusoidal bob for enemies/previews.
   const isPlayerVehicle = (vehicle === Game.vehicle && !opts.ghost && !opts.isEnemy
     && Game.player && Game.state === 'playing');
+  const tractionN = isPlayerVehicle ? clamp(opts.tractionN !== undefined ? opts.tractionN : (Game.classicTractionN || 1), 0, 1) : 1;
   const suspensionBob = isPlayerVehicle
     ? (Game.suspOffset || 0) * 0.55              // spring compression → visual downward shift
     : Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
@@ -10777,7 +10805,8 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const lean = clamp(vx / 460, -1, 1) * (0.16 + speedN * 0.16) + idleRock;
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
-  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + (opts.extraTilt || 0)) + hitPunch * 0.08;
+  const tractionSlipTilt = isPlayerVehicle ? (1 - tractionN) * clamp(vx / VEHICLE_TRACTION_VX_NORM, -1, 1) * VEHICLE_TRACTION_TILT_FACTOR : 0;
+  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + tractionSlipTilt + (opts.extraTilt || 0)) + hitPunch * 0.08;
   const wheelSpin = t * (5.5 + speedN * 30);
   const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
   const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
@@ -10785,7 +10814,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
     : 1;
 
   ctx.save();
-  ctx.translate(x, y + suspensionBob - spawnN * 6);
+  ctx.translate(x, y + suspensionBob + (1 - tractionN) * VEHICLE_TRACTION_Y_OFFSET - spawnN * 6);
 
   // === Phase 2 — 2.5D presentation ===
   // When the caller is rendering the chassis as part of a top-down camera
@@ -12620,6 +12649,7 @@ function drawPlayerGroundShadow() {
   // squats), the shadow sits tighter/wider; when the spring extends (car
   // lifts), the shadow shrinks and gains a slight gap.
   const suspComp = clamp((Game.suspOffset || 0) / SUSP_MAX, 0, 1);
+  const tractionSlip = 1 - clamp(Game.classicTractionN || 1, 0, 1);
   const suspShadowScale = 1 + suspComp * 0.12;       // wider when squatting
   const suspShadowGap = (1 - suspComp) * 2;           // small gap when lifted
   const cx = p.x + slant * 0.25;
@@ -12656,7 +12686,7 @@ function drawPlayerGroundShadow() {
   }
   // Contact patches under the tyres anchor the car to the road plane once
   // the softer body shadow is stretched out by speed.
-  ctx.globalAlpha = 0.16 + speedN * 0.10;
+  ctx.globalAlpha = 0.16 + speedN * 0.10 + tractionSlip * SHADOW_TRACTION_INTENSITY;
   ctx.fillStyle = 'rgba(0,0,0,0.82)';
   const contactY = 1 + speedN * 2.5;
   const contactW = pw * (0.13 + speedN * 0.02);
@@ -13981,6 +14011,8 @@ function render() {
             nitro: isPowerupActive('nitro'),
             extraTilt: isChargeActive ? -0.06 : 0,
             brakeForce: clamp((Game.targetSpeed - Game.speed) / 220, -1, 1),
+            slipForce: clamp((1 - (Game.classicTractionN || 1)) * VEHICLE_SLIP_FORCE_AMPLIFIER, 0, 1),
+            tractionN: Game.classicTractionN || 1,
             damageRatio: 1 - clamp((Game.health || 0) / Math.max(1, Game.maxHealth || 1), 0, 1),
             ghost: false,
             cloak: isCloakActive,
