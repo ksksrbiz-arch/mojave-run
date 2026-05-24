@@ -3650,11 +3650,21 @@ const SFX = {
   chainsaw: () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.32, 0.14, 600, t, audioSfxGain, 'lowpass', 0.6); tone(88, 0.3, 'sawtooth', 0.07, 30, t, audioSfxGain); tone(175, 0.2, 'sawtooth', 0.04, 20, t + 0.04, audioSfxGain); },
   // Rising adrenaline sweep for the adrenaline powerup
   adrenaline: () => { const t = audioCtx ? audioCtx.currentTime : 0; [320, 480, 720, 1080, 1520].forEach((f, i) => tone(f, 0.09, 'square', 0.052, 40, t + i * 0.04)); filteredNoise(0.22, 0.06, 2800, t + 0.1, audioSfxGain, 'highpass', 0.9); },
-  // Sharp metallic snap for critical hits — short hi-shimmer + impact crackle
-  crit:   () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(2200, 0.05, 'square', 0.06, -1600, t); tone(1480, 0.07, 'triangle', 0.04, -900, t + 0.01); filteredNoise(0.08, 0.12, 4200, t, audioSfxGain, 'bandpass', 1.8); },
+  // Phase 4B: critical hits intentionally have no dedicated SFX (silent no-op)
+  // — the visual shockwave + sparks carry the moment, and adding another
+  // layer over the standard hit/explode stack just causes audio clutter.
+  crit:   () => {},
   // Heavy chassis thud + brief debris rattle when a destroyed enemy leaves
   // a wreck on the road; pairs with multi-stage destruction visuals.
   wreckThud: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(58, 0.36, 'sawtooth', 0.085, -28, t); filteredNoise(0.28, 0.14, 380, t + 0.02, audioSfxGain, 'lowpass', 0.5); tone(110, 0.18, 'triangle', 0.05, -16, t + 0.06); filteredNoise(0.18, 0.07, 1800, t + 0.08, audioSfxGain, 'bandpass', 0.7); },
+  // Phase 4B: Short, dry metallic clatter for debris bouncing on the road.
+  // Two tight band-pass noise bursts plus a high triangle ping. Kept very
+  // short (<0.15s total) so multiple debris hits per frame still feel light.
+  debrisClatter: () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.06, 0.04, 2600, t, audioSfxGain, 'bandpass', 1.4); filteredNoise(0.07, 0.05, 1800, t + 0.04, audioSfxGain, 'bandpass', 1.1); tone(1620, 0.05, 'triangle', 0.022, 80, t + 0.02, audioSfxGain); },
+  // Phase 2A: Tire squeal for hard drifts / low-grip surfaces.
+  // High-pitched, modulated noise with a falling pitch tail. Volume
+  // arg (0..1) lets the caller scale by slip magnitude.
+  tireSqueal: (vol) => { const v = clamp(vol == null ? 1 : vol, 0, 1); if (v <= 0.04) return; const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.18 + 0.1 * v, 0.045 * v, 3400, t, audioSfxGain, 'bandpass', 1.7); tone(1320, 0.18, 'sawtooth', 0.018 * v, -360, t, audioSfxGain); tone(880, 0.12, 'triangle', 0.012 * v, -180, t + 0.04, audioSfxGain); },
 };
 
 // ============================================================
@@ -4429,6 +4439,15 @@ function emitDebrisFor(x, y, scale, kind = null) {
         shape: 'spark',
         color: 'rgba(255,170,80,0.95)',
       });
+    }
+  }
+  // Phase 4B audio: a short metallic clatter accompanies the debris burst.
+  // Throttled so a chain explosion doesn't stack the sound on itself.
+  if (SFX && SFX.debrisClatter) {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (!Game._lastDebrisClatterT || now - Game._lastDebrisClatterT > 70) {
+      Game._lastDebrisClatterT = now;
+      SFX.debrisClatter();
     }
   }
 }
@@ -6387,11 +6406,15 @@ function maybeEliteEnemy(enemy, forceElite) {
     : Game.mode === 'classic'
       ? Math.min(0.22, 0.05 + Game.distance / 22000)
       : 0.12;
-  if (!forceElite && Math.random() >= chance) return enemy;
+  if (!forceElite && Math.random() >= chance) {
+    if (enemy && enemy.hpMax == null) enemy.hpMax = enemy.hp;
+    return enemy;
+  }
   enemy.elite = true;
   enemy.hp = Math.ceil(enemy.hp * 2);
   enemy.fireT *= 0.7;
   enemy.vy *= 1.08;
+  enemy.hpMax = enemy.hp;
   return enemy;
 }
 
@@ -6438,6 +6461,7 @@ function spawnEnemy(forceKind, forceElite) {
         vx: rand(-def.vxRange, def.vxRange),
         vy: def.vy * (0.85 + Math.random() * 0.3) * Math.min(1.6, waveDiff),
         hp: def.hp, fireT: 999, // zombies never shoot
+        hpMax: def.hp,
         contact: def.contact,
         zombieScore: def.score * (waveDiff > 2 ? 1.4 : 1),
         color: def.color, goreColor: def.goreColor, accent: def.accent,
@@ -7349,6 +7373,20 @@ function updateClassicHandling(dt, p, stats) {
   const tractionTarget = clamp((surfGrip * (1 - speedFrac * CLASSIC_TRACTION_SPEED_GRIP_DROP)) - Math.max(0, slipN - CLASSIC_TRACTION_SLIP_THRESHOLD) * CLASSIC_TRACTION_SLIP_PENALTY, CLASSIC_TRACTION_MIN, 1);
   Game.classicTractionN = (Game.classicTractionN || 1) * (1 - CLASSIC_TRACTION_LERP) + tractionTarget * CLASSIC_TRACTION_LERP;
 
+  // Phase 2A: Tire squeal SFX modulated by traction loss. Fires periodically
+  // (every 0.18s) while grip is low enough to slide. Volume scales with the
+  // amount of slip. Skipped under reduced motion to keep audio quiet.
+  if (SFX && SFX.tireSqueal && !(Settings && Settings.reducedMotion)) {
+    const slipAmt = 1 - clamp(Game.classicTractionN || 1, 0, 1);
+    const fastEnough = speedFrac > 0.42;
+    Game._tireSquealCd = (Game._tireSquealCd || 0) - dt;
+    if (fastEnough && slipAmt > 0.22 && Game._tireSquealCd <= 0) {
+      // Re-fire faster when slip is heavier so the squeal feels continuous.
+      Game._tireSquealCd = 0.22 - 0.1 * slipAmt;
+      SFX.tireSqueal(slipAmt);
+    }
+  }
+
   // -- drift state machine --
   // Enter drift when player holds hard steer at speed for >0.18s, or when
   // |vx| already exceeds 0.7*maxV (carried slide).
@@ -8056,6 +8094,47 @@ function update(dt) {
     if (e.spawnAnimT > 0) e.spawnAnimT = Math.max(0, e.spawnAnimT - dt);
     if (e.hitAnimT > 0) e.hitAnimT = Math.max(0, e.hitAnimT - dt);
     if (e.storyAnimT > 0) e.storyAnimT = Math.max(0, e.storyAnimT - dt);
+    // Phase 2B: Damage telegraph — wounded enemies (≤35% HP) trail dark
+    // smoke; ≤15% HP also pops the occasional ember. Cosmetic only; gated
+    // by quality, skipped for zombies (they have their own gore system)
+    // and tiny low-HP enemies where it would dominate the sprite.
+    if (e.kind !== 'zombie' && e.hpMax && e.hp > 0 && e.hp < e.hpMax * 0.35
+        && PerfMon && PerfMon.quality > 0.35
+        && !(Settings && Settings.reducedMotion)) {
+      e._smokeT = (e._smokeT || 0) - dt;
+      if (e._smokeT <= 0) {
+        const hpFrac = e.hp / e.hpMax;
+        // Closer to dying → faster, darker puffs.
+        e._smokeT = 0.05 + 0.18 * hpFrac;
+        const dark = hpFrac < 0.18 ? 'rgba(28,24,22,0.7)' : 'rgba(60,55,50,0.55)';
+        Game.particles.push({
+          x: e.x + (Math.random() - 0.5) * (e.w * 0.4),
+          y: e.y - e.h * 0.3,
+          vx: (Math.random() - 0.5) * 28,
+          vy: -18 - Math.random() * 22,
+          gravity: -8,
+          life: 0.55 + Math.random() * 0.35,
+          max: 0.95,
+          size: 6 + Math.random() * 4,
+          shape: 'smoke',
+          color: dark,
+        });
+        if (hpFrac < 0.15 && Math.random() < 0.4) {
+          Game.particles.push({
+            x: e.x + (Math.random() - 0.5) * (e.w * 0.3),
+            y: e.y - e.h * 0.2,
+            vx: (Math.random() - 0.5) * 80,
+            vy: -40 - Math.random() * 40,
+            gravity: 220,
+            life: 0.35 + Math.random() * 0.3,
+            max: 0.65,
+            size: 2,
+            shape: 'spark',
+            color: 'rgba(255,160,70,0.9)',
+          });
+        }
+      }
+    }
     // movement per kind
     if (e.kind === 'bike') {
       e.wave += e.waveSpeed * dt;
