@@ -8106,7 +8106,7 @@ function update(dt) {
         const hpFrac = e.hp / e.hpMax;
         // Closer to dying → faster, darker puffs.
         e._smokeT = 0.05 + 0.18 * hpFrac;
-        const dark = hpFrac < 0.18 ? 'rgba(28,24,22,0.7)' : 'rgba(60,55,50,0.55)';
+        const dark = hpFrac < 0.15 ? 'rgba(28,24,22,0.7)' : 'rgba(60,55,50,0.55)';
         Game.particles.push({
           x: e.x + (Math.random() - 0.5) * (e.w * 0.4),
           y: e.y - e.h * 0.3,
