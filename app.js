@@ -4187,36 +4187,37 @@ function comboMult() {
   for (let i = 0; i < COMBO_THRESHOLDS.length; i++) {
     if (c >= COMBO_THRESHOLDS[i]) m = COMBO_MULTS[i];
   }
-
-  function requestHitStop(seconds) {
-    if (Game.mode === 'arena') return;
-    if (Game.state !== 'playing') return;
-    if (!seconds || seconds <= 0) return;
-    Game.hitStopT = Math.max(Game.hitStopT || 0, seconds);
-  }
-
-  function maybeSpawnCombatWreck(e) {
-    if (!e || e.kind === 'zombie') return;
-    if (Math.random() >= COMBAT_WRECK_SPAWN_CHANCE) return;
-    let wreckCount = 0;
-    for (let i = 0; i < Game.obstacles.length; i++) {
-      if (Game.obstacles[i] && Game.obstacles[i].combatWreck) wreckCount++;
-    }
-    if (wreckCount >= COMBAT_WRECK_MAX) return;
-    Game.obstacles.push({
-      kind: 'wreck',
-      combatWreck: true,
-      x: clamp(e.x + rand(-8, 8), 26, W - 26),
-      y: e.y + rand(-6, 6),
-      w: clamp((e.w || 36) + rand(-6, 8), 24, 52),
-      h: clamp((e.h || 50) + rand(-8, 10), 28, 72),
-      rot: rand(-0.42, 0.42),
-      vy: rand(8, 26),
-      ttl: rand(4.2, 7.5),
-      emberT: rand(0.05, 0.2),
-    });
-  }
   return m;
+}
+
+function requestHitStop(seconds) {
+  if (Game.mode === 'arena') return;
+  if (Game.state !== 'playing') return;
+  if (!seconds || seconds <= 0) return;
+  Game.hitStopT = Math.max(Game.hitStopT || 0, seconds);
+}
+
+function maybeSpawnCombatWreck(e) {
+  if (!e || e.kind === 'zombie') return;
+  if (!(W > 0)) return;
+  if (Math.random() >= COMBAT_WRECK_SPAWN_CHANCE) return;
+  let wreckCount = 0;
+  for (let i = 0; i < Game.obstacles.length; i++) {
+    if (Game.obstacles[i] && Game.obstacles[i].combatWreck) wreckCount++;
+  }
+  if (wreckCount >= COMBAT_WRECK_MAX) return;
+  Game.obstacles.push({
+    kind: 'wreck',
+    combatWreck: true,
+    x: clamp(e.x + rand(-8, 8), 26, W - 26),
+    y: e.y + rand(-6, 6),
+    w: clamp((e.w || 36) + rand(-6, 8), 24, 52),
+    h: clamp((e.h || 50) + rand(-8, 10), 28, 72),
+    rot: rand(-0.42, 0.42),
+    vy: rand(8, 26),
+    ttl: rand(4.2, 7.5),
+    emberT: rand(0.05, 0.2),
+  });
 }
 
 function applyKill(x, y, baseScore) {
@@ -12356,6 +12357,13 @@ function drawPickup(pk) {
 
 function drawBullets() {
   const glowOn = (PerfMon.quality > 0.25) && (Settings.particles > 0.4);
+  const withAlpha = (input, alpha) => {
+    const m = typeof input === 'string' ? input.match(/^rgba?\(([^)]+)\)$/i) : null;
+    if (!m) return input;
+    const parts = m[1].split(',').map(s => s.trim());
+    if (parts.length < 3) return input;
+    return `rgba(${parts[0]},${parts[1]},${parts[2]},${alpha})`;
+  };
   const drawTracer = (b, color, width, alphaMul = 1) => {
     if (!b || b.px === undefined || b.py === undefined) return;
     const dx = b.x - b.px, dy = b.y - b.py;
@@ -12364,7 +12372,7 @@ function drawBullets() {
     const tx = b.x - dx * 0.85;
     const ty = b.y - dy * 0.85;
     const g = ctx.createLinearGradient(b.x, b.y, tx, ty);
-    const headColor = color.replace(/[\d.]+\)\s*$/, `${(0.95 * alphaMul).toFixed(2)})`);
+    const headColor = withAlpha(color, (0.95 * alphaMul).toFixed(2));
     g.addColorStop(0, headColor);
     g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.strokeStyle = g;
@@ -12476,7 +12484,11 @@ function drawBullets() {
   }
 
   for (const b of Game.enemyBullets) {
-    if (!b.mortar) drawTracer(b, b.big ? 'rgba(255,110,110,0.85)' : 'rgba(255,80,65,0.85)', b.big ? 2.4 : 1.7, 0.85);
+    if (!b.mortar) {
+      const enemyTracerColor = b.big ? 'rgba(255,110,110,0.85)' : 'rgba(255,80,65,0.85)';
+      const enemyTracerWidth = b.big ? 2.4 : 1.7;
+      drawTracer(b, enemyTracerColor, enemyTracerWidth, 0.85);
+    }
     if (b.mortar) {
       // Mortar shell — 3D-looking sphere with top-left shading
       if (b.telegraph) {
@@ -18969,6 +18981,8 @@ const Cinematic = (function () {
     leadY: 0, leadYTarget: 0,
     lastPx: 0, lastT: 0,
   };
+  const CAM_EPS_ROT_ZOOM = 0.0008;
+  const CAM_EPS_LEAD = 0.01;
 
   function isOn() {
     // Hard gate: feature flag off OR very low quality kills cinematic FX so
@@ -19044,8 +19058,8 @@ const Cinematic = (function () {
     cam.leadYTarget = -(4 + sp * 22) * k;
     cam.leadX += (cam.leadXTarget - cam.leadX) * 0.11;
     cam.leadY += (cam.leadYTarget - cam.leadY) * 0.08;
-    if (Math.abs(cam.rot) < 0.0008 && Math.abs(cam.zoom - 1) < 0.0008
-      && Math.abs(cam.leadX) < 0.01 && Math.abs(cam.leadY) < 0.01) return;
+    if (Math.abs(cam.rot) < CAM_EPS_ROT_ZOOM && Math.abs(cam.zoom - 1) < CAM_EPS_ROT_ZOOM
+      && Math.abs(cam.leadX) < CAM_EPS_LEAD && Math.abs(cam.leadY) < CAM_EPS_LEAD) return;
     // Pivot near the player so tilt feels anchored to the car.
     const px = ((Game.player && Game.player.x) || W * 0.5) + cam.leadX;
     const py = ((Game.player && Game.player.y) || H * 0.78) + cam.leadY;
