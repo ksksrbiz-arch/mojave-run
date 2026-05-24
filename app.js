@@ -5236,6 +5236,9 @@ const Game = {
   health: 100,
   maxHealth: 100,
   fireCooldown: 0,
+  lockTarget: null,
+  lockT: 0,
+  lockStrength: 0,
   spawnTimer: 0,
   pickupTimer: 0,
   shake: 0,
@@ -5661,6 +5664,9 @@ function startRun(mode, level) {
   Game.maxHealth = Math.round(stats.maxHp);
   Game.health = Game.maxHealth;
   Game.fireCooldown = 0;
+  Game.lockTarget = null;
+  Game.lockT = 0;
+  Game.lockStrength = 0;
   Game.spawnTimer = 0.6;
   Game.pickupTimer = 3;
   if (Game.customConfig) {
@@ -7927,6 +7933,7 @@ function update(dt) {
   // ---- fire ----
   Game.fireCooldown -= dt;
   const wantsFire = input.fire || Settings.autoFire;
+  updateTargetLock(dt, wantsFire);
   if (!Game.spinout && wantsFire && Game.fireCooldown <= 0) {
     fireGuns();
     // Light haptic on manual touch fire (not spammed on autoFire)
@@ -8600,6 +8607,91 @@ function update(dt) {
   checkObjective();
 }
 
+const LOCK_ON_ACQUIRE_T = 0.55;
+const LOCK_ON_BASE_CONE_X = 150;
+const LOCK_ON_RANGE_Y = 620;
+const LOCK_ON_AIM_ASSIST = 0.42;
+
+function lockTargetAlive(t) {
+  if (!t) return false;
+  if (t === Game.boss) return !!Game.boss && Game.boss.hp > 0;
+  return Game.enemies.indexOf(t) !== -1 && t.hp > 0;
+}
+
+function lockTargetScore(t, p) {
+  if (!t || !p) return Infinity;
+  const dy = p.y - t.y;
+  if (dy < -20 || dy > LOCK_ON_RANGE_Y) return Infinity;
+  const dx = Math.abs((t.x || 0) - p.x);
+  const cone = LOCK_ON_BASE_CONE_X + dy * 0.18;
+  if (dx > cone) return Infinity;
+  const bossBias = t === Game.boss ? -140 : 0;
+  const eliteBias = t.elite ? -35 : 0;
+  return dx * 1.55 + dy * 0.32 + bossBias + eliteBias;
+}
+
+function findLockTarget() {
+  const p = Game.player;
+  let best = null, bestScore = Infinity;
+  for (const e of Game.enemies) {
+    const s = lockTargetScore(e, p);
+    if (s < bestScore) { best = e; bestScore = s; }
+  }
+  if (Game.boss) {
+    const s = lockTargetScore(Game.boss, p);
+    if (s < bestScore) best = Game.boss;
+  }
+  return best;
+}
+
+function updateTargetLock(dt, wantsFire) {
+  if (!wantsFire || Game.spinout || !Game.player) {
+    Game.lockT = Math.max(0, (Game.lockT || 0) - dt * 2.5);
+    Game.lockStrength = clamp((Game.lockT || 0) / LOCK_ON_ACQUIRE_T, 0, 1);
+    if (Game.lockT <= 0) Game.lockTarget = null;
+    return;
+  }
+  let target = lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+  if (!target || lockTargetScore(target, Game.player) === Infinity) {
+    target = findLockTarget();
+    if (target !== Game.lockTarget) Game.lockT = Math.min(Game.lockT || 0, 0.12);
+    Game.lockTarget = target;
+  }
+  if (!target) {
+    Game.lockT = 0;
+    Game.lockStrength = 0;
+    return;
+  }
+  Game.lockT = Math.min(LOCK_ON_ACQUIRE_T, (Game.lockT || 0) + dt);
+  Game.lockStrength = clamp(Game.lockT / LOCK_ON_ACQUIRE_T, 0, 1);
+}
+
+function getSustainedLockTarget() {
+  return Game.lockStrength >= 1 && lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+}
+
+function applyLockAimToShot(shot, target) {
+  if (!target || !shot || shot.homing) return shot;
+  const spd = Math.hypot(shot.vx || 0, shot.vy || 0);
+  if (!spd) return shot;
+  const leadT = clamp((shot.y - target.y) / Math.max(220, spd), 0, 0.35);
+  const tx = target.x + (target.vx || 0) * leadT;
+  const ty = target.y + (target.vy || 0) * leadT * 0.3;
+  const dx = tx - shot.x, dy = ty - shot.y;
+  if (dy > 40) return shot;
+  const desired = Math.atan2(dy, dx);
+  const current = Math.atan2(shot.vy || 0, shot.vx || 0);
+  let dA = desired - current;
+  while (dA >  Math.PI) dA -= 2 * Math.PI;
+  while (dA < -Math.PI) dA += 2 * Math.PI;
+  const maxNudge = 0.55 * LOCK_ON_AIM_ASSIST;
+  const next = current + clamp(dA, -maxNudge, maxNudge);
+  shot.vx = Math.cos(next) * spd;
+  shot.vy = Math.sin(next) * spd;
+  shot.locked = true;
+  return shot;
+}
+
 function fireGuns() {
   const p = Game.player;
   const stats = Game.vehicleStats;
@@ -8611,6 +8703,8 @@ function fireGuns() {
   const makeShot = extra => {
     const crit = Math.random() < critChance;
     const mul = crit ? critMul : 1;
+    const lockTarget = getSustainedLockTarget();
+    const aimed = applyLockAimToShot(Object.assign({}, extra), lockTarget);
     return Object.assign({
       owner:'p',
       dmg: stats.dmg * overdriveMul * mul,
@@ -8621,7 +8715,8 @@ function fireGuns() {
       chain: Game.weaponSpecState && Game.weaponSpecState.bulletChain,
       chainDamageMul: Game.weaponSpecState && Game.weaponSpecState.chainDamageMul,
       hitIds: [],
-    }, extra);
+      lockTarget,
+    }, aimed);
   };
   const bigShot = v.base.bigShot;
   const muzzleColor = v.color.glow;
@@ -11626,6 +11721,42 @@ function drawEnemyThreatHalos() {
   ctx.restore();
 }
 
+function drawTargetLockReticle() {
+  const target = lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+  const n = clamp(Game.lockStrength || 0, 0, 1);
+  if (!target || n <= 0.08 || PerfMon.quality < 0.35) return;
+  const w = target.w || 86, h = target.h || 100;
+  const r = Math.max(w, h) * (0.72 + (1 - n) * 0.25);
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 16);
+  const a = 0.22 + n * 0.58;
+  ctx.save();
+  ctx.translate(target.x, target.y);
+  ctx.strokeStyle = n >= 1
+    ? `rgba(120,255,210,${a})`
+    : `rgba(255,210,90,${a})`;
+  ctx.lineWidth = 1.5 + n;
+  ctx.beginPath();
+  ctx.arc(0, 0, r + pulse * 2, -Math.PI * 0.35, Math.PI * 0.35);
+  ctx.arc(0, 0, r + pulse * 2, Math.PI * 0.65, Math.PI * 1.35);
+  ctx.stroke();
+  ctx.strokeStyle = n >= 1 ? 'rgba(200,255,235,0.8)' : 'rgba(255,235,150,0.7)';
+  const c = r * 0.35;
+  ctx.beginPath();
+  ctx.moveTo(-c, 0); ctx.lineTo(-c * 0.35, 0);
+  ctx.moveTo( c, 0); ctx.lineTo( c * 0.35, 0);
+  ctx.moveTo(0, -c); ctx.lineTo(0, -c * 0.35);
+  ctx.moveTo(0,  c); ctx.lineTo(0,  c * 0.35);
+  ctx.stroke();
+  if (n >= 1) {
+    ctx.fillStyle = 'rgba(120,255,210,0.85)';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('LOCK', 0, -r - 5);
+  }
+  ctx.restore();
+}
+
 function enemyAnimState(e) {
   const spawnN = clamp((e && (e.spawnAnimT ?? 0)) / ENEMY_SPAWN_ANIM_WINDOW, 0, 1);
   const hitN = clamp((e && (e.hitAnimT ?? 0)) / ENEMY_HIT_ANIM_WINDOW, 0, 1);
@@ -14430,6 +14561,7 @@ function render() {
     for (const e of Game.enemies) drawEnemy(e);
     for (const pk of Game.pickups) drawPickup(pk);
     if (Game.boss) drawBoss();
+    drawTargetLockReticle();
     drawBullets();
     // player vehicle (none during dying — wreck takes its place)
     if (Game.state === 'dying') {
