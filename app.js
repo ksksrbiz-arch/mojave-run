@@ -3650,6 +3650,11 @@ const SFX = {
   chainsaw: () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.32, 0.14, 600, t, audioSfxGain, 'lowpass', 0.6); tone(88, 0.3, 'sawtooth', 0.07, 30, t, audioSfxGain); tone(175, 0.2, 'sawtooth', 0.04, 20, t + 0.04, audioSfxGain); },
   // Rising adrenaline sweep for the adrenaline powerup
   adrenaline: () => { const t = audioCtx ? audioCtx.currentTime : 0; [320, 480, 720, 1080, 1520].forEach((f, i) => tone(f, 0.09, 'square', 0.052, 40, t + i * 0.04)); filteredNoise(0.22, 0.06, 2800, t + 0.1, audioSfxGain, 'highpass', 0.9); },
+  // Sharp metallic snap for critical hits — short hi-shimmer + impact crackle
+  crit:   () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(2200, 0.05, 'square', 0.06, -1600, t); tone(1480, 0.07, 'triangle', 0.04, -900, t + 0.01); filteredNoise(0.08, 0.12, 4200, t, audioSfxGain, 'bandpass', 1.8); },
+  // Heavy chassis thud + brief debris rattle when a destroyed enemy leaves
+  // a wreck on the road; pairs with multi-stage destruction visuals.
+  wreckThud: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(58, 0.36, 'sawtooth', 0.085, -28, t); filteredNoise(0.28, 0.14, 380, t + 0.02, audioSfxGain, 'lowpass', 0.5); tone(110, 0.18, 'triangle', 0.05, -16, t + 0.06); filteredNoise(0.18, 0.07, 1800, t + 0.08, audioSfxGain, 'bandpass', 0.7); },
 };
 
 // ============================================================
@@ -4197,6 +4202,43 @@ function requestHitStop(seconds) {
   Game.hitStopT = Math.max(Game.hitStopT || 0, seconds);
 }
 
+// Phase 1 — Road-edge dust kicks at high speed. Spawns a few low, gravity-
+// pulled tan dust puffs along the road shoulders proportional to forward
+// speed. Pure cosmetic; respects PerfMon quality and Settings.reducedMotion.
+function emitRoadEdgeDust(dt) {
+  if (Settings && Settings.reducedMotion) return;
+  if (!Game.player) return;
+  if (Game.mode === 'arena' || Game.mode === 'zombie') return;
+  const q = (PerfMon && PerfMon.quality) || 0.5;
+  if (q < 0.4) return;
+  const speedN = clamp(Game.speed / 460, 0, 1);
+  if (speedN < 0.45) return;
+  // Spawn 0–3 puffs per frame based on speed and quality.
+  const rate = (speedN - 0.45) * 22 * q;
+  Game._dustAcc = (Game._dustAcc || 0) + rate * dt;
+  while (Game._dustAcc >= 1) {
+    Game._dustAcc -= 1;
+    const onLeft = Math.random() < 0.5;
+    const yy = H * (0.55 + Math.random() * 0.42);
+    const rb = roadBounds ? roadBounds(yy) : null;
+    if (!rb) break;
+    const edgeX = onLeft ? rb.x0 - rand(2, 18) : rb.x1 + rand(2, 18);
+    const drift = (onLeft ? -1 : 1) * rand(20, 50);
+    Game.particles.push({
+      x: edgeX,
+      y: yy,
+      vx: drift,
+      vy: rand(-10, 18) + Game.speed * 0.04,
+      gravity: 30,
+      life: 0.5 + Math.random() * 0.4,
+      max: 0.9,
+      size: 7 + Math.random() * 6,
+      shape: 'smoke',
+      color: 'rgba(190,160,110,0.32)',
+    });
+  }
+}
+
 function maybeSpawnCombatWreck(e) {
   if (!e || e.kind === 'zombie') return;
   if (!(W > 0)) return;
@@ -4206,6 +4248,7 @@ function maybeSpawnCombatWreck(e) {
     if (Game.obstacles[i] && Game.obstacles[i].combatWreck) wreckCount++;
   }
   if (wreckCount >= COMBAT_WRECK_MAX) return;
+  if (SFX && SFX.wreckThud) SFX.wreckThud();
   Game.obstacles.push({
     kind: 'wreck',
     combatWreck: true,
@@ -7521,6 +7564,7 @@ function update(dt) {
   Game.shake = Math.max(0, Game.shake - dt * 2.4);
   Game.flash = Math.max(0, Game.flash - dt * 3);
   if (Game.muzzleT > 0) Game.muzzleT -= dt;
+  emitRoadEdgeDust(dt);
 
   // Living Road: decay surface, spawn/move debris, apply crack chip damage,
   // tick manual-repair cooldown. Internally no-ops for arena/winding modes.
@@ -8149,6 +8193,7 @@ function update(dt) {
         if (b.crit && visualQualityLevel() >= 1) {
           shockwave(b.x, b.y, 'rgba(255,180,90,0.55)', 26);
           emit(b.x, b.y, 6, { color:'#ffb36a', speed:240, life:0.25, size:2, shape:'spark', spread: Math.PI * 2 });
+          if (SFX && SFX.crit) SFX.crit();
         }
         if (e.hp <= 0) {
           SFX.explode();
