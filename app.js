@@ -8611,6 +8611,8 @@ const LOCK_ON_ACQUIRE_T = 0.55;
 const LOCK_ON_BASE_CONE_X = 150;
 const LOCK_ON_RANGE_Y = 620;
 const LOCK_ON_AIM_ASSIST = 0.42;
+const LOCK_ON_MIN_DY_BEHIND = -20;
+const LOCK_ON_AIM_SKIP_BEHIND_Y = 40;
 
 function lockTargetAlive(t) {
   if (!t) return false;
@@ -8621,7 +8623,7 @@ function lockTargetAlive(t) {
 function lockTargetScore(t, p) {
   if (!t || !p) return Infinity;
   const dy = p.y - t.y;
-  if (dy < -20 || dy > LOCK_ON_RANGE_Y) return Infinity;
+  if (dy < LOCK_ON_MIN_DY_BEHIND || dy > LOCK_ON_RANGE_Y) return Infinity;
   const dx = Math.abs((t.x || 0) - p.x);
   const cone = LOCK_ON_BASE_CONE_X + dy * 0.18;
   if (dx > cone) return Infinity;
@@ -8678,7 +8680,7 @@ function applyLockAimToShot(shot, target) {
   const tx = target.x + (target.vx || 0) * leadT;
   const ty = target.y + (target.vy || 0) * leadT * 0.3;
   const dx = tx - shot.x, dy = ty - shot.y;
-  if (dy > 40) return shot;
+  if (dy > LOCK_ON_AIM_SKIP_BEHIND_Y) return shot;
   const desired = Math.atan2(dy, dx);
   const current = Math.atan2(shot.vy || 0, shot.vx || 0);
   let dA = desired - current;
