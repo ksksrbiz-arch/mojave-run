@@ -3056,6 +3056,7 @@ const Haptics = {
   victory()  { this.vibrate([0, 30, 30, 30, 30, 80], 'victory', 0); },
   combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12, 'combo', 260); },
   nearMiss() { this.vibrate(8, 'nearMiss', 180); },
+  lockOn()   { this.vibrate([0, 10, 18, 18], 'lockOn', 260); },
 };
 
 // ============================================================
@@ -3642,6 +3643,7 @@ const SFX = {
   nitroOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.42, 0.18, 2400, t); tone(140, 0.3, 'sawtooth', 0.095, 440, t); tone(320, 0.2, 'triangle', 0.03, 480, t + 0.08); },
   combo:  (tier) => { const f = 430 + Math.min(tier, 12) * 90; tone(f, 0.09, 'square', 0.058, 40); tone(f * 1.5, 0.06, 'triangle', 0.04, 60, audioCtx ? audioCtx.currentTime + 0.01 : 0); },
   nearMiss:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(980, 0.045, 'triangle', 0.045, 220, t); tone(1320, 0.05, 'triangle', 0.035, 260, t + 0.025); },
+  lockOn: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(880, 0.055, 'triangle', 0.042, 180, t); tone(1320, 0.08, 'sine', 0.038, 80, t + 0.045); },
   mortar: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(64, 0.54, 'sawtooth', 0.085, -18, t); filteredNoise(0.42, 0.11, 620, t + 0.01); },
   rocket: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(150, 0.38, 'square', 0.078, -58, t); filteredNoise(0.24, 0.09, 1900, t + 0.01); },
   // Electric crack for the thunder horn and lightning strikes
@@ -5239,6 +5241,8 @@ const Game = {
   lockTarget: null,
   lockT: 0,
   lockStrength: 0,
+  lockReady: false,
+  lockPulseT: 0,
   spawnTimer: 0,
   pickupTimer: 0,
   shake: 0,
@@ -5667,6 +5671,8 @@ function startRun(mode, level) {
   Game.lockTarget = null;
   Game.lockT = 0;
   Game.lockStrength = 0;
+  Game.lockReady = false;
+  Game.lockPulseT = 0;
   Game.spawnTimer = 0.6;
   Game.pickupTimer = 3;
   if (Game.customConfig) {
@@ -8647,29 +8653,47 @@ function findLockTarget() {
 }
 
 function updateTargetLock(dt, wantsFire) {
+  if (Game.lockPulseT > 0) Game.lockPulseT = Math.max(0, Game.lockPulseT - dt);
   if (!wantsFire || Game.spinout || !Game.player) {
     Game.lockT = Math.max(0, (Game.lockT || 0) - dt * 2.5);
     Game.lockStrength = clamp((Game.lockT || 0) / LOCK_ON_ACQUIRE_T, 0, 1);
-    if (Game.lockT <= 0) Game.lockTarget = null;
+    if (Game.lockT <= 0) {
+      Game.lockTarget = null;
+      Game.lockReady = false;
+    }
     return;
   }
   let target = lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
   if (!target || lockTargetScore(target, Game.player) === Infinity) {
     target = findLockTarget();
-    if (target !== Game.lockTarget) Game.lockT = Math.min(Game.lockT || 0, 0.12);
+    if (target !== Game.lockTarget) {
+      Game.lockT = Math.min(Game.lockT || 0, 0.12);
+      Game.lockReady = false;
+    }
     Game.lockTarget = target;
   }
   if (!target) {
     Game.lockT = 0;
     Game.lockStrength = 0;
+    Game.lockReady = false;
     return;
   }
   Game.lockT = Math.min(LOCK_ON_ACQUIRE_T, (Game.lockT || 0) + dt);
   Game.lockStrength = clamp(Game.lockT / LOCK_ON_ACQUIRE_T, 0, 1);
+  const ready = Game.lockStrength >= 1;
+  if (ready && !Game.lockReady) triggerLockAcquired(target);
+  Game.lockReady = ready;
 }
 
 function getSustainedLockTarget() {
   return Game.lockStrength >= 1 && lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+}
+
+function triggerLockAcquired(target) {
+  Game.lockPulseT = 0.42;
+  if (target) addPopup('TARGET LOCK', target.x, target.y - (target.h || 90) * 0.65, '#78ffd2', 12);
+  if (SFX && SFX.lockOn) SFX.lockOn();
+  if (Haptics && Haptics.lockOn) Haptics.lockOn();
 }
 
 function applyLockAimToShot(shot, target) {
@@ -11730,9 +11754,19 @@ function drawTargetLockReticle() {
   const w = target.w || 86, h = target.h || 100;
   const r = Math.max(w, h) * (0.72 + (1 - n) * 0.25);
   const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 16);
+  const acquiredPulse = clamp((Game.lockPulseT || 0) / 0.42, 0, 1);
   const a = 0.22 + n * 0.58;
   ctx.save();
   ctx.translate(target.x, target.y);
+  if (acquiredPulse > 0) {
+    ctx.globalAlpha = acquiredPulse * 0.55;
+    ctx.strokeStyle = 'rgba(120,255,210,0.9)';
+    ctx.lineWidth = 2 + acquiredPulse * 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + (1 - acquiredPulse) * 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   ctx.strokeStyle = n >= 1
     ? `rgba(120,255,210,${a})`
     : `rgba(255,210,90,${a})`;
@@ -11756,6 +11790,34 @@ function drawTargetLockReticle() {
     ctx.textBaseline = 'bottom';
     ctx.fillText('LOCK', 0, -r - 5);
   }
+  ctx.restore();
+}
+
+function drawLockHudChip(hudH) {
+  const n = clamp(Game.lockStrength || 0, 0, 1);
+  if (Game.mode === 'arena' || n <= 0.04 || !lockTargetAlive(Game.lockTarget)) return;
+  const chipW = Math.min(124, W * 0.32);
+  const chipH = 12;
+  const x = (W - chipW) / 2;
+  const y = hudH + ((Game.mode === 'zombie' || Game.mode === 'wastelandrun') ? 27 : 10);
+  const ready = n >= 1;
+  ctx.save();
+  ctx.globalAlpha = 0.72 + n * 0.28;
+  ctx.fillStyle = Settings.hudContrast ? 'rgba(0,0,0,0.78)' : 'rgba(16,20,18,0.62)';
+  pathRoundRect(x, y, chipW, chipH, 4);
+  ctx.fill();
+  ctx.fillStyle = ready ? 'rgba(120,255,210,0.88)' : 'rgba(255,210,90,0.82)';
+  pathRoundRect(x + 2, y + 2, (chipW - 4) * n, chipH - 4, 3);
+  ctx.fill();
+  ctx.strokeStyle = ready ? 'rgba(190,255,235,0.88)' : 'rgba(255,235,150,0.72)';
+  ctx.lineWidth = 1;
+  pathRoundRect(x, y, chipW, chipH, 4);
+  ctx.stroke();
+  ctx.font = 'bold 8px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = ready ? '#d8fff4' : '#fff0b0';
+  ctx.fillText(ready ? 'TARGET LOCK' : 'LOCKING ' + Math.round(n * 100) + '%', W / 2, y + chipH / 2 + 0.5);
   ctx.restore();
 }
 
@@ -13619,6 +13681,7 @@ function drawHUD() {
     const icons = (zw.specialIcons && zw.specialIcons.length) ? zw.specialIcons.slice(-5).join(' ') : '—';
     ctx.fillText('SPECIALS ' + icons + ' · SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + ZOMBIE_HUD_OFFSET_Y);
   }
+  drawLockHudChip(hudH);
 
   // hull bar
   const hbW = Math.min(180, W * 0.42), hbH = 10, hbX = (W - hbW) / 2, hbY = hudH * 0.4 - hbH/2;
