@@ -4152,6 +4152,13 @@ const RUN_MOMENT_BIG_SCRAP = 1000;
 const RUN_MOMENT_SWEEP_KILLS = 50;
 const RUN_MOMENT_LONG_HAUL_DISTANCE = 2000;
 const KILL_STREAK_LABEL = ' KILL STREAK';
+const IMPACT_HITSTOP_LIGHT = 0.016;
+const IMPACT_HITSTOP_MEDIUM = 0.026;
+const IMPACT_HITSTOP_HEAVY = 0.038;
+const COMBAT_WRECK_SPAWN_CHANCE = 0.52;
+const COMBAT_WRECK_MAX = 14;
+const POWERUP_WARNING_SECONDS = 2.0;
+const PICKUP_ATTRACT_RADIUS = 190;
 
 function getWastelandReputation() {
   // These are end-of-run flavor titles, not a second achievement list.
@@ -4179,6 +4186,35 @@ function comboMult() {
   let m = 1;
   for (let i = 0; i < COMBO_THRESHOLDS.length; i++) {
     if (c >= COMBO_THRESHOLDS[i]) m = COMBO_MULTS[i];
+  }
+
+  function requestHitStop(seconds) {
+    if (Game.mode === 'arena') return;
+    if (Game.state !== 'playing') return;
+    if (!seconds || seconds <= 0) return;
+    Game.hitStopT = Math.max(Game.hitStopT || 0, seconds);
+  }
+
+  function maybeSpawnCombatWreck(e) {
+    if (!e || e.kind === 'zombie') return;
+    if (Math.random() >= COMBAT_WRECK_SPAWN_CHANCE) return;
+    let wreckCount = 0;
+    for (let i = 0; i < Game.obstacles.length; i++) {
+      if (Game.obstacles[i] && Game.obstacles[i].combatWreck) wreckCount++;
+    }
+    if (wreckCount >= COMBAT_WRECK_MAX) return;
+    Game.obstacles.push({
+      kind: 'wreck',
+      combatWreck: true,
+      x: clamp(e.x + rand(-8, 8), 26, W - 26),
+      y: e.y + rand(-6, 6),
+      w: clamp((e.w || 36) + rand(-6, 8), 24, 52),
+      h: clamp((e.h || 50) + rand(-8, 10), 28, 72),
+      rot: rand(-0.42, 0.42),
+      vy: rand(8, 26),
+      ttl: rand(4.2, 7.5),
+      emberT: rand(0.05, 0.2),
+    });
   }
   return m;
 }
@@ -4517,9 +4553,11 @@ function hexToRgba(hex, a) {
 }
 
 function updatePowerups(dt) {
+  if ((Game.powerWarnSfxT || 0) > 0) Game.powerWarnSfxT = Math.max(0, Game.powerWarnSfxT - dt);
   for (const id of POWERUP_KEYS) {
     const p = Game.powerups[id];
     if (p && p.t > 0) {
+      const prevT = p.t;
       if (id === 'pulse') {
         p.tick = (p.tick || 0) - dt;
         if (p.tick <= 0) {
@@ -4528,6 +4566,15 @@ function updatePowerups(dt) {
         }
       }
       p.t -= dt;
+      if (prevT > POWERUP_WARNING_SECONDS && p.t <= POWERUP_WARNING_SECONDS) {
+        p.warnT = 0.55;
+        addPopup((POWERUPS[id] ? POWERUPS[id].name : id).toUpperCase() + ' LOW!', W * 0.5, H * 0.2, '#ffd86b', 12);
+        if ((Game.powerWarnSfxT || 0) <= 0) {
+          Game.powerWarnSfxT = 0.45;
+          SFX.click && SFX.click();
+        }
+      }
+      if (p.warnT > 0) p.warnT = Math.max(0, p.warnT - dt);
       if (p.t <= 0) {
         Game.powerups[id] = null;
         // visual cue when shield drops
@@ -5036,6 +5083,8 @@ const Game = {
   playerTrail: [],
   flash: 0,
   hitFlash: 0,            // brief vehicle hit indicator
+  hitStopT: 0,            // short global freeze-frame timer for impact feel
+  powerWarnSfxT: 0,       // anti-spam cooldown for power-up expiry warning SFX
   hintTime: 0,
   laneOffset: 0,
   windingRoad: null,      // procedural curve params for winding mode
@@ -5567,6 +5616,8 @@ function startRun(mode, level) {
   Game.comboT = 0;
   Game.comboBest = 0;
   Game.comboPulseT = 0;
+  Game.hitStopT = 0;
+  Game.powerWarnSfxT = 0;
   Game._pendingBadges = [];
   Game._pendingCosmetics = [];
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
@@ -7711,6 +7762,7 @@ function update(dt) {
   // ---- bullets ----
   for (let i = Game.bullets.length - 1; i >= 0; i--) {
     const b = Game.bullets[i];
+    b.px = b.x; b.py = b.y;
     // Homing: steer toward nearest enemy or boss at a limited turn rate
     if (b.homing && (Game.enemies.length > 0 || Game.boss)) {
       let tx = null, ty = null, bestDist = Infinity;
@@ -7743,6 +7795,7 @@ function update(dt) {
   }
   for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
     const b = Game.enemyBullets[i];
+    b.px = b.x; b.py = b.y;
     b.y += b.vy * dt; b.x += (b.vx || 0) * dt;
     if (b.gravity) b.vy += b.gravity * dt;
     if (b.telegraph) b.telegraph.t -= dt;
@@ -7770,6 +7823,21 @@ function update(dt) {
       }
     } else {
       o.y += Game.speed * dt;
+    }
+    if (o.combatWreck) {
+      o.ttl = (o.ttl || 0) - dt;
+      o.emberT = (o.emberT || 0) - dt;
+      if (o.emberT <= 0 && visualQualityLevel() >= 1) {
+        o.emberT = rand(0.07, 0.22);
+        Game.particles.push({
+          x: o.x + rand(-o.w * 0.28, o.w * 0.28),
+          y: o.y - o.h * 0.18,
+          vx: rand(-16, 16), vy: rand(-52, -18),
+          life: 0.35, max: 0.35, size: 3 + (Math.random() * 2) | 0,
+          color: 'rgba(255,125,45,0.78)', shape: 'spark',
+        });
+      }
+      if (o.ttl <= 0) { Game.obstacles.splice(i, 1); continue; }
     }
     if (o.y > H + 80) { Game.obstacles.splice(i,1); continue; }
 
@@ -7815,6 +7883,7 @@ function update(dt) {
             emit(o.x, o.y, 26, { color:'#ff8a3d', speed:320, life:0.7, size:4 });
             emit(o.x, o.y, 12, { color:'#ffd86b', speed:220, life:0.5, size:3 });
             shockwave(o.x, o.y, 'rgba(255,140,60,0.5)', 90);
+            requestHitStop(IMPACT_HITSTOP_MEDIUM);
             Game.shake = Math.max(Game.shake, 0.5);
             Game.score += 50;
             splashDamage(o.x, o.y, 70, 1);
@@ -7993,6 +8062,7 @@ function update(dt) {
             const bigExplosion = isMortar || isTank;
             const explScale = isTank ? 1.5 : isMortar ? 1.3 : isDrone ? 0.85 : 1.0;
             emitExplosion(e.x, e.y, explScale);
+            maybeSpawnCombatWreck(e);
             if (isDrone) {
               // extra purple sparks for drone
               emit(e.x, e.y, 10, { color:'#c87af0', speed:280, life:0.6, size:3, shape:'spark', spread: Math.PI * 2 });
@@ -8000,6 +8070,11 @@ function update(dt) {
             if (bigExplosion) Game.shake = Math.max(Game.shake, 0.7);
             else Game.shake = Math.max(Game.shake, 0.5);
           }
+          requestHitStop(
+            (isTank || isMortar) ? IMPACT_HITSTOP_HEAVY :
+            (b.big || b.crit) ? IMPACT_HITSTOP_MEDIUM :
+            IMPACT_HITSTOP_LIGHT
+          );
           applyKill(e.x, e.y, baseScore);
           // drops
           const dropR = Math.random();
@@ -8030,11 +8105,13 @@ function update(dt) {
       if (isPowerupActive('shield')) {
         emit(e.x, e.y, 24, { color:'#7aaaff', speed: 280, life: 0.5, size: 3 });
         shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 80);
+        requestHitStop(IMPACT_HITSTOP_LIGHT);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         Game.enemies.splice(i,1);
         clearEnemyShotsFrom(e);
         Game.shake = Math.max(Game.shake, 0.5);
       } else if (e.hp <= 0) {
+        requestHitStop(IMPACT_HITSTOP_LIGHT);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         if (isZombie) {
           emit(e.x, e.y, 10, { color:'#5a7a3a', speed:200, life:0.5, size:3 });
@@ -8057,6 +8134,7 @@ function update(dt) {
           e.storyAnimT = Math.max(e.storyAnimT || 0, 0.5);
         } else {
           emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
+          maybeSpawnCombatWreck(e);
           Game.enemies.splice(i,1);
           clearEnemyShotsFrom(e);
           Game.shake = Math.max(Game.shake, 0.7);
@@ -8094,6 +8172,7 @@ function update(dt) {
       if (isPowerupActive('shield')) {
         emit(b.x, b.y, 8, { color:'#7aaaff', speed: 220, life: 0.4, size: 3 });
         shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.4)', 50);
+        requestHitStop(IMPACT_HITSTOP_LIGHT);
       } else {
         damagePlayer(b.dmg || 8);
         emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2 });
@@ -8109,6 +8188,8 @@ function update(dt) {
     pk.t += dt;
     if (pk.y > H + 40) { Game.pickups.splice(i,1); continue; }
     if (aabb(pk, Game.player)) {
+      emit(pk.x, pk.y, 6, { color:'#ffe7a0', speed:200, life:0.24, size:2, shape:'spark', spread:Math.PI * 2 });
+      if (visualQualityLevel() >= 1) shockwave(pk.x, pk.y, 'rgba(255,220,140,0.35)', 38);
       if (pk.kind === 'scrap') {
         const x2 = isPowerupActive('x2') ? 2 : 1;
         const salvageMul = isPowerupActive('salvage') ? 1.5 : 1;
@@ -8314,6 +8395,25 @@ function fireGuns() {
   const muzzleColor = v.color.glow;
   const triple = isPowerupActive('triple');
   Game.muzzleT = 0.08;
+  if (visualQualityLevel() >= 1 && !Settings.reducedMotion) {
+    const casingCount = Math.min(8, Math.max(2, guns + (triple ? 2 : 0)));
+    for (let ci = 0; ci < casingCount; ci++) {
+      const side = ci % 2 === 0 ? -1 : 1;
+      Game.particles.push({
+        x: p.x + side * rand(8, 16),
+        y: p.y - rand(8, 18),
+        vx: side * rand(70, 150),
+        vy: rand(-140, -60),
+        gravity: 450,
+        life: rand(0.38, 0.62),
+        max: 0.62,
+        size: 3 + (Math.random() * 2) | 0,
+        shape: 'rect',
+        rot: rand(0, Math.PI * 2),
+        color: 'rgba(230,170,85,0.85)',
+      });
+    }
+  }
   if (bigShot) {
     Game.bullets.push(makeShot({ x:p.x, y:p.y - 30, w:8, h:18, vy:-720, big:true }));
     if (triple) {
@@ -8399,6 +8499,7 @@ function damagePlayer(amt) {
   Game.runDamageTaken = (Game.runDamageTaken || 0) + amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
+  requestHitStop(amt >= 28 ? IMPACT_HITSTOP_MEDIUM : IMPACT_HITSTOP_LIGHT);
   // Suspension impact kick — car jolts downward on hit
   Game.suspVelocity = (Game.suspVelocity || 0) + 4.5;
   // taking damage breaks the combo and bounty chain
@@ -8442,6 +8543,7 @@ function triggerPlayerDeath() {
   emit(px, py, 24, { color:'#ffd86b', speed:320, life:0.8, size:4 });
   shockwave(px, py, 'rgba(255,140,60,0.6)', 140);
   Game.shake = 1.4;
+  requestHitStop(IMPACT_HITSTOP_HEAVY);
   Game.flash = 1;
   SFX.death();
   Haptics.death();
@@ -10931,12 +11033,31 @@ function drawObstacle(o) {
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
+    if (o.combatWreck) {
+      const burnPulse = 0.45 + 0.55 * Math.sin((Game.t || 0) * 10 + o.x * 0.03);
+      const fireG = ctx.createRadialGradient(0, -o.h * 0.12, 1, 0, -o.h * 0.12, o.w * 0.55);
+      fireG.addColorStop(0, `rgba(255,220,130,${0.30 * burnPulse})`);
+      fireG.addColorStop(0.55, `rgba(255,110,45,${0.28 * burnPulse})`);
+      fireG.addColorStop(1, 'rgba(255,70,20,0)');
+      ctx.fillStyle = fireG;
+      ctx.beginPath();
+      ctx.ellipse(0, -o.h * 0.12, o.w * 0.55, o.h * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
     pathRoundRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h, 4);
     ctx.fill();
     ctx.fillStyle = '#5a4030';
     pathRoundRect(-o.w/2, -o.h/2, o.w, o.h, 4);
     ctx.fill();
+    if (o.combatWreck) {
+      ctx.fillStyle = 'rgba(20,12,8,0.65)';
+      pathRoundRect(-o.w/2 + 2, -o.h/2 + 10, o.w - 4, 8, 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,110,40,0.35)';
+      pathRoundRect(-o.w/2 + 6, -o.h/2 + 12, o.w * 0.36, 4, 1.5);
+      ctx.fill();
+    }
     ctx.fillStyle = '#3a2818';
     pathRoundRect(-o.w/2 + 4, -o.h/2 + 14, o.w - 8, 22, 3);
     ctx.fill();
@@ -11988,8 +12109,25 @@ function drawBoss() {
 }
 
 function drawPickup(pk) {
+  const p = Game.player;
+  const distToPlayer = p ? Math.hypot((p.x || 0) - pk.x, (p.y || 0) - pk.y) : 9999;
+  const attractN = p ? clamp(1 - distToPlayer / PICKUP_ATTRACT_RADIUS, 0, 1) : 0;
   const bob = Math.sin(pk.t * 6) * 2;
   const detail = visualQualityLevel();
+  if (attractN > 0.05 && detail >= 1) {
+    const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 10 + pk.x * 0.02);
+    const ringR = 18 + attractN * 10 + pulse * 3;
+    const g = ctx.createRadialGradient(pk.x, pk.y + bob, ringR * 0.55, pk.x, pk.y + bob, ringR);
+    g.addColorStop(0, 'rgba(255,245,190,0)');
+    g.addColorStop(0.6, `rgba(255,220,125,${0.16 + attractN * 0.16})`);
+    g.addColorStop(1, 'rgba(255,210,110,0)');
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(pk.x, pk.y + bob, ringR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   if (pk.kind === 'scrap') {
     ctx.save();
     ctx.translate(pk.x, pk.y + bob);
@@ -12218,6 +12356,24 @@ function drawPickup(pk) {
 
 function drawBullets() {
   const glowOn = (PerfMon.quality > 0.25) && (Settings.particles > 0.4);
+  const drawTracer = (b, color, width, alphaMul = 1) => {
+    if (!b || b.px === undefined || b.py === undefined) return;
+    const dx = b.x - b.px, dy = b.y - b.py;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 3) return;
+    const tx = b.x - dx * 0.85;
+    const ty = b.y - dy * 0.85;
+    const g = ctx.createLinearGradient(b.x, b.y, tx, ty);
+    const headColor = color.replace(/[\d.]+\)\s*$/, `${(0.95 * alphaMul).toFixed(2)})`);
+    g.addColorStop(0, headColor);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = g;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+  };
 
   // ── Player bullets ──────────────────────────────────────────────
   if (glowOn && Game.bullets.length > 0) {
@@ -12246,6 +12402,9 @@ function drawBullets() {
   }
 
   for (const b of Game.bullets) {
+    if (b.homing) drawTracer(b, 'rgba(210,110,255,0.85)', 2.2, 0.95);
+    else if (b.big) drawTracer(b, 'rgba(120,255,175,0.85)', 2.8, 0.9);
+    else drawTracer(b, 'rgba(255,185,85,0.85)', 1.8, 1);
     if (b.big) {
       // Wide green plasma blob with pulsing corona
       const pCor = 0.65 + 0.35 * Math.sin((Game.t || 0) * 18);
@@ -12317,6 +12476,7 @@ function drawBullets() {
   }
 
   for (const b of Game.enemyBullets) {
+    if (!b.mortar) drawTracer(b, b.big ? 'rgba(255,110,110,0.85)' : 'rgba(255,80,65,0.85)', b.big ? 2.4 : 1.7, 0.85);
     if (b.mortar) {
       // Mortar shell — 3D-looking sphere with top-left shading
       if (b.telegraph) {
@@ -12561,6 +12721,7 @@ function drawPowerupStrip() {
   // small icon strip showing active power-ups, top-left under hudH
   const active = POWERUP_KEYS.filter(k => isPowerupActive(k));
   if (active.length === 0) return;
+  const detail = visualQualityLevel();
   const hudH = W < 500 ? 48 : 56;
   const ix = 14, iy = hudH + 6, sz = W < 500 ? 28 : 34, gap = 6;
   ctx.save();
@@ -12586,9 +12747,16 @@ function drawPowerupStrip() {
     ctx.fillStyle = def.color;
     ctx.fillRect(x, iy + sz - 3, sz * pct, 3);
     // flashing border when about to expire
-    if (p.t < 1.5 && Math.floor(p.t * 6) % 2 === 0) {
+    if (p.t < POWERUP_WARNING_SECONDS && Math.floor(p.t * 6) % 2 === 0) {
       ctx.strokeStyle = '#fff';
       ctx.strokeRect(x - 0.5, iy - 0.5, sz + 1, sz + 1);
+    }
+    if (p.warnT > 0 && detail >= 1) {
+      const wa = clamp(p.warnT / 0.55, 0, 1);
+      ctx.strokeStyle = `rgba(255,216,107,${0.75 * wa})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 2, iy - 2, sz + 4, sz + 4);
+      ctx.lineWidth = 1.5;
     }
   }
   ctx.lineWidth = 1;
@@ -16530,7 +16698,12 @@ function frame(now) {
       if (Game.state !== 'playing') GamepadInput.poll();
       if (Game.state === 'playing' || Game.state === 'loading'
           || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
-        update(dt);
+        let simDt = dt;
+        if (Game.state === 'playing' && (Game.hitStopT || 0) > 0) {
+          Game.hitStopT = Math.max(0, (Game.hitStopT || 0) - dt);
+          simDt = 0;
+        }
+        update(simDt);
         capRuntimeArrays();
       }
       if (window.MP && MP.connected) {
@@ -18792,6 +18965,8 @@ const Cinematic = (function () {
   const cam = {
     rot: 0, rotTarget: 0,
     zoom: 1, zoomTarget: 1,
+    leadX: 0, leadXTarget: 0,
+    leadY: 0, leadYTarget: 0,
     lastPx: 0, lastT: 0,
   };
 
@@ -18843,19 +19018,37 @@ const Cinematic = (function () {
   // translate that already happened.
   // ========================================================================
   function preTransform(ctx) {
-    if (!isOn()) { cam.rot *= 0.85; cam.zoom += (1 - cam.zoom) * 0.2; return; }
-    if (Game.state !== 'playing') { cam.rot *= 0.85; cam.zoom += (1 - cam.zoom) * 0.2; return; }
+    if (!isOn()) {
+      cam.rot *= 0.85;
+      cam.zoom += (1 - cam.zoom) * 0.2;
+      cam.leadX *= 0.8; cam.leadY *= 0.8;
+      return;
+    }
+    if (Game.state !== 'playing') {
+      cam.rot *= 0.85;
+      cam.zoom += (1 - cam.zoom) * 0.2;
+      cam.leadX *= 0.8; cam.leadY *= 0.8;
+      return;
+    }
     const k = intensity();
+    const lat = lateralProxy();
+    const sp = speedNorm();
     // Tilt: max ~1.5° at full lateral input. Subtle, never disorienting.
-    cam.rotTarget = lateralProxy() * 0.026 * k;
+    cam.rotTarget = lat * 0.026 * k;
     cam.rot += (cam.rotTarget - cam.rot) * 0.12;
     // Zoom: up to +4% at top speed.
-    cam.zoomTarget = 1 + speedNorm() * 0.04 * k;
+    cam.zoomTarget = 1 + sp * 0.04 * k;
     cam.zoom += (cam.zoomTarget - cam.zoom) * 0.08;
-    if (Math.abs(cam.rot) < 0.0008 && Math.abs(cam.zoom - 1) < 0.0008) return;
+    // Lead the camera slightly into motion so players see farther ahead.
+    cam.leadXTarget = lat * (10 + sp * 16) * k;
+    cam.leadYTarget = -(4 + sp * 22) * k;
+    cam.leadX += (cam.leadXTarget - cam.leadX) * 0.11;
+    cam.leadY += (cam.leadYTarget - cam.leadY) * 0.08;
+    if (Math.abs(cam.rot) < 0.0008 && Math.abs(cam.zoom - 1) < 0.0008
+      && Math.abs(cam.leadX) < 0.01 && Math.abs(cam.leadY) < 0.01) return;
     // Pivot near the player so tilt feels anchored to the car.
-    const px = (Game.player && Game.player.x) || W * 0.5;
-    const py = (Game.player && Game.player.y) || H * 0.78;
+    const px = ((Game.player && Game.player.x) || W * 0.5) + cam.leadX;
+    const py = ((Game.player && Game.player.y) || H * 0.78) + cam.leadY;
     ctx.translate(px, py);
     ctx.rotate(cam.rot);
     ctx.scale(cam.zoom, cam.zoom);
