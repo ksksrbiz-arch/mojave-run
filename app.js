@@ -3056,7 +3056,7 @@ const Haptics = {
   victory()  { this.vibrate([0, 30, 30, 30, 30, 80], 'victory', 0); },
   combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12, 'combo', 260); },
   nearMiss() { this.vibrate(8, 'nearMiss', 180); },
-  lockOn()   { this.vibrate([0, 10, 18, 18], 'lockOn', 260); },
+  targetLock(){ this.vibrate([0, 10, 18, 18], 'targetLock', 260); },
 };
 
 // ============================================================
@@ -3643,7 +3643,7 @@ const SFX = {
   nitroOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.42, 0.18, 2400, t); tone(140, 0.3, 'sawtooth', 0.095, 440, t); tone(320, 0.2, 'triangle', 0.03, 480, t + 0.08); },
   combo:  (tier) => { const f = 430 + Math.min(tier, 12) * 90; tone(f, 0.09, 'square', 0.058, 40); tone(f * 1.5, 0.06, 'triangle', 0.04, 60, audioCtx ? audioCtx.currentTime + 0.01 : 0); },
   nearMiss:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(980, 0.045, 'triangle', 0.045, 220, t); tone(1320, 0.05, 'triangle', 0.035, 260, t + 0.025); },
-  lockOn: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(880, 0.055, 'triangle', 0.042, 180, t); tone(1320, 0.08, 'sine', 0.038, 80, t + 0.045); },
+  targetLock: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(880, 0.055, 'triangle', 0.042, 180, t); tone(1320, 0.08, 'sine', 0.038, 80, t + 0.045); },
   mortar: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(64, 0.54, 'sawtooth', 0.085, -18, t); filteredNoise(0.42, 0.11, 620, t + 0.01); },
   rocket: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(150, 0.38, 'square', 0.078, -58, t); filteredNoise(0.24, 0.09, 1900, t + 0.01); },
   // Electric crack for the thunder horn and lightning strikes
@@ -8692,8 +8692,8 @@ function getSustainedLockTarget() {
 function triggerLockAcquired(target) {
   Game.lockPulseT = 0.42;
   if (target) addPopup('TARGET LOCK', target.x, target.y - (target.h || 90) * 0.65, '#78ffd2', 12);
-  if (SFX && SFX.lockOn) SFX.lockOn();
-  if (Haptics && Haptics.lockOn) Haptics.lockOn();
+  if (SFX && SFX.targetLock) SFX.targetLock();
+  if (Haptics && Haptics.targetLock) Haptics.targetLock();
 }
 
 function applyLockAimToShot(shot, target) {
@@ -8730,7 +8730,7 @@ function fireGuns() {
     const crit = Math.random() < critChance;
     const mul = crit ? critMul : 1;
     const lockTarget = getSustainedLockTarget();
-    const aimed = applyLockAimToShot(Object.assign({}, extra), lockTarget);
+    const aimed = applyLockAimToShot(extra, lockTarget);
     return Object.assign({
       owner:'p',
       dmg: stats.dmg * overdriveMul * mul,
