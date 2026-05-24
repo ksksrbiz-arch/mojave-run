@@ -4285,7 +4285,7 @@ function awardNearMiss(e) {
 }
 
 // ── Phase 4C: cinematic enemy explosion — multi-ring shockwaves + spark streaks + smoke puffs
-function emitExplosion(x, y, scale, kind) {
+function emitExplosion(x, y, scale, kind = null) {
   scale = scale || 1;
   if (!PerfMon || PerfMon.quality < 0.2) {
     emit(x, y, 10, { color: '#ff7a28', speed: 300, life: 0.65, size: 4, spread: Math.PI * 2 });
@@ -4311,7 +4311,7 @@ function emitExplosion(x, y, scale, kind) {
 // Cosmetic debris helper used by explosions and big destruction. Emits a small
 // burst of bouncy shrapnel/glass/tire chunks based on the enemy kind. Pure
 // visual — never affects gameplay, never spawns gameplay-blocking obstacles.
-function emitDebrisFor(x, y, scale, kind) {
+function emitDebrisFor(x, y, scale, kind = null) {
   const q = (PerfMon && PerfMon.quality) || 0.5;
   scale = scale || 1;
   const cnt = Math.max(2, Math.round((kind === 'tank' ? 10 : kind === 'mortar' ? 8 : kind === 'drone' ? 6 : 5) * q * scale));
@@ -4644,7 +4644,7 @@ function updatePowerups(dt) {
   // live HP value so damage taken is visually telegraphed. Initialized lazily
   // on first frame of a run so legacy save states are unaffected.
   if (Game.state === 'playing' && Game.maxHealth > 0) {
-    if (Game.healthDrain === undefined || Game.healthDrain === null) Game.healthDrain = Game.health;
+    if (Game.healthDrain == null) Game.healthDrain = Game.health;
     if (Game.healthDrain > Game.health) {
       const delay = (Game._healthDrainDelay = Math.max(0, (Game._healthDrainDelay || 0) - dt));
       if (delay <= 0) {
@@ -16858,6 +16858,9 @@ function frame(now) {
           || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
         let simDt = dt;
         if (Game.state === 'playing' && (Game.hitStopT || 0) > 0) {
+          // Hit-stop: freeze simulation for a tiny window (rendering still runs)
+          // to sell big impacts. The timer counts down here even though sim is
+          // paused, so the freeze ends after the requested duration.
           Game.hitStopT = Math.max(0, (Game.hitStopT || 0) - dt);
           simDt = 0;
         }
