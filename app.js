@@ -4285,7 +4285,7 @@ function awardNearMiss(e) {
 }
 
 // ── Phase 4C: cinematic enemy explosion — multi-ring shockwaves + spark streaks + smoke puffs
-function emitExplosion(x, y, scale) {
+function emitExplosion(x, y, scale, kind) {
   scale = scale || 1;
   if (!PerfMon || PerfMon.quality < 0.2) {
     emit(x, y, 10, { color: '#ff7a28', speed: 300, life: 0.65, size: 4, spread: Math.PI * 2 });
@@ -4300,9 +4300,94 @@ function emitExplosion(x, y, scale) {
     emit(x, y, Math.round(4 * q * scale), { color: 'rgba(50,44,36,0.45)', speed: 55 * scale, life: 1.1, size: 14 * scale, shape: 'smoke', spread: Math.PI * 2 });
   }
   emit(x, y, Math.round(7 * q * scale), { color: '#7a5028', speed: 280 * scale, life: 0.6, size: 6 * scale, shape: 'rect', spread: Math.PI * 2 });
+  // Per-enemy debris/shrapnel — cosmetic only. Tanks/mortars spray heavy metal
+  // chunks; drones rain blue glass shards; bikes throw tire fragments.
+  if (q > 0.3) emitDebrisFor(x, y, scale, kind);
   shockwave(x, y, 'rgba(255,180,80,0.65)', 70 * scale);
   if (q > 0.5) shockwave(x, y, 'rgba(255,220,130,0.35)', 45 * scale);
   if (q > 0.7 && scale >= 1) shockwave(x, y, 'rgba(255,140,50,0.22)', 110 * scale);
+}
+
+// Cosmetic debris helper used by explosions and big destruction. Emits a small
+// burst of bouncy shrapnel/glass/tire chunks based on the enemy kind. Pure
+// visual — never affects gameplay, never spawns gameplay-blocking obstacles.
+function emitDebrisFor(x, y, scale, kind) {
+  const q = (PerfMon && PerfMon.quality) || 0.5;
+  scale = scale || 1;
+  const cnt = Math.max(2, Math.round((kind === 'tank' ? 10 : kind === 'mortar' ? 8 : kind === 'drone' ? 6 : 5) * q * scale));
+  // metal chunks
+  for (let i = 0; i < cnt; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const sp = (160 + Math.random() * 220) * scale;
+    Game.particles.push({
+      x, y,
+      vx: Math.cos(ang) * sp,
+      vy: Math.sin(ang) * sp - 80 * scale,
+      gravity: 520,
+      life: 0.55 + Math.random() * 0.5,
+      max: 1.05,
+      size: 2 + ((Math.random() * 3) | 0),
+      shape: 'rect',
+      rot: Math.random() * Math.PI * 2,
+      color: kind === 'drone'
+        ? 'rgba(160,200,240,0.85)'
+        : 'rgba(170,150,120,0.85)',
+    });
+  }
+  // drones rain blue glass shards
+  if (kind === 'drone') {
+    for (let i = 0; i < Math.round(5 * q * scale); i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = (200 + Math.random() * 180) * scale;
+      Game.particles.push({
+        x, y,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp - 60 * scale,
+        gravity: 480,
+        life: 0.4 + Math.random() * 0.35,
+        max: 0.75,
+        size: 2,
+        shape: 'spark',
+        color: 'rgba(140,210,255,0.92)',
+      });
+    }
+  }
+  // bikes throw tire fragments (rubber)
+  if (kind === 'bike') {
+    for (let i = 0; i < Math.round(4 * q * scale); i++) {
+      Game.particles.push({
+        x: x + (Math.random() - 0.5) * 12,
+        y,
+        vx: (Math.random() - 0.5) * 220 * scale,
+        vy: -(80 + Math.random() * 140) * scale,
+        gravity: 620,
+        life: 0.6 + Math.random() * 0.4,
+        max: 1.0,
+        size: 3,
+        shape: 'rect',
+        rot: Math.random() * Math.PI * 2,
+        color: 'rgba(34,28,26,0.92)',
+      });
+    }
+  }
+  // tank/mortar — heavy oily plumes already covered by explosion smoke, add
+  // a few long-life ember sparks for emphasis.
+  if (kind === 'tank' || kind === 'mortar') {
+    for (let i = 0; i < Math.round(6 * q * scale); i++) {
+      const ang = Math.random() * Math.PI * 2;
+      Game.particles.push({
+        x, y,
+        vx: Math.cos(ang) * 260 * scale,
+        vy: Math.sin(ang) * 260 * scale - 60 * scale,
+        gravity: 380,
+        life: 0.7 + Math.random() * 0.5,
+        max: 1.2,
+        size: 2,
+        shape: 'spark',
+        color: 'rgba(255,170,80,0.95)',
+      });
+    }
+  }
 }
 
 function applyCivilianPenalty(x, y, kind) {
@@ -4555,6 +4640,22 @@ function hexToRgba(hex, a) {
 
 function updatePowerups(dt) {
   if ((Game.powerWarnSfxT || 0) > 0) Game.powerWarnSfxT = Math.max(0, Game.powerWarnSfxT - dt);
+  // Phase 5A: animated health bar — delayed "ghost" drain that chases the
+  // live HP value so damage taken is visually telegraphed. Initialized lazily
+  // on first frame of a run so legacy save states are unaffected.
+  if (Game.state === 'playing' && Game.maxHealth > 0) {
+    if (Game.healthDrain === undefined || Game.healthDrain === null) Game.healthDrain = Game.health;
+    if (Game.healthDrain > Game.health) {
+      const delay = (Game._healthDrainDelay = Math.max(0, (Game._healthDrainDelay || 0) - dt));
+      if (delay <= 0) {
+        const rate = Math.max(8, (Game.healthDrain - Game.health) * 1.4) * dt + 22 * dt;
+        Game.healthDrain = Math.max(Game.health, Game.healthDrain - rate);
+      }
+    } else if (Game.healthDrain < Game.health) {
+      // healing — snap up immediately
+      Game.healthDrain = Game.health;
+    }
+  }
   for (const id of POWERUP_KEYS) {
     const p = Game.powerups[id];
     if (p && p.t > 0) {
@@ -5619,6 +5720,8 @@ function startRun(mode, level) {
   Game.comboPulseT = 0;
   Game.hitStopT = 0;
   Game.powerWarnSfxT = 0;
+  Game.healthDrain = null;
+  Game._healthDrainDelay = 0;
   Game._pendingBadges = [];
   Game._pendingCosmetics = [];
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
@@ -8041,8 +8144,12 @@ function update(dt) {
           e.storyAnimT = Math.max(e.storyAnimT || 0, STORY_ANIM_MIN_DURATION);
         }
         applyWeaponSpecHit(b, e, dmg);
-        if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', 11);
+        if (Settings.damageNumbers) addPopup((b.crit ? '⚡ -' : '-') + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', b.crit ? 15 : 11);
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
+        if (b.crit && visualQualityLevel() >= 1) {
+          shockwave(b.x, b.y, 'rgba(255,180,90,0.55)', 26);
+          emit(b.x, b.y, 6, { color:'#ffb36a', speed:240, life:0.25, size:2, shape:'spark', spread: Math.PI * 2 });
+        }
         if (e.hp <= 0) {
           SFX.explode();
           const isBike = e.kind === 'bike';
@@ -8062,7 +8169,7 @@ function update(dt) {
           } else {
             const bigExplosion = isMortar || isTank;
             const explScale = isTank ? 1.5 : isMortar ? 1.3 : isDrone ? 0.85 : 1.0;
-            emitExplosion(e.x, e.y, explScale);
+            emitExplosion(e.x, e.y, explScale, e.kind);
             maybeSpawnCombatWreck(e);
             if (isDrone) {
               // extra purple sparks for drone
@@ -8500,6 +8607,7 @@ function damagePlayer(amt) {
   Game.runDamageTaken = (Game.runDamageTaken || 0) + amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
+  Game._healthDrainDelay = 0.18;
   requestHitStop(amt >= 28 ? IMPACT_HITSTOP_MEDIUM : IMPACT_HITSTOP_LIGHT);
   // Suspension impact kick — car jolts downward on hit
   Game.suspVelocity = (Game.suspVelocity || 0) + 4.5;
@@ -8570,7 +8678,7 @@ function splashDamage(x, y, r, dmg) {
       e.hp -= dmg;
       if (e.hp <= 0) {
         SFX.explode();
-        emitExplosion(e.x, e.y, 0.9);
+        emitExplosion(e.x, e.y, 0.9, e.kind);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 120);
         Game.enemies.splice(i,1);
         clearEnemyShotsFrom(e);
@@ -12937,6 +13045,32 @@ function drawComboAura() {
   grad.addColorStop(1, `rgba(${hue[0]},${hue[1]},${hue[2]},${baseA * pulse})`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
+  // Phase 5A: at very high combos (multiplier ≥ 5), add an edge "flame" band
+  // that flickers along the screen sides. Cosmetic — no gameplay impact.
+  if (m >= 5 && !Settings.reducedMotion && visualQualityLevel() >= 1) {
+    const flick = 0.7 + 0.3 * Math.sin((Game.t || 0) * 17 + Math.cos((Game.t || 0) * 9.4));
+    const edgeA = Math.min(0.55, 0.18 + (m - 5) * 0.07) * flick;
+    const edgeW = Math.min(W, H) * (0.07 + Math.min(0.05, (m - 5) * 0.012));
+    const flameColor = m >= 7 ? [255, 80, 80] : [255, 150, 60];
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const eL = ctx.createLinearGradient(0, 0, edgeW, 0);
+    eL.addColorStop(0, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},${edgeA})`);
+    eL.addColorStop(1, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},0)`);
+    ctx.fillStyle = eL;
+    ctx.fillRect(0, 0, edgeW, H);
+    const eR = ctx.createLinearGradient(W - edgeW, 0, W, 0);
+    eR.addColorStop(0, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},0)`);
+    eR.addColorStop(1, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},${edgeA})`);
+    ctx.fillStyle = eR;
+    ctx.fillRect(W - edgeW, 0, edgeW, H);
+    const eB = ctx.createLinearGradient(0, H - edgeW, 0, H);
+    eB.addColorStop(0, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},0)`);
+    eB.addColorStop(1, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},${edgeA * 0.8})`);
+    ctx.fillStyle = eB;
+    ctx.fillRect(0, H - edgeW, W, edgeW);
+    ctx.restore();
+  }
 }
 
 // ── Depth-aware speed streaks — road-surface perspective streaks (classic/winding)
@@ -13289,6 +13423,18 @@ function drawHUD() {
   }
   pathRoundRect(hbX, hbY, hbW * pct, hbH, 2);
   ctx.fill();
+  // Phase 5A: delayed "drain" ghost — white bar trails behind on damage.
+  if (Game.healthDrain !== undefined && Game.healthDrain !== null) {
+    const drainPct = clamp(Game.healthDrain / Math.max(1, Game.maxHealth), 0, 1);
+    if (drainPct > pct + 0.005) {
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = 'rgba(255,250,240,0.95)';
+      pathRoundRect(hbX + hbW * pct, hbY, hbW * (drainPct - pct), hbH, 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
   ctx.strokeStyle = cineHud ? 'rgba(255,205,130,0.92)' : '#f5d76e'; ctx.lineWidth = 1;
   pathRoundRect(hbX, hbY, hbW, hbH, 2);
   ctx.stroke();
