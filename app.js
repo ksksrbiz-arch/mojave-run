@@ -5658,7 +5658,12 @@ function startRun(mode, level) {
   Game.lastResultsSnapshot = null;
   const speedModeMul = mode === 'winding' ? 1.35 : 1;
   const baseSpeed = 280 * (Game.levelData ? (0.85 + Game.levelData.diff * 0.15) : 1) * speedModeMul;
-  Game.speed = baseSpeed * 0.6; Game.targetSpeed = baseSpeed;
+  // Classic and winding runs start at full speed for immediate engagement
+  // (matches the original v2 feel where you hit the road at pace).
+  // Structured modes (gauntlet, campaign) keep the 0.6 ramp-in so the
+  // opening seconds aren't instantly at peak difficulty.
+  const speedStartFactor = (mode === 'classic' || mode === 'winding') ? 1.0 : 0.6;
+  Game.speed = baseSpeed * speedStartFactor; Game.targetSpeed = baseSpeed;
   Game.activeWeaponSpec = getActiveWeaponSpec();
   stats = applyRunStatLayers(stats, profile, mode);
   // Vehicle Wear & Tear: low-condition rides suffer handling/HP penalties.
@@ -7473,7 +7478,11 @@ function updateClassicHandling(dt, p, stats) {
   // Scaled by speed so it only bites at pace; multiplied by surface grip
   // (less push on dirt) and softened during drift (you're sliding anyway).
   const corneringMul = Game.classicDrifting ? 0.55 : 1.0;
-  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.55 * corneringMul * surfGrip * (CLASSIC_LATERAL_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_LATERAL_TRACTION_RANGE);
+  // Reduced from 0.55 to 0.22: curves are a gentle guide rather than an
+  // active force. The original v2 feel had direct, predictable steering;
+  // too strong a lateral push caused unfair edge-of-road deaths that hurt
+  // the "one-more-run" motivation.
+  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.22 * corneringMul * surfGrip * (CLASSIC_LATERAL_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_LATERAL_TRACTION_RANGE);
   p.vx -= lateralPush * dt;
   p.x  += p.vx * dt;
 
@@ -7782,7 +7791,9 @@ function update(dt) {
   // difficulty ramp (classic: by distance; gauntlet: fixed per level; timeattack: aggressive)
   if (Game.mode === 'classic') {
     const lvl = 1 + Math.floor(Game.distance / 1500);
-    Game.targetSpeed = 280 + Math.min(420, lvl * 28);
+    // Raised cap from 420→520 (max speed 800 vs old 700) so long runs feel
+    // increasingly intense — closer to the original v2 top-speed ceiling of 900.
+    Game.targetSpeed = 280 + Math.min(520, lvl * 32);
   } else if (Game.mode === 'winding') {
     // Winding mode ramps faster than classic (shorter level span + higher base and cap).
     const lvl = 1 + Math.floor(Game.distance / 1200);
