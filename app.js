@@ -3056,6 +3056,7 @@ const Haptics = {
   victory()  { this.vibrate([0, 30, 30, 30, 30, 80], 'victory', 0); },
   combo(tier){ this.vibrate(tier >= 4 ? [0,30,15,30] : tier >= 2 ? [0,18,10,18] : 12, 'combo', 260); },
   nearMiss() { this.vibrate(8, 'nearMiss', 180); },
+  targetLock(){ this.vibrate([0, 10, 18, 18], 'targetLock', 260); },
 };
 
 // ============================================================
@@ -3642,6 +3643,7 @@ const SFX = {
   nitroOn:() => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.42, 0.18, 2400, t); tone(140, 0.3, 'sawtooth', 0.095, 440, t); tone(320, 0.2, 'triangle', 0.03, 480, t + 0.08); },
   combo:  (tier) => { const f = 430 + Math.min(tier, 12) * 90; tone(f, 0.09, 'square', 0.058, 40); tone(f * 1.5, 0.06, 'triangle', 0.04, 60, audioCtx ? audioCtx.currentTime + 0.01 : 0); },
   nearMiss:() => { const t = audioCtx ? audioCtx.currentTime : 0; tone(980, 0.045, 'triangle', 0.045, 220, t); tone(1320, 0.05, 'triangle', 0.035, 260, t + 0.025); },
+  targetLock: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(880, 0.055, 'triangle', 0.042, 180, t); tone(1320, 0.08, 'sine', 0.038, 80, t + 0.045); },
   mortar: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(64, 0.54, 'sawtooth', 0.085, -18, t); filteredNoise(0.42, 0.11, 620, t + 0.01); },
   rocket: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(150, 0.38, 'square', 0.078, -58, t); filteredNoise(0.24, 0.09, 1900, t + 0.01); },
   // Electric crack for the thunder horn and lightning strikes
@@ -3650,6 +3652,21 @@ const SFX = {
   chainsaw: () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.32, 0.14, 600, t, audioSfxGain, 'lowpass', 0.6); tone(88, 0.3, 'sawtooth', 0.07, 30, t, audioSfxGain); tone(175, 0.2, 'sawtooth', 0.04, 20, t + 0.04, audioSfxGain); },
   // Rising adrenaline sweep for the adrenaline powerup
   adrenaline: () => { const t = audioCtx ? audioCtx.currentTime : 0; [320, 480, 720, 1080, 1520].forEach((f, i) => tone(f, 0.09, 'square', 0.052, 40, t + i * 0.04)); filteredNoise(0.22, 0.06, 2800, t + 0.1, audioSfxGain, 'highpass', 0.9); },
+  // Phase 4B: critical hits intentionally have no dedicated SFX (silent no-op)
+  // — the visual shockwave + sparks carry the moment, and adding another
+  // layer over the standard hit/explode stack just causes audio clutter.
+  crit:   () => {},
+  // Heavy chassis thud + brief debris rattle when a destroyed enemy leaves
+  // a wreck on the road; pairs with multi-stage destruction visuals.
+  wreckThud: () => { const t = audioCtx ? audioCtx.currentTime : 0; tone(58, 0.36, 'sawtooth', 0.085, -28, t); filteredNoise(0.28, 0.14, 380, t + 0.02, audioSfxGain, 'lowpass', 0.5); tone(110, 0.18, 'triangle', 0.05, -16, t + 0.06); filteredNoise(0.18, 0.07, 1800, t + 0.08, audioSfxGain, 'bandpass', 0.7); },
+  // Phase 4B: Short, dry metallic clatter for debris bouncing on the road.
+  // Two tight band-pass noise bursts plus a high triangle ping. Kept very
+  // short (<0.15s total) so multiple debris hits per frame still feel light.
+  debrisClatter: () => { const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.06, 0.04, 2600, t, audioSfxGain, 'bandpass', 1.4); filteredNoise(0.07, 0.05, 1800, t + 0.04, audioSfxGain, 'bandpass', 1.1); tone(1620, 0.05, 'triangle', 0.022, 80, t + 0.02, audioSfxGain); },
+  // Phase 2A: Tire squeal for hard drifts / low-grip surfaces.
+  // High-pitched, modulated noise with a falling pitch tail. Volume
+  // arg (0..1) lets the caller scale by slip magnitude.
+  tireSqueal: (vol) => { const v = clamp(vol == null ? 1 : vol, 0, 1); if (v <= 0.04) return; const t = audioCtx ? audioCtx.currentTime : 0; filteredNoise(0.18 + 0.1 * v, 0.045 * v, 3400, t, audioSfxGain, 'bandpass', 1.7); tone(1320, 0.18, 'sawtooth', 0.018 * v, -360, t, audioSfxGain); tone(880, 0.12, 'triangle', 0.012 * v, -180, t + 0.04, audioSfxGain); },
 };
 
 // ============================================================
@@ -4152,6 +4169,13 @@ const RUN_MOMENT_BIG_SCRAP = 1000;
 const RUN_MOMENT_SWEEP_KILLS = 50;
 const RUN_MOMENT_LONG_HAUL_DISTANCE = 2000;
 const KILL_STREAK_LABEL = ' KILL STREAK';
+const IMPACT_HITSTOP_LIGHT = 0.016;
+const IMPACT_HITSTOP_MEDIUM = 0.026;
+const IMPACT_HITSTOP_HEAVY = 0.038;
+const COMBAT_WRECK_SPAWN_CHANCE = 0.52;
+const COMBAT_WRECK_MAX = 14;
+const POWERUP_WARNING_SECONDS = 2.0;
+const PICKUP_ATTRACT_RADIUS = 190;
 
 function getWastelandReputation() {
   // These are end-of-run flavor titles, not a second achievement list.
@@ -4181,6 +4205,74 @@ function comboMult() {
     if (c >= COMBO_THRESHOLDS[i]) m = COMBO_MULTS[i];
   }
   return m;
+}
+
+function requestHitStop(seconds) {
+  if (Game.mode === 'arena') return;
+  if (Game.state !== 'playing') return;
+  if (!seconds || seconds <= 0) return;
+  Game.hitStopT = Math.max(Game.hitStopT || 0, seconds);
+}
+
+// Phase 1 — Road-edge dust kicks at high speed. Spawns a few low, gravity-
+// pulled tan dust puffs along the road shoulders proportional to forward
+// speed. Pure cosmetic; respects PerfMon quality and Settings.reducedMotion.
+function emitRoadEdgeDust(dt) {
+  if (Settings && Settings.reducedMotion) return;
+  if (!Game.player) return;
+  if (Game.mode === 'arena' || Game.mode === 'zombie') return;
+  const q = (PerfMon && PerfMon.quality) || 0.5;
+  if (q < 0.4) return;
+  const speedN = clamp(Game.speed / 460, 0, 1);
+  if (speedN < 0.45) return;
+  // Spawn 0–3 puffs per frame based on speed and quality.
+  const rate = (speedN - 0.45) * 22 * q;
+  Game._dustAcc = (Game._dustAcc || 0) + rate * dt;
+  while (Game._dustAcc >= 1) {
+    Game._dustAcc -= 1;
+    const onLeft = Math.random() < 0.5;
+    const yy = H * (0.55 + Math.random() * 0.42);
+    const rb = roadBounds ? roadBounds(yy) : null;
+    if (!rb) break;
+    const edgeX = onLeft ? rb.x0 - rand(2, 18) : rb.x1 + rand(2, 18);
+    const drift = (onLeft ? -1 : 1) * rand(20, 50);
+    Game.particles.push({
+      x: edgeX,
+      y: yy,
+      vx: drift,
+      vy: rand(-10, 18) + Game.speed * 0.04,
+      gravity: 30,
+      life: 0.5 + Math.random() * 0.4,
+      max: 0.9,
+      size: 7 + Math.random() * 6,
+      shape: 'smoke',
+      color: 'rgba(190,160,110,0.32)',
+    });
+  }
+}
+
+function maybeSpawnCombatWreck(e) {
+  if (!e || e.kind === 'zombie') return;
+  if (!(W > 0)) return;
+  if (Math.random() >= COMBAT_WRECK_SPAWN_CHANCE) return;
+  let wreckCount = 0;
+  for (let i = 0; i < Game.obstacles.length; i++) {
+    if (Game.obstacles[i] && Game.obstacles[i].combatWreck) wreckCount++;
+  }
+  if (wreckCount >= COMBAT_WRECK_MAX) return;
+  if (SFX && SFX.wreckThud) SFX.wreckThud();
+  Game.obstacles.push({
+    kind: 'wreck',
+    combatWreck: true,
+    x: clamp(e.x + rand(-8, 8), 26, W - 26),
+    y: e.y + rand(-6, 6),
+    w: clamp((e.w || 36) + rand(-6, 8), 24, 52),
+    h: clamp((e.h || 50) + rand(-8, 10), 28, 72),
+    rot: rand(-0.42, 0.42),
+    vy: rand(8, 26),
+    ttl: rand(4.2, 7.5),
+    emberT: rand(0.05, 0.2),
+  });
 }
 
 function applyKill(x, y, baseScore) {
@@ -4248,7 +4340,7 @@ function awardNearMiss(e) {
 }
 
 // ── Phase 4C: cinematic enemy explosion — multi-ring shockwaves + spark streaks + smoke puffs
-function emitExplosion(x, y, scale) {
+function emitExplosion(x, y, scale, kind = null) {
   scale = scale || 1;
   if (!PerfMon || PerfMon.quality < 0.2) {
     emit(x, y, 10, { color: '#ff7a28', speed: 300, life: 0.65, size: 4, spread: Math.PI * 2 });
@@ -4263,9 +4355,103 @@ function emitExplosion(x, y, scale) {
     emit(x, y, Math.round(4 * q * scale), { color: 'rgba(50,44,36,0.45)', speed: 55 * scale, life: 1.1, size: 14 * scale, shape: 'smoke', spread: Math.PI * 2 });
   }
   emit(x, y, Math.round(7 * q * scale), { color: '#7a5028', speed: 280 * scale, life: 0.6, size: 6 * scale, shape: 'rect', spread: Math.PI * 2 });
+  // Per-enemy debris/shrapnel — cosmetic only. Tanks/mortars spray heavy metal
+  // chunks; drones rain blue glass shards; bikes throw tire fragments.
+  if (q > 0.3) emitDebrisFor(x, y, scale, kind);
   shockwave(x, y, 'rgba(255,180,80,0.65)', 70 * scale);
   if (q > 0.5) shockwave(x, y, 'rgba(255,220,130,0.35)', 45 * scale);
   if (q > 0.7 && scale >= 1) shockwave(x, y, 'rgba(255,140,50,0.22)', 110 * scale);
+}
+
+// Cosmetic debris helper used by explosions and big destruction. Emits a small
+// burst of bouncy shrapnel/glass/tire chunks based on the enemy kind. Pure
+// visual — never affects gameplay, never spawns gameplay-blocking obstacles.
+function emitDebrisFor(x, y, scale, kind = null) {
+  const q = (PerfMon && PerfMon.quality) || 0.5;
+  scale = scale || 1;
+  const cnt = Math.max(2, Math.round((kind === 'tank' ? 10 : kind === 'mortar' ? 8 : kind === 'drone' ? 6 : 5) * q * scale));
+  // metal chunks
+  for (let i = 0; i < cnt; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const sp = (160 + Math.random() * 220) * scale;
+    Game.particles.push({
+      x, y,
+      vx: Math.cos(ang) * sp,
+      vy: Math.sin(ang) * sp - 80 * scale,
+      gravity: 520,
+      life: 0.55 + Math.random() * 0.5,
+      max: 1.05,
+      size: 2 + ((Math.random() * 3) | 0),
+      shape: 'rect',
+      rot: Math.random() * Math.PI * 2,
+      color: kind === 'drone'
+        ? 'rgba(160,200,240,0.85)'
+        : 'rgba(170,150,120,0.85)',
+    });
+  }
+  // drones rain blue glass shards
+  if (kind === 'drone') {
+    for (let i = 0; i < Math.round(5 * q * scale); i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = (200 + Math.random() * 180) * scale;
+      Game.particles.push({
+        x, y,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp - 60 * scale,
+        gravity: 480,
+        life: 0.4 + Math.random() * 0.35,
+        max: 0.75,
+        size: 2,
+        shape: 'spark',
+        color: 'rgba(140,210,255,0.92)',
+      });
+    }
+  }
+  // bikes throw tire fragments (rubber)
+  if (kind === 'bike') {
+    for (let i = 0; i < Math.round(4 * q * scale); i++) {
+      Game.particles.push({
+        x: x + (Math.random() - 0.5) * 12,
+        y,
+        vx: (Math.random() - 0.5) * 220 * scale,
+        vy: -(80 + Math.random() * 140) * scale,
+        gravity: 620,
+        life: 0.6 + Math.random() * 0.4,
+        max: 1.0,
+        size: 3,
+        shape: 'rect',
+        rot: Math.random() * Math.PI * 2,
+        color: 'rgba(34,28,26,0.92)',
+      });
+    }
+  }
+  // tank/mortar — heavy oily plumes already covered by explosion smoke, add
+  // a few long-life ember sparks for emphasis.
+  if (kind === 'tank' || kind === 'mortar') {
+    for (let i = 0; i < Math.round(6 * q * scale); i++) {
+      const ang = Math.random() * Math.PI * 2;
+      Game.particles.push({
+        x, y,
+        vx: Math.cos(ang) * 260 * scale,
+        vy: Math.sin(ang) * 260 * scale - 60 * scale,
+        gravity: 380,
+        life: 0.7 + Math.random() * 0.5,
+        max: 1.2,
+        size: 2,
+        shape: 'spark',
+        color: 'rgba(255,170,80,0.95)',
+      });
+    }
+  }
+  // Phase 4B audio: a short metallic clatter accompanies the debris burst.
+  // Throttled so a chain explosion doesn't stack the sound on itself.
+  if (SFX && SFX.debrisClatter) {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (!Game._lastDebrisClatterT || now - Game._lastDebrisClatterT > 70) {
+      Game._lastDebrisClatterT = now;
+      SFX.debrisClatter();
+    }
+  }
 }
 
 function applyCivilianPenalty(x, y, kind) {
@@ -4517,9 +4703,27 @@ function hexToRgba(hex, a) {
 }
 
 function updatePowerups(dt) {
+  if ((Game.powerWarnSfxT || 0) > 0) Game.powerWarnSfxT = Math.max(0, Game.powerWarnSfxT - dt);
+  // Phase 5A: animated health bar — delayed "ghost" drain that chases the
+  // live HP value so damage taken is visually telegraphed. Initialized lazily
+  // on first frame of a run so legacy save states are unaffected.
+  if (Game.state === 'playing' && Game.maxHealth > 0) {
+    if (Game.healthDrain == null) Game.healthDrain = Game.health;
+    if (Game.healthDrain > Game.health) {
+      const delay = (Game._healthDrainDelay = Math.max(0, (Game._healthDrainDelay || 0) - dt));
+      if (delay <= 0) {
+        const rate = Math.max(8, (Game.healthDrain - Game.health) * 1.4) * dt + 22 * dt;
+        Game.healthDrain = Math.max(Game.health, Game.healthDrain - rate);
+      }
+    } else if (Game.healthDrain < Game.health) {
+      // healing — snap up immediately
+      Game.healthDrain = Game.health;
+    }
+  }
   for (const id of POWERUP_KEYS) {
     const p = Game.powerups[id];
     if (p && p.t > 0) {
+      const prevT = p.t;
       if (id === 'pulse') {
         p.tick = (p.tick || 0) - dt;
         if (p.tick <= 0) {
@@ -4528,6 +4732,15 @@ function updatePowerups(dt) {
         }
       }
       p.t -= dt;
+      if (prevT > POWERUP_WARNING_SECONDS && p.t <= POWERUP_WARNING_SECONDS) {
+        p.warnT = 0.55;
+        addPopup((POWERUPS[id] ? POWERUPS[id].name : id).toUpperCase() + ' LOW!', W * 0.5, H * 0.2, '#ffd86b', 12);
+        if ((Game.powerWarnSfxT || 0) <= 0) {
+          Game.powerWarnSfxT = 0.45;
+          SFX.click && SFX.click();
+        }
+      }
+      if (p.warnT > 0) p.warnT = Math.max(0, p.warnT - dt);
       if (p.t <= 0) {
         Game.powerups[id] = null;
         // visual cue when shield drops
@@ -5025,6 +5238,11 @@ const Game = {
   health: 100,
   maxHealth: 100,
   fireCooldown: 0,
+  lockTarget: null,
+  lockT: 0,
+  lockStrength: 0,
+  lockReady: false,
+  lockPulseT: 0,
   spawnTimer: 0,
   pickupTimer: 0,
   shake: 0,
@@ -5036,6 +5254,8 @@ const Game = {
   playerTrail: [],
   flash: 0,
   hitFlash: 0,            // brief vehicle hit indicator
+  hitStopT: 0,            // short global freeze-frame timer for impact feel
+  powerWarnSfxT: 0,       // anti-spam cooldown for power-up expiry warning SFX
   hintTime: 0,
   laneOffset: 0,
   windingRoad: null,      // procedural curve params for winding mode
@@ -5448,6 +5668,11 @@ function startRun(mode, level) {
   Game.maxHealth = Math.round(stats.maxHp);
   Game.health = Game.maxHealth;
   Game.fireCooldown = 0;
+  Game.lockTarget = null;
+  Game.lockT = 0;
+  Game.lockStrength = 0;
+  Game.lockReady = false;
+  Game.lockPulseT = 0;
   Game.spawnTimer = 0.6;
   Game.pickupTimer = 3;
   if (Game.customConfig) {
@@ -5567,6 +5792,10 @@ function startRun(mode, level) {
   Game.comboT = 0;
   Game.comboBest = 0;
   Game.comboPulseT = 0;
+  Game.hitStopT = 0;
+  Game.powerWarnSfxT = 0;
+  Game.healthDrain = null;
+  Game._healthDrainDelay = 0;
   Game._pendingBadges = [];
   Game._pendingCosmetics = [];
   for (const k of POWERUP_KEYS) Game.powerups[k] = null;
@@ -6189,11 +6418,15 @@ function maybeEliteEnemy(enemy, forceElite) {
     : Game.mode === 'classic'
       ? Math.min(0.22, 0.05 + Game.distance / 22000)
       : 0.12;
-  if (!forceElite && Math.random() >= chance) return enemy;
+  if (!forceElite && Math.random() >= chance) {
+    if (enemy && enemy.hpMax == null) enemy.hpMax = enemy.hp;
+    return enemy;
+  }
   enemy.elite = true;
   enemy.hp = Math.ceil(enemy.hp * 2);
   enemy.fireT *= 0.7;
   enemy.vy *= 1.08;
+  enemy.hpMax = enemy.hp;
   return enemy;
 }
 
@@ -6240,6 +6473,7 @@ function spawnEnemy(forceKind, forceElite) {
         vx: rand(-def.vxRange, def.vxRange),
         vy: def.vy * (0.85 + Math.random() * 0.3) * Math.min(1.6, waveDiff),
         hp: def.hp, fireT: 999, // zombies never shoot
+        hpMax: def.hp,
         contact: def.contact,
         zombieScore: def.score * (waveDiff > 2 ? 1.4 : 1),
         color: def.color, goreColor: def.goreColor, accent: def.accent,
@@ -7151,6 +7385,20 @@ function updateClassicHandling(dt, p, stats) {
   const tractionTarget = clamp((surfGrip * (1 - speedFrac * CLASSIC_TRACTION_SPEED_GRIP_DROP)) - Math.max(0, slipN - CLASSIC_TRACTION_SLIP_THRESHOLD) * CLASSIC_TRACTION_SLIP_PENALTY, CLASSIC_TRACTION_MIN, 1);
   Game.classicTractionN = (Game.classicTractionN || 1) * (1 - CLASSIC_TRACTION_LERP) + tractionTarget * CLASSIC_TRACTION_LERP;
 
+  // Phase 2A: Tire squeal SFX modulated by traction loss. Fires periodically
+  // (every 0.18s) while grip is low enough to slide. Volume scales with the
+  // amount of slip. Skipped under reduced motion to keep audio quiet.
+  if (SFX && SFX.tireSqueal && !(Settings && Settings.reducedMotion)) {
+    const slipAmt = 1 - clamp(Game.classicTractionN || 1, 0, 1);
+    const fastEnough = speedFrac > 0.42;
+    Game._tireSquealCd = (Game._tireSquealCd || 0) - dt;
+    if (fastEnough && slipAmt > 0.22 && Game._tireSquealCd <= 0) {
+      // Re-fire faster when slip is heavier so the squeal feels continuous.
+      Game._tireSquealCd = 0.22 - 0.1 * slipAmt;
+      SFX.tireSqueal(slipAmt);
+    }
+  }
+
   // -- drift state machine --
   // Enter drift when player holds hard steer at speed for >0.18s, or when
   // |vx| already exceeds 0.7*maxV (carried slide).
@@ -7366,6 +7614,7 @@ function update(dt) {
   Game.shake = Math.max(0, Game.shake - dt * 2.4);
   Game.flash = Math.max(0, Game.flash - dt * 3);
   if (Game.muzzleT > 0) Game.muzzleT -= dt;
+  emitRoadEdgeDust(dt);
 
   // Living Road: decay surface, spawn/move debris, apply crack chip damage,
   // tick manual-repair cooldown. Internally no-ops for arena/winding modes.
@@ -7690,6 +7939,7 @@ function update(dt) {
   // ---- fire ----
   Game.fireCooldown -= dt;
   const wantsFire = input.fire || Settings.autoFire;
+  updateTargetLock(dt, wantsFire);
   if (!Game.spinout && wantsFire && Game.fireCooldown <= 0) {
     fireGuns();
     // Light haptic on manual touch fire (not spammed on autoFire)
@@ -7711,6 +7961,7 @@ function update(dt) {
   // ---- bullets ----
   for (let i = Game.bullets.length - 1; i >= 0; i--) {
     const b = Game.bullets[i];
+    b.px = b.x; b.py = b.y;
     // Homing: steer toward nearest enemy or boss at a limited turn rate
     if (b.homing && (Game.enemies.length > 0 || Game.boss)) {
       let tx = null, ty = null, bestDist = Infinity;
@@ -7743,6 +7994,7 @@ function update(dt) {
   }
   for (let i = Game.enemyBullets.length - 1; i >= 0; i--) {
     const b = Game.enemyBullets[i];
+    b.px = b.x; b.py = b.y;
     b.y += b.vy * dt; b.x += (b.vx || 0) * dt;
     if (b.gravity) b.vy += b.gravity * dt;
     if (b.telegraph) b.telegraph.t -= dt;
@@ -7770,6 +8022,21 @@ function update(dt) {
       }
     } else {
       o.y += Game.speed * dt;
+    }
+    if (o.combatWreck) {
+      o.ttl = (o.ttl || 0) - dt;
+      o.emberT = (o.emberT || 0) - dt;
+      if (o.emberT <= 0 && visualQualityLevel() >= 1) {
+        o.emberT = rand(0.07, 0.22);
+        Game.particles.push({
+          x: o.x + rand(-o.w * 0.28, o.w * 0.28),
+          y: o.y - o.h * 0.18,
+          vx: rand(-16, 16), vy: rand(-52, -18),
+          life: 0.35, max: 0.35, size: 3 + (Math.random() * 2) | 0,
+          color: 'rgba(255,125,45,0.78)', shape: 'spark',
+        });
+      }
+      if (o.ttl <= 0) { Game.obstacles.splice(i, 1); continue; }
     }
     if (o.y > H + 80) { Game.obstacles.splice(i,1); continue; }
 
@@ -7815,6 +8082,7 @@ function update(dt) {
             emit(o.x, o.y, 26, { color:'#ff8a3d', speed:320, life:0.7, size:4 });
             emit(o.x, o.y, 12, { color:'#ffd86b', speed:220, life:0.5, size:3 });
             shockwave(o.x, o.y, 'rgba(255,140,60,0.5)', 90);
+            requestHitStop(IMPACT_HITSTOP_MEDIUM);
             Game.shake = Math.max(Game.shake, 0.5);
             Game.score += 50;
             splashDamage(o.x, o.y, 70, 1);
@@ -7839,6 +8107,47 @@ function update(dt) {
     if (e.spawnAnimT > 0) e.spawnAnimT = Math.max(0, e.spawnAnimT - dt);
     if (e.hitAnimT > 0) e.hitAnimT = Math.max(0, e.hitAnimT - dt);
     if (e.storyAnimT > 0) e.storyAnimT = Math.max(0, e.storyAnimT - dt);
+    // Phase 2B: Damage telegraph — wounded enemies (≤35% HP) trail dark
+    // smoke; ≤15% HP also pops the occasional ember. Cosmetic only; gated
+    // by quality, skipped for zombies (they have their own gore system)
+    // and tiny low-HP enemies where it would dominate the sprite.
+    if (e.kind !== 'zombie' && e.hpMax && e.hp > 0 && e.hp < e.hpMax * 0.35
+        && PerfMon && PerfMon.quality > 0.35
+        && !(Settings && Settings.reducedMotion)) {
+      e._smokeT = (e._smokeT || 0) - dt;
+      if (e._smokeT <= 0) {
+        const hpFrac = e.hp / e.hpMax;
+        // Closer to dying → faster, darker puffs.
+        e._smokeT = 0.05 + 0.18 * hpFrac;
+        const dark = hpFrac < 0.15 ? 'rgba(28,24,22,0.7)' : 'rgba(60,55,50,0.55)';
+        Game.particles.push({
+          x: e.x + (Math.random() - 0.5) * (e.w * 0.4),
+          y: e.y - e.h * 0.3,
+          vx: (Math.random() - 0.5) * 28,
+          vy: -18 - Math.random() * 22,
+          gravity: -8,
+          life: 0.55 + Math.random() * 0.35,
+          max: 0.95,
+          size: 6 + Math.random() * 4,
+          shape: 'smoke',
+          color: dark,
+        });
+        if (hpFrac < 0.15 && Math.random() < 0.4) {
+          Game.particles.push({
+            x: e.x + (Math.random() - 0.5) * (e.w * 0.3),
+            y: e.y - e.h * 0.2,
+            vx: (Math.random() - 0.5) * 80,
+            vy: -40 - Math.random() * 40,
+            gravity: 220,
+            life: 0.35 + Math.random() * 0.3,
+            max: 0.65,
+            size: 2,
+            shape: 'spark',
+            color: 'rgba(255,160,70,0.9)',
+          });
+        }
+      }
+    }
     // movement per kind
     if (e.kind === 'bike') {
       e.wave += e.waveSpeed * dt;
@@ -7971,8 +8280,13 @@ function update(dt) {
           e.storyAnimT = Math.max(e.storyAnimT || 0, STORY_ANIM_MIN_DURATION);
         }
         applyWeaponSpecHit(b, e, dmg);
-        if (Settings.damageNumbers) addPopup('-' + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', 11);
+        if (Settings.damageNumbers) addPopup((b.crit ? '⚡ -' : '-') + Math.round(dmg), e.x, e.y - 8, b.crit ? '#ffb36a' : '#ffd86b', b.crit ? 15 : 11);
         emit(b.x, b.y, 5, { color:'#ffd86b', speed:200, life:0.3, size:2 });
+        if (b.crit && visualQualityLevel() >= 1) {
+          shockwave(b.x, b.y, 'rgba(255,180,90,0.55)', 26);
+          emit(b.x, b.y, 6, { color:'#ffb36a', speed:240, life:0.25, size:2, shape:'spark', spread: Math.PI * 2 });
+          if (SFX && SFX.crit) SFX.crit();
+        }
         if (e.hp <= 0) {
           SFX.explode();
           const isBike = e.kind === 'bike';
@@ -7992,7 +8306,8 @@ function update(dt) {
           } else {
             const bigExplosion = isMortar || isTank;
             const explScale = isTank ? 1.5 : isMortar ? 1.3 : isDrone ? 0.85 : 1.0;
-            emitExplosion(e.x, e.y, explScale);
+            emitExplosion(e.x, e.y, explScale, e.kind);
+            maybeSpawnCombatWreck(e);
             if (isDrone) {
               // extra purple sparks for drone
               emit(e.x, e.y, 10, { color:'#c87af0', speed:280, life:0.6, size:3, shape:'spark', spread: Math.PI * 2 });
@@ -8000,6 +8315,11 @@ function update(dt) {
             if (bigExplosion) Game.shake = Math.max(Game.shake, 0.7);
             else Game.shake = Math.max(Game.shake, 0.5);
           }
+          requestHitStop(
+            (isTank || isMortar) ? IMPACT_HITSTOP_HEAVY :
+            (b.big || b.crit) ? IMPACT_HITSTOP_MEDIUM :
+            IMPACT_HITSTOP_LIGHT
+          );
           applyKill(e.x, e.y, baseScore);
           // drops
           const dropR = Math.random();
@@ -8030,11 +8350,13 @@ function update(dt) {
       if (isPowerupActive('shield')) {
         emit(e.x, e.y, 24, { color:'#7aaaff', speed: 280, life: 0.5, size: 3 });
         shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.55)', 80);
+        requestHitStop(IMPACT_HITSTOP_LIGHT);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         Game.enemies.splice(i,1);
         clearEnemyShotsFrom(e);
         Game.shake = Math.max(Game.shake, 0.5);
       } else if (e.hp <= 0) {
+        requestHitStop(IMPACT_HITSTOP_LIGHT);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 150);
         if (isZombie) {
           emit(e.x, e.y, 10, { color:'#5a7a3a', speed:200, life:0.5, size:3 });
@@ -8057,6 +8379,7 @@ function update(dt) {
           e.storyAnimT = Math.max(e.storyAnimT || 0, 0.5);
         } else {
           emit(e.x, e.y, 24, { color:'#ff6a2b', speed:320, life:0.7, size:4 });
+          maybeSpawnCombatWreck(e);
           Game.enemies.splice(i,1);
           clearEnemyShotsFrom(e);
           Game.shake = Math.max(Game.shake, 0.7);
@@ -8094,6 +8417,7 @@ function update(dt) {
       if (isPowerupActive('shield')) {
         emit(b.x, b.y, 8, { color:'#7aaaff', speed: 220, life: 0.4, size: 3 });
         shockwave(Game.player.x, Game.player.y, 'rgba(122,170,255,0.4)', 50);
+        requestHitStop(IMPACT_HITSTOP_LIGHT);
       } else {
         damagePlayer(b.dmg || 8);
         emit(b.x, b.y, 6, { color:'#ff5050', speed:180, life:0.3, size:2 });
@@ -8109,6 +8433,8 @@ function update(dt) {
     pk.t += dt;
     if (pk.y > H + 40) { Game.pickups.splice(i,1); continue; }
     if (aabb(pk, Game.player)) {
+      emit(pk.x, pk.y, 6, { color:'#ffe7a0', speed:200, life:0.24, size:2, shape:'spark', spread:Math.PI * 2 });
+      if (visualQualityLevel() >= 1) shockwave(pk.x, pk.y, 'rgba(255,220,140,0.35)', 38);
       if (pk.kind === 'scrap') {
         const x2 = isPowerupActive('x2') ? 2 : 1;
         const salvageMul = isPowerupActive('salvage') ? 1.5 : 1;
@@ -8287,6 +8613,111 @@ function update(dt) {
   checkObjective();
 }
 
+const LOCK_ON_ACQUIRE_T = 0.55;
+const LOCK_ON_BASE_CONE_X = 150;
+const LOCK_ON_RANGE_Y = 620;
+const LOCK_ON_AIM_ASSIST = 0.42;
+const LOCK_ON_MIN_DY_BEHIND = -20;
+const LOCK_ON_AIM_SKIP_BEHIND_Y = 40;
+
+function lockTargetAlive(t) {
+  if (!t) return false;
+  if (t === Game.boss) return !!Game.boss && Game.boss.hp > 0;
+  return Game.enemies.indexOf(t) !== -1 && t.hp > 0;
+}
+
+function lockTargetScore(t, p) {
+  if (!t || !p) return Infinity;
+  const dy = p.y - t.y;
+  if (dy < LOCK_ON_MIN_DY_BEHIND || dy > LOCK_ON_RANGE_Y) return Infinity;
+  const dx = Math.abs((t.x || 0) - p.x);
+  const cone = LOCK_ON_BASE_CONE_X + dy * 0.18;
+  if (dx > cone) return Infinity;
+  const bossBias = t === Game.boss ? -140 : 0;
+  const eliteBias = t.elite ? -35 : 0;
+  return dx * 1.55 + dy * 0.32 + bossBias + eliteBias;
+}
+
+function findLockTarget() {
+  const p = Game.player;
+  let best = null, bestScore = Infinity;
+  for (const e of Game.enemies) {
+    const s = lockTargetScore(e, p);
+    if (s < bestScore) { best = e; bestScore = s; }
+  }
+  if (Game.boss) {
+    const s = lockTargetScore(Game.boss, p);
+    if (s < bestScore) best = Game.boss;
+  }
+  return best;
+}
+
+function updateTargetLock(dt, wantsFire) {
+  if (Game.lockPulseT > 0) Game.lockPulseT = Math.max(0, Game.lockPulseT - dt);
+  if (!wantsFire || Game.spinout || !Game.player) {
+    Game.lockT = Math.max(0, (Game.lockT || 0) - dt * 2.5);
+    Game.lockStrength = clamp((Game.lockT || 0) / LOCK_ON_ACQUIRE_T, 0, 1);
+    if (Game.lockT <= 0) {
+      Game.lockTarget = null;
+      Game.lockReady = false;
+    }
+    return;
+  }
+  let target = lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+  if (!target || lockTargetScore(target, Game.player) === Infinity) {
+    target = findLockTarget();
+    if (target !== Game.lockTarget) {
+      Game.lockT = Math.min(Game.lockT || 0, 0.12);
+      Game.lockReady = false;
+    }
+    Game.lockTarget = target;
+  }
+  if (!target) {
+    Game.lockT = 0;
+    Game.lockStrength = 0;
+    Game.lockReady = false;
+    return;
+  }
+  Game.lockT = Math.min(LOCK_ON_ACQUIRE_T, (Game.lockT || 0) + dt);
+  Game.lockStrength = clamp(Game.lockT / LOCK_ON_ACQUIRE_T, 0, 1);
+  const ready = Game.lockStrength >= 1;
+  if (ready && !Game.lockReady) triggerLockAcquired(target);
+  Game.lockReady = ready;
+}
+
+function getSustainedLockTarget() {
+  return Game.lockStrength >= 1 && lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+}
+
+function triggerLockAcquired(target) {
+  Game.lockPulseT = 0.42;
+  if (target) addPopup('TARGET LOCK', target.x, target.y - (target.h || 90) * 0.65, '#78ffd2', 12);
+  if (SFX && SFX.targetLock) SFX.targetLock();
+  if (Haptics && Haptics.targetLock) Haptics.targetLock();
+}
+
+function applyLockAimToShot(shot, target) {
+  if (!target || !shot || shot.homing) return shot;
+  const spd = Math.hypot(shot.vx || 0, shot.vy || 0);
+  if (!spd) return shot;
+  const leadT = clamp((shot.y - target.y) / Math.max(220, spd), 0, 0.35);
+  const tx = target.x + (target.vx || 0) * leadT;
+  const ty = target.y + (target.vy || 0) * leadT * 0.3;
+  const dx = tx - shot.x, dy = ty - shot.y;
+  if (dy > LOCK_ON_AIM_SKIP_BEHIND_Y) return shot;
+  const desired = Math.atan2(dy, dx);
+  const current = Math.atan2(shot.vy || 0, shot.vx || 0);
+  let dA = desired - current;
+  while (dA >  Math.PI) dA -= 2 * Math.PI;
+  while (dA < -Math.PI) dA += 2 * Math.PI;
+  const maxNudge = 0.55 * LOCK_ON_AIM_ASSIST;
+  const next = current + clamp(dA, -maxNudge, maxNudge);
+  shot.vx = Math.cos(next) * spd;
+  shot.vy = Math.sin(next) * spd;
+  shot.locked = true;
+  return shot;
+}
+
 function fireGuns() {
   const p = Game.player;
   const stats = Game.vehicleStats;
@@ -8298,6 +8729,8 @@ function fireGuns() {
   const makeShot = extra => {
     const crit = Math.random() < critChance;
     const mul = crit ? critMul : 1;
+    const lockTarget = getSustainedLockTarget();
+    const aimed = applyLockAimToShot(extra, lockTarget);
     return Object.assign({
       owner:'p',
       dmg: stats.dmg * overdriveMul * mul,
@@ -8308,12 +8741,32 @@ function fireGuns() {
       chain: Game.weaponSpecState && Game.weaponSpecState.bulletChain,
       chainDamageMul: Game.weaponSpecState && Game.weaponSpecState.chainDamageMul,
       hitIds: [],
-    }, extra);
+      lockTarget,
+    }, aimed);
   };
   const bigShot = v.base.bigShot;
   const muzzleColor = v.color.glow;
   const triple = isPowerupActive('triple');
   Game.muzzleT = 0.08;
+  if (visualQualityLevel() >= 1 && !Settings.reducedMotion) {
+    const casingCount = Math.min(8, Math.max(2, guns + (triple ? 2 : 0)));
+    for (let ci = 0; ci < casingCount; ci++) {
+      const side = ci % 2 === 0 ? -1 : 1;
+      Game.particles.push({
+        x: p.x + side * rand(8, 16),
+        y: p.y - rand(8, 18),
+        vx: side * rand(70, 150),
+        vy: rand(-140, -60),
+        gravity: 450,
+        life: rand(0.38, 0.62),
+        max: 0.62,
+        size: 3 + (Math.random() * 2) | 0,
+        shape: 'rect',
+        rot: rand(0, Math.PI * 2),
+        color: 'rgba(230,170,85,0.85)',
+      });
+    }
+  }
   if (bigShot) {
     Game.bullets.push(makeShot({ x:p.x, y:p.y - 30, w:8, h:18, vy:-720, big:true }));
     if (triple) {
@@ -8399,6 +8852,8 @@ function damagePlayer(amt) {
   Game.runDamageTaken = (Game.runDamageTaken || 0) + amt;
   Game.flash = 1;
   Game.hitFlash = 0.35;
+  Game._healthDrainDelay = 0.18;
+  requestHitStop(amt >= 28 ? IMPACT_HITSTOP_MEDIUM : IMPACT_HITSTOP_LIGHT);
   // Suspension impact kick — car jolts downward on hit
   Game.suspVelocity = (Game.suspVelocity || 0) + 4.5;
   // taking damage breaks the combo and bounty chain
@@ -8442,6 +8897,7 @@ function triggerPlayerDeath() {
   emit(px, py, 24, { color:'#ffd86b', speed:320, life:0.8, size:4 });
   shockwave(px, py, 'rgba(255,140,60,0.6)', 140);
   Game.shake = 1.4;
+  requestHitStop(IMPACT_HITSTOP_HEAVY);
   Game.flash = 1;
   SFX.death();
   Haptics.death();
@@ -8467,7 +8923,7 @@ function splashDamage(x, y, r, dmg) {
       e.hp -= dmg;
       if (e.hp <= 0) {
         SFX.explode();
-        emitExplosion(e.x, e.y, 0.9);
+        emitExplosion(e.x, e.y, 0.9, e.kind);
         applyKill(e.x, e.y, ENEMY_SCORE[e.kind] || 120);
         Game.enemies.splice(i,1);
         clearEnemyShotsFrom(e);
@@ -10931,12 +11387,31 @@ function drawObstacle(o) {
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
+    if (o.combatWreck) {
+      const burnPulse = 0.45 + 0.55 * Math.sin((Game.t || 0) * 10 + o.x * 0.03);
+      const fireG = ctx.createRadialGradient(0, -o.h * 0.12, 1, 0, -o.h * 0.12, o.w * 0.55);
+      fireG.addColorStop(0, `rgba(255,220,130,${0.30 * burnPulse})`);
+      fireG.addColorStop(0.55, `rgba(255,110,45,${0.28 * burnPulse})`);
+      fireG.addColorStop(1, 'rgba(255,70,20,0)');
+      ctx.fillStyle = fireG;
+      ctx.beginPath();
+      ctx.ellipse(0, -o.h * 0.12, o.w * 0.55, o.h * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
     pathRoundRect(-o.w/2 + 3, -o.h/2 + 4, o.w, o.h, 4);
     ctx.fill();
     ctx.fillStyle = '#5a4030';
     pathRoundRect(-o.w/2, -o.h/2, o.w, o.h, 4);
     ctx.fill();
+    if (o.combatWreck) {
+      ctx.fillStyle = 'rgba(20,12,8,0.65)';
+      pathRoundRect(-o.w/2 + 2, -o.h/2 + 10, o.w - 4, 8, 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,110,40,0.35)';
+      pathRoundRect(-o.w/2 + 6, -o.h/2 + 12, o.w * 0.36, 4, 1.5);
+      ctx.fill();
+    }
     ctx.fillStyle = '#3a2818';
     pathRoundRect(-o.w/2 + 4, -o.h/2 + 14, o.w - 8, 22, 3);
     ctx.fill();
@@ -11269,6 +11744,80 @@ function drawEnemyThreatHalos() {
       ctx.fill();
     }
   }
+  ctx.restore();
+}
+
+function drawTargetLockReticle() {
+  const target = lockTargetAlive(Game.lockTarget) ? Game.lockTarget : null;
+  const n = clamp(Game.lockStrength || 0, 0, 1);
+  if (!target || n <= 0.08 || PerfMon.quality < 0.35) return;
+  const w = target.w || 86, h = target.h || 100;
+  const r = Math.max(w, h) * (0.72 + (1 - n) * 0.25);
+  const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 16);
+  const acquiredPulse = clamp((Game.lockPulseT || 0) / 0.42, 0, 1);
+  const a = 0.22 + n * 0.58;
+  ctx.save();
+  ctx.translate(target.x, target.y);
+  if (acquiredPulse > 0) {
+    ctx.globalAlpha = acquiredPulse * 0.55;
+    ctx.strokeStyle = 'rgba(120,255,210,0.9)';
+    ctx.lineWidth = 2 + acquiredPulse * 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + (1 - acquiredPulse) * 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = n >= 1
+    ? `rgba(120,255,210,${a})`
+    : `rgba(255,210,90,${a})`;
+  ctx.lineWidth = 1.5 + n;
+  ctx.beginPath();
+  ctx.arc(0, 0, r + pulse * 2, -Math.PI * 0.35, Math.PI * 0.35);
+  ctx.arc(0, 0, r + pulse * 2, Math.PI * 0.65, Math.PI * 1.35);
+  ctx.stroke();
+  ctx.strokeStyle = n >= 1 ? 'rgba(200,255,235,0.8)' : 'rgba(255,235,150,0.7)';
+  const c = r * 0.35;
+  ctx.beginPath();
+  ctx.moveTo(-c, 0); ctx.lineTo(-c * 0.35, 0);
+  ctx.moveTo( c, 0); ctx.lineTo( c * 0.35, 0);
+  ctx.moveTo(0, -c); ctx.lineTo(0, -c * 0.35);
+  ctx.moveTo(0,  c); ctx.lineTo(0,  c * 0.35);
+  ctx.stroke();
+  if (n >= 1) {
+    ctx.fillStyle = 'rgba(120,255,210,0.85)';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('LOCK', 0, -r - 5);
+  }
+  ctx.restore();
+}
+
+function drawLockHudChip(hudH) {
+  const n = clamp(Game.lockStrength || 0, 0, 1);
+  if (Game.mode === 'arena' || n <= 0.04 || !lockTargetAlive(Game.lockTarget)) return;
+  const chipW = Math.min(124, W * 0.32);
+  const chipH = 12;
+  const x = (W - chipW) / 2;
+  const y = hudH + ((Game.mode === 'zombie' || Game.mode === 'wastelandrun') ? 27 : 10);
+  const ready = n >= 1;
+  ctx.save();
+  ctx.globalAlpha = 0.72 + n * 0.28;
+  ctx.fillStyle = Settings.hudContrast ? 'rgba(0,0,0,0.78)' : 'rgba(16,20,18,0.62)';
+  pathRoundRect(x, y, chipW, chipH, 4);
+  ctx.fill();
+  ctx.fillStyle = ready ? 'rgba(120,255,210,0.88)' : 'rgba(255,210,90,0.82)';
+  pathRoundRect(x + 2, y + 2, (chipW - 4) * n, chipH - 4, 3);
+  ctx.fill();
+  ctx.strokeStyle = ready ? 'rgba(190,255,235,0.88)' : 'rgba(255,235,150,0.72)';
+  ctx.lineWidth = 1;
+  pathRoundRect(x, y, chipW, chipH, 4);
+  ctx.stroke();
+  ctx.font = 'bold 8px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = ready ? '#d8fff4' : '#fff0b0';
+  ctx.fillText(ready ? 'TARGET LOCK' : 'LOCKING ' + Math.round(n * 100) + '%', W / 2, y + chipH / 2 + 0.5);
   ctx.restore();
 }
 
@@ -11988,8 +12537,25 @@ function drawBoss() {
 }
 
 function drawPickup(pk) {
+  const p = Game.player;
+  const distToPlayer = p ? Math.hypot((p.x || 0) - pk.x, (p.y || 0) - pk.y) : 9999;
+  const attractN = p ? clamp(1 - distToPlayer / PICKUP_ATTRACT_RADIUS, 0, 1) : 0;
   const bob = Math.sin(pk.t * 6) * 2;
   const detail = visualQualityLevel();
+  if (attractN > 0.05 && detail >= 1) {
+    const pulse = 0.5 + 0.5 * Math.sin((Game.t || 0) * 10 + pk.x * 0.02);
+    const ringR = 18 + attractN * 10 + pulse * 3;
+    const g = ctx.createRadialGradient(pk.x, pk.y + bob, ringR * 0.55, pk.x, pk.y + bob, ringR);
+    g.addColorStop(0, 'rgba(255,245,190,0)');
+    g.addColorStop(0.6, `rgba(255,220,125,${0.16 + attractN * 0.16})`);
+    g.addColorStop(1, 'rgba(255,210,110,0)');
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(pk.x, pk.y + bob, ringR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   if (pk.kind === 'scrap') {
     ctx.save();
     ctx.translate(pk.x, pk.y + bob);
@@ -12218,6 +12784,31 @@ function drawPickup(pk) {
 
 function drawBullets() {
   const glowOn = (PerfMon.quality > 0.25) && (Settings.particles > 0.4);
+  const withAlpha = (input, alpha) => {
+    const m = typeof input === 'string' ? input.match(/^rgba?\(([^)]+)\)$/i) : null;
+    if (!m) return input;
+    const parts = m[1].split(',').map(s => s.trim());
+    if (parts.length < 3) return input;
+    return `rgba(${parts[0]},${parts[1]},${parts[2]},${alpha})`;
+  };
+  const drawTracer = (b, color, width, alphaMul = 1) => {
+    if (!b || b.px === undefined || b.py === undefined) return;
+    const dx = b.x - b.px, dy = b.y - b.py;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 3) return;
+    const tx = b.x - dx * 0.85;
+    const ty = b.y - dy * 0.85;
+    const g = ctx.createLinearGradient(b.x, b.y, tx, ty);
+    const headColor = withAlpha(color, (0.95 * alphaMul).toFixed(2));
+    g.addColorStop(0, headColor);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = g;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+  };
 
   // ── Player bullets ──────────────────────────────────────────────
   if (glowOn && Game.bullets.length > 0) {
@@ -12246,6 +12837,9 @@ function drawBullets() {
   }
 
   for (const b of Game.bullets) {
+    if (b.homing) drawTracer(b, 'rgba(210,110,255,0.85)', 2.2, 0.95);
+    else if (b.big) drawTracer(b, 'rgba(120,255,175,0.85)', 2.8, 0.9);
+    else drawTracer(b, 'rgba(255,185,85,0.85)', 1.8, 1);
     if (b.big) {
       // Wide green plasma blob with pulsing corona
       const pCor = 0.65 + 0.35 * Math.sin((Game.t || 0) * 18);
@@ -12317,6 +12911,11 @@ function drawBullets() {
   }
 
   for (const b of Game.enemyBullets) {
+    if (!b.mortar) {
+      const enemyTracerColor = b.big ? 'rgba(255,110,110,0.85)' : 'rgba(255,80,65,0.85)';
+      const enemyTracerWidth = b.big ? 2.4 : 1.7;
+      drawTracer(b, enemyTracerColor, enemyTracerWidth, 0.85);
+    }
     if (b.mortar) {
       // Mortar shell — 3D-looking sphere with top-left shading
       if (b.telegraph) {
@@ -12561,6 +13160,7 @@ function drawPowerupStrip() {
   // small icon strip showing active power-ups, top-left under hudH
   const active = POWERUP_KEYS.filter(k => isPowerupActive(k));
   if (active.length === 0) return;
+  const detail = visualQualityLevel();
   const hudH = W < 500 ? 48 : 56;
   const ix = 14, iy = hudH + 6, sz = W < 500 ? 28 : 34, gap = 6;
   ctx.save();
@@ -12586,9 +13186,16 @@ function drawPowerupStrip() {
     ctx.fillStyle = def.color;
     ctx.fillRect(x, iy + sz - 3, sz * pct, 3);
     // flashing border when about to expire
-    if (p.t < 1.5 && Math.floor(p.t * 6) % 2 === 0) {
+    if (p.t < POWERUP_WARNING_SECONDS && Math.floor(p.t * 6) % 2 === 0) {
       ctx.strokeStyle = '#fff';
       ctx.strokeRect(x - 0.5, iy - 0.5, sz + 1, sz + 1);
+    }
+    if (p.warnT > 0 && detail >= 1) {
+      const wa = clamp(p.warnT / 0.55, 0, 1);
+      ctx.strokeStyle = `rgba(255,216,107,${0.75 * wa})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 2, iy - 2, sz + 4, sz + 4);
+      ctx.lineWidth = 1.5;
     }
   }
   ctx.lineWidth = 1;
@@ -12757,6 +13364,32 @@ function drawComboAura() {
   grad.addColorStop(1, `rgba(${hue[0]},${hue[1]},${hue[2]},${baseA * pulse})`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
+  // Phase 5A: at very high combos (multiplier ≥ 5), add an edge "flame" band
+  // that flickers along the screen sides. Cosmetic — no gameplay impact.
+  if (m >= 5 && !Settings.reducedMotion && visualQualityLevel() >= 1) {
+    const flick = 0.7 + 0.3 * Math.sin((Game.t || 0) * 17 + Math.cos((Game.t || 0) * 9.4));
+    const edgeA = Math.min(0.55, 0.18 + (m - 5) * 0.07) * flick;
+    const edgeW = Math.min(W, H) * (0.07 + Math.min(0.05, (m - 5) * 0.012));
+    const flameColor = m >= 7 ? [255, 80, 80] : [255, 150, 60];
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const eL = ctx.createLinearGradient(0, 0, edgeW, 0);
+    eL.addColorStop(0, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},${edgeA})`);
+    eL.addColorStop(1, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},0)`);
+    ctx.fillStyle = eL;
+    ctx.fillRect(0, 0, edgeW, H);
+    const eR = ctx.createLinearGradient(W - edgeW, 0, W, 0);
+    eR.addColorStop(0, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},0)`);
+    eR.addColorStop(1, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},${edgeA})`);
+    ctx.fillStyle = eR;
+    ctx.fillRect(W - edgeW, 0, edgeW, H);
+    const eB = ctx.createLinearGradient(0, H - edgeW, 0, H);
+    eB.addColorStop(0, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},0)`);
+    eB.addColorStop(1, `rgba(${flameColor[0]},${flameColor[1]},${flameColor[2]},${edgeA * 0.8})`);
+    ctx.fillStyle = eB;
+    ctx.fillRect(0, H - edgeW, W, edgeW);
+    ctx.restore();
+  }
 }
 
 // ── Depth-aware speed streaks — road-surface perspective streaks (classic/winding)
@@ -13048,6 +13681,7 @@ function drawHUD() {
     const icons = (zw.specialIcons && zw.specialIcons.length) ? zw.specialIcons.slice(-5).join(' ') : '—';
     ctx.fillText('SPECIALS ' + icons + ' · SURVIVORS ' + (zw.survivors ?? 0), W / 2, hudH + ZOMBIE_HUD_OFFSET_Y);
   }
+  drawLockHudChip(hudH);
 
   // hull bar
   const hbW = Math.min(180, W * 0.42), hbH = 10, hbX = (W - hbW) / 2, hbY = hudH * 0.4 - hbH/2;
@@ -13109,6 +13743,18 @@ function drawHUD() {
   }
   pathRoundRect(hbX, hbY, hbW * pct, hbH, 2);
   ctx.fill();
+  // Phase 5A: delayed "drain" ghost — white bar trails behind on damage.
+  if (Game.healthDrain !== undefined && Game.healthDrain !== null) {
+    const drainPct = clamp(Game.healthDrain / Math.max(1, Game.maxHealth), 0, 1);
+    if (drainPct > pct + 0.005) {
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = 'rgba(255,250,240,0.95)';
+      pathRoundRect(hbX + hbW * pct, hbY, hbW * (drainPct - pct), hbH, 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
   ctx.strokeStyle = cineHud ? 'rgba(255,205,130,0.92)' : '#f5d76e'; ctx.lineWidth = 1;
   pathRoundRect(hbX, hbY, hbW, hbH, 2);
   ctx.stroke();
@@ -13980,6 +14626,7 @@ function render() {
     for (const e of Game.enemies) drawEnemy(e);
     for (const pk of Game.pickups) drawPickup(pk);
     if (Game.boss) drawBoss();
+    drawTargetLockReticle();
     drawBullets();
     // player vehicle (none during dying — wreck takes its place)
     if (Game.state === 'dying') {
@@ -16530,7 +17177,15 @@ function frame(now) {
       if (Game.state !== 'playing') GamepadInput.poll();
       if (Game.state === 'playing' || Game.state === 'loading'
           || Game.state === 'dying' || Game.state === 'victory' || Game.state === 'replay') {
-        update(dt);
+        let simDt = dt;
+        if (Game.state === 'playing' && (Game.hitStopT || 0) > 0) {
+          // Hit-stop: freeze simulation for a tiny window (rendering still runs)
+          // to sell big impacts. The timer counts down here even though sim is
+          // paused, so the freeze ends after the requested duration.
+          Game.hitStopT = Math.max(0, (Game.hitStopT || 0) - dt);
+          simDt = 0;
+        }
+        update(simDt);
         capRuntimeArrays();
       }
       if (window.MP && MP.connected) {
@@ -18792,8 +19447,12 @@ const Cinematic = (function () {
   const cam = {
     rot: 0, rotTarget: 0,
     zoom: 1, zoomTarget: 1,
+    leadX: 0, leadXTarget: 0,
+    leadY: 0, leadYTarget: 0,
     lastPx: 0, lastT: 0,
   };
+  const CAM_EPS_ROT_ZOOM = 0.0008;
+  const CAM_EPS_LEAD = 0.01;
 
   function isOn() {
     // Hard gate: feature flag off OR very low quality kills cinematic FX so
@@ -18843,19 +19502,37 @@ const Cinematic = (function () {
   // translate that already happened.
   // ========================================================================
   function preTransform(ctx) {
-    if (!isOn()) { cam.rot *= 0.85; cam.zoom += (1 - cam.zoom) * 0.2; return; }
-    if (Game.state !== 'playing') { cam.rot *= 0.85; cam.zoom += (1 - cam.zoom) * 0.2; return; }
+    if (!isOn()) {
+      cam.rot *= 0.85;
+      cam.zoom += (1 - cam.zoom) * 0.2;
+      cam.leadX *= 0.8; cam.leadY *= 0.8;
+      return;
+    }
+    if (Game.state !== 'playing') {
+      cam.rot *= 0.85;
+      cam.zoom += (1 - cam.zoom) * 0.2;
+      cam.leadX *= 0.8; cam.leadY *= 0.8;
+      return;
+    }
     const k = intensity();
+    const lat = lateralProxy();
+    const sp = speedNorm();
     // Tilt: max ~1.5° at full lateral input. Subtle, never disorienting.
-    cam.rotTarget = lateralProxy() * 0.026 * k;
+    cam.rotTarget = lat * 0.026 * k;
     cam.rot += (cam.rotTarget - cam.rot) * 0.12;
     // Zoom: up to +4% at top speed.
-    cam.zoomTarget = 1 + speedNorm() * 0.04 * k;
+    cam.zoomTarget = 1 + sp * 0.04 * k;
     cam.zoom += (cam.zoomTarget - cam.zoom) * 0.08;
-    if (Math.abs(cam.rot) < 0.0008 && Math.abs(cam.zoom - 1) < 0.0008) return;
+    // Lead the camera slightly into motion so players see farther ahead.
+    cam.leadXTarget = lat * (10 + sp * 16) * k;
+    cam.leadYTarget = -(4 + sp * 22) * k;
+    cam.leadX += (cam.leadXTarget - cam.leadX) * 0.11;
+    cam.leadY += (cam.leadYTarget - cam.leadY) * 0.08;
+    if (Math.abs(cam.rot) < CAM_EPS_ROT_ZOOM && Math.abs(cam.zoom - 1) < CAM_EPS_ROT_ZOOM
+      && Math.abs(cam.leadX) < CAM_EPS_LEAD && Math.abs(cam.leadY) < CAM_EPS_LEAD) return;
     // Pivot near the player so tilt feels anchored to the car.
-    const px = (Game.player && Game.player.x) || W * 0.5;
-    const py = (Game.player && Game.player.y) || H * 0.78;
+    const px = ((Game.player && Game.player.x) || W * 0.5) + cam.leadX;
+    const py = ((Game.player && Game.player.y) || H * 0.78) + cam.leadY;
     ctx.translate(px, py);
     ctx.rotate(cam.rot);
     ctx.scale(cam.zoom, cam.zoom);
