@@ -7371,7 +7371,11 @@ function updateClassicHandling(dt, p, stats) {
     const dx = target - p.x;
     if (Math.abs(dx) > 16) steerInput = clamp(dx / 90, -1, 1);
   }
-  p.steerSmooth = expEase(p.steerSmooth || 0, steerInput, 18, dt);
+  // Steering builds up like a real wheel instead of snapping instantly: a
+  // lower ease rate gives the car perceptible mass at turn-in and on release.
+  // (Was 18 ≈ 0.05s — too instant to feel like a vehicle. ~0.11s reads heavy
+  // but still responsive.)
+  p.steerSmooth = expEase(p.steerSmooth || 0, steerInput, 9, dt);
 
   // -- speed fraction (drives grip scaling) --
   const speedFrac = clamp((Game.speed || 0) / 520, 0, 1);
@@ -7462,7 +7466,10 @@ function updateClassicHandling(dt, p, stats) {
   // -- grip & lateral integration --
   // Base grip drops with speed (high-speed = slidey). Drift slashes it.
   // Surface dirt cuts a further bit.
-  const baseGrip = 7.5 * (1 - speedFrac * 0.42);
+  // Slightly looser grip so the car carries lateral momentum and arcs into
+  // its new line (mass) rather than snapping sideways. Kept high enough that
+  // it still settles firmly and doesn't drift/float.
+  const baseGrip = 6.4 * (1 - speedFrac * 0.42);
   const driftGripMul = Game.classicDrifting ? 0.32 : 1.0;
   const grip = Math.max(0.8, baseGrip * driftGripMul * surfGrip * (CLASSIC_GRIP_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_GRIP_TRACTION_RANGE));
   const driftAccelMul = Game.classicDrifting ? 1.55 : 1.0;
