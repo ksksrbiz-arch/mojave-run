@@ -9275,10 +9275,15 @@ function drawRoad() {
   // ─────────────────────────────────────────────────────────────────
   const horizonY = H * 0.42;
 
-  // Vanishing point drifts slightly with player steering for a subtle banking feel
-  const playerLean = (Game.player && Game.mode !== 'winding')
-    ? clamp((Game.player.vx || 0) / 460, -1, 1) : 0;
-  const vpX = W * 0.5 - playerLean * W * 0.055;
+  // Road kept straight + centered and only mildly tapered so the PAINTED road
+  // matches the constant-width top-down strip the gameplay actually uses
+  // (roadBounds / enemy + pickup spawn / collision). The old steep taper that
+  // converged to a point at the horizon is exactly why cars and pickups
+  // floated off the road in gauntlet/campaign/zombie/etc. pwf() is the
+  // per-depth width factor: ~82% at the horizon row, 100% at the player row.
+  const vpX = W * 0.5;
+  const pwf = (tf) => 0.82 + 0.18 * clamp(tf, 0, 1);
+  const hwTop = w * pwf(0) * 0.5;   // half-width at the horizon row
 
   // Full ground fill from horizon to bottom (shoulder colour)
   ctx.fillStyle = Game.isNight ? t.shoulderNight : t.shoulderDay;
@@ -9299,7 +9304,8 @@ function drawRoad() {
   }
   ctx.fillStyle = roadSurfGrad;
   ctx.beginPath();
-  ctx.moveTo(vpX,   horizonY);
+  ctx.moveTo(vpX - hwTop, horizonY);
+  ctx.lineTo(vpX + hwTop, horizonY);
   ctx.lineTo(x1bot, H);
   ctx.lineTo(x0bot, H);
   ctx.closePath();
@@ -9317,10 +9323,11 @@ function drawRoad() {
       if (Math.floor(dist * 7.0 + Game.laneOffset * 0.022) % 2 !== 1) continue;
       const tTop = si / SBAND, tBot = (si + 1) / SBAND;
       const y = horizonY + si * sbH;
-      ctx.moveTo(vpX - w * tTop / 2, y);
-      ctx.lineTo(vpX + w * tTop / 2, y);
-      ctx.lineTo(vpX + w * tBot / 2, y + sbH);
-      ctx.lineTo(vpX - w * tBot / 2, y + sbH);
+      const hbT = w * pwf(tTop) / 2, hbB = w * pwf(tBot) / 2;
+      ctx.moveTo(vpX - hbT, y);
+      ctx.lineTo(vpX + hbT, y);
+      ctx.lineTo(vpX + hbB, y + sbH);
+      ctx.lineTo(vpX - hbB, y + sbH);
       ctx.closePath();
     }
     ctx.fill();
@@ -9337,7 +9344,7 @@ function drawRoad() {
         const dist  = 1.0 / Math.max(0.001, tFrac);
         if (Math.floor(dist * 5.2 + Game.laneOffset * 0.028) % 2 !== pass) continue;
         const tTop = ri / RS, tBot = (ri + 1) / RS;
-        const hw0 = w * tTop / 2, hw1 = w * tBot / 2;
+        const hw0 = w * pwf(tTop) / 2, hw1 = w * pwf(tBot) / 2;
         const rT = Math.max(0.5, hw0 * 0.044), rB = Math.max(0.5, hw1 * 0.044);
         const y = horizonY + ri * rsH;
         // left strip
@@ -9360,7 +9367,7 @@ function drawRoad() {
     for (let i = 0; i < 10; i++) {
       const tFrac = clamp(((i * 73 + crackSeed) % Math.max(1, Math.round(H - horizonY))) / (H - horizonY), 0.06, 1);
       const cy    = horizonY + tFrac * (H - horizonY);
-      const hw    = w * tFrac / 2;
+      const hw    = w * pwf(tFrac) / 2;
       const crackW = Math.max(6, w * tFrac * 0.065);
       const cx2   = vpX + ((i * 37) % Math.max(1, Math.round(hw * 1.6))) - hw * 0.8;
       ctx.fillRect(cx2, cy, crackW, Math.max(1, tFrac * 3));
@@ -9371,8 +9378,8 @@ function drawRoad() {
   ctx.strokeStyle = '#f5d76e';
   ctx.lineWidth = Math.max(1.5, w * 0.0052);
   ctx.beginPath();
-  ctx.moveTo(vpX, horizonY); ctx.lineTo(x0bot - 1, H);
-  ctx.moveTo(vpX, horizonY); ctx.lineTo(x1bot + 1, H);
+  ctx.moveTo(vpX - hwTop, horizonY); ctx.lineTo(x0bot - 1, H);
+  ctx.moveTo(vpX + hwTop, horizonY); ctx.lineTo(x1bot + 1, H);
   ctx.stroke();
 
   // Dashed centre line — perspective accurate
@@ -9399,7 +9406,7 @@ function drawRoad() {
       const dist  = 1.0 / Math.max(0.001, tFrac);
       if ((dist * 4.8 + Game.laneOffset * 0.015) % 1 > 0.38) continue;
       const y    = horizonY + li * lgH;
-      const hw   = w * tFrac / 2;
+      const hw   = w * pwf(tFrac) / 2;
       const lw   = Math.max(0.5, hw * 0.008);
       ctx.fillRect(vpX - hw / 3 - lw / 2, y, lw, lgH);
       ctx.fillRect(vpX + hw / 3 - lw / 2, y, lw, lgH);
