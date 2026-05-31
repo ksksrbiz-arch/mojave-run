@@ -13,7 +13,7 @@
  * Cache-name versioning: bump CACHE_VERSION to invalidate old caches when
  * shipping a major asset change. Old caches are purged in `activate`.
  */
-const CACHE_VERSION = 'v3.1.0-2026-05-14';
+const CACHE_VERSION = 'v3.2.0-2026-05-31';
 const CACHE_NAME    = 'mojave-run-' + CACHE_VERSION;
 const NAVIGATION_TIMEOUT_MS = 1200;
 const MAX_RUNTIME_ENTRIES = 36;
@@ -23,8 +23,8 @@ const PRECACHE = [
   '/index.html',
   // Previous app version kept for backward compatibility; cache for offline play.
   '/v2.html',
-  '/app.js?v=v3.1.0-2026-05-14',
-  '/mp.js?v=v3.1.0-2026-05-14',
+  '/app.js?v=v3.2.0-2026-05-31',
+  '/mp.js?v=v3.2.0-2026-05-31',
   '/icon.svg',
   '/manifest.webmanifest',
   '/privacy-policy.html',
