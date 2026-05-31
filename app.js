@@ -3998,13 +3998,11 @@ function getClassicHillAt(distance) {
 // Render-only per-row horizontal shift (pixels). Zero at the player row,
 // quadratic ramp up to max at the horizon. Used by drawRoadClassicV2.
 function getClassicRoadShift(y) {
-  if (!Game || Game.mode !== 'classic') return 0;
-  const horizonY = H * 0.42;
-  const c = Game.classicCurveSmooth || 0;
-  if (y <= horizonY) return c * W * 0.20;
-  const tFrac = (y - horizonY) / Math.max(1, H - horizonY);
-  const wq = (1 - tFrac) * (1 - tFrac);
-  return c * wq * W * 0.20;
+  // Road is kept straight (centered) so far rows never bend away from the
+  // entities, which live in a centered top-down strip. A curved painted road
+  // over a straight entity field is exactly what made enemies read as
+  // "off the road." Curves are still felt subtly through handling, not paint.
+  return 0;
 }
 // Render-only per-row vertical hill offset (pixels). Negative = crest
 // (road sits a bit higher / horizon appears lower); positive = dip.
@@ -4018,7 +4016,15 @@ function getClassicRoadHillDy(y) {
   return -h * wq * 16;
 }
 function classicRoadPerspectiveT(tFrac) {
-  return Math.pow(clamp(tFrac, 0, 1), 1.08);
+  // The game logic (roadBounds, enemy/pickup spawn + collision) treats the road
+  // as a constant-width top-down strip. The old steep OutRun taper shrank the
+  // PAINTED road to ~8% width near the horizon while entities kept the full
+  // width, so enemies floated off the road and the car never looked planted.
+  // We now paint a near-straight wide strip (85%→100%) that matches the logic:
+  // everything sits ON the road, v2-style, and depth still reads via the
+  // per-entity perspectiveScale() size falloff and the scrolling road bands.
+  const t = clamp(tFrac, 0, 1);
+  return 0.85 + 0.15 * Math.pow(t, 0.7);
 }
 
 // === Z-based perspective helpers ===
@@ -7365,7 +7371,11 @@ function updateClassicHandling(dt, p, stats) {
     const dx = target - p.x;
     if (Math.abs(dx) > 16) steerInput = clamp(dx / 90, -1, 1);
   }
-  p.steerSmooth = expEase(p.steerSmooth || 0, steerInput, 18, dt);
+  // Steering builds up like a real wheel instead of snapping instantly: a
+  // lower ease rate gives the car perceptible mass at turn-in and on release.
+  // (Was 18 ≈ 0.05s — too instant to feel like a vehicle. ~0.11s reads heavy
+  // but still responsive.)
+  p.steerSmooth = expEase(p.steerSmooth || 0, steerInput, 9, dt);
 
   // -- speed fraction (drives grip scaling) --
   const speedFrac = clamp((Game.speed || 0) / 520, 0, 1);
@@ -7456,7 +7466,10 @@ function updateClassicHandling(dt, p, stats) {
   // -- grip & lateral integration --
   // Base grip drops with speed (high-speed = slidey). Drift slashes it.
   // Surface dirt cuts a further bit.
-  const baseGrip = 7.5 * (1 - speedFrac * 0.42);
+  // Slightly looser grip so the car carries lateral momentum and arcs into
+  // its new line (mass) rather than snapping sideways. Kept high enough that
+  // it still settles firmly and doesn't drift/float.
+  const baseGrip = 6.4 * (1 - speedFrac * 0.42);
   const driftGripMul = Game.classicDrifting ? 0.32 : 1.0;
   const grip = Math.max(0.8, baseGrip * driftGripMul * surfGrip * (CLASSIC_GRIP_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_GRIP_TRACTION_RANGE));
   const driftAccelMul = Game.classicDrifting ? 1.55 : 1.0;
@@ -7476,11 +7489,11 @@ function updateClassicHandling(dt, p, stats) {
   // Scaled by speed so it only bites at pace; multiplied by surface grip
   // (less push on dirt) and softened during drift (you're sliding anyway).
   const corneringMul = Game.classicDrifting ? 0.55 : 1.0;
-  // Reduced from 0.55 to 0.22: curves are a gentle guide rather than an
-  // active force. The original v2 feel had direct, predictable steering;
-  // too strong a lateral push caused unfair edge-of-road deaths that hurt
-  // the "one-more-run" motivation.
-  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.22 * corneringMul * surfGrip * (CLASSIC_LATERAL_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_LATERAL_TRACTION_RANGE);
+  // Cornering push disabled: the road is now painted straight (centered) to
+  // keep enemies/pickups visibly ON the road, so an invisible curve force that
+  // shoves the car sideways would feel arbitrary. Steering is fully
+  // player-driven and direct — the original v2 contract.
+  const lateralPush = 0;
   p.vx -= lateralPush * dt;
   p.x  += p.vx * dt;
 
@@ -9513,7 +9526,11 @@ function drawRoadClassicV2() {
   // Boost slightly amplifies the lean for that hot-corner cinematic kick.
   const boostKick = (Game.classicBoostT || 0) > 0 ? 1.18 : 1.0;
   const curveHoriz = (Game.classicCurveSmooth || 0);
-  const vpX = W * 0.5 - playerLean * W * 0.055 * boostKick + curveHoriz * W * 0.10;
+  // Vanishing point stays centered: the road must share the entities' centered
+  // top-down axis so cars/pickups read as being ON the road. (playerLean /
+  // curveHoriz retained above for potential future use; intentionally not
+  // applied to the VP to keep the road and the playfield aligned.)
+  const vpX = W * 0.5;
   const hillHorizonOffset = -(Game.classicHillSmooth || 0) * 12;
   const horizonYEff = horizonY + hillHorizonOffset;
 
@@ -11273,7 +11290,20 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
   const tractionSlipTilt = isPlayerVehicle ? (1 - tractionN) * clamp(vx / VEHICLE_TRACTION_VX_NORM, -1, 1) * VEHICLE_TRACTION_TILT_FACTOR : 0;
-  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + tractionSlipTilt + (opts.extraTilt || 0)) + hitPunch * 0.08;
+  // --- Player "real car" attitude ---
+  // steerN: eased steering input (-1..1) when available, else derived from
+  // lateral velocity so every mode still gets the cue.
+  const steerN = isPlayerVehicle
+    ? clamp((Game.player && Game.player.steerSmooth != null) ? Game.player.steerSmooth : (vx / 300), -1, 1)
+    : 0;
+  // Yaw the nose INTO the turn so it reads like a car cornering, not a sprite
+  // sliding flat. Combined with the bank shear applied after rotate().
+  const steerYaw = steerN * 0.13;
+  // Weight transfer: tail squats under acceleration, nose dips under braking.
+  const accelPitch = isPlayerVehicle
+    ? clamp(((Game.targetSpeed || 0) - (Game.speed || 0)) / 220, -1, 1)
+    : 0;
+  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + tractionSlipTilt + steerYaw + (opts.extraTilt || 0)) + hitPunch * 0.08;
   const wheelSpin = t * (5.5 + speedN * 30);
   const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
   const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
@@ -11309,6 +11339,12 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   }
 
   ctx.rotate(tilt);
+  // Player bank: skew the body so it leans INTO the corner (the classic
+  // arcade "car tipping through a turn" cue). Horizontal shear scaled by the
+  // steer signal; capped so the silhouette and wheels still read cleanly.
+  if (isPlayerVehicle && !topDown && steerN !== 0) {
+    ctx.transform(1, 0, steerN * 0.12, 1, 0, 0);
+  }
   // Slight flatten makes the chassis read as viewed from above; a tiny
   // bank-driven shear simulates the body tipping into a turn without
   // breaking the wheels' alignment.
@@ -11321,7 +11357,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
       ctx.transform(1, bank * 0.12, 0, 1 - Math.abs(bank) * 0.05, 0, 0);
     }
   }
-  ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03);
+  ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03 + accelPitch * 0.05);
   ctx.globalAlpha *= ghostAlpha * cloakFade;
 
   if (!topDown) {
