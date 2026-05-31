@@ -7313,11 +7313,9 @@ function updateCarSuspension(deltaTime, speed = Game.speed || 0, isTurning = nul
   const targetRoll = isTurning ? (isTurning === 'left' ? -SUSP_ROLL_MAX : SUSP_ROLL_MAX) : 0;
   Game.suspBodyRoll = Game.suspBodyRoll * (1 - SUSP_ROLL_LERP) + targetRoll * SUSP_ROLL_LERP;
 
-  // Sync camera shake with strong suspension movements
-  if (Settings && !Settings.reducedMotion) {
-    const suspImpact = Math.abs(Game.suspVelocity) * 0.006;
-    if (suspImpact > 0.06) Game.shake = Math.max(Game.shake, suspImpact);
-  }
+  // Suspension no longer drives camera shake: coupling the spring velocity to
+  // screen shake made the view jitter constantly and washed out the punchy,
+  // intentional shakes (hits, drifts, crests). Shake is now event-driven only.
 }
 
 // =========================================================================
@@ -11265,10 +11263,12 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
     && Game.player && Game.state === 'playing');
   const tractionN = isPlayerVehicle ? clamp(opts.tractionN !== undefined ? opts.tractionN : (Game.classicTractionN || 1), 0, 1) : 1;
   const suspensionBob = isPlayerVehicle
-    ? (Game.suspOffset || 0) * 0.55              // spring compression → visual downward shift
+    ? (Game.suspOffset || 0) * 0.16              // subtle planted settle (kept small to preserve the snappy v2 feel)
     : Math.sin(t * (4.8 + speedN * 10 + roughness * 4) + x * 0.012) * (0.45 + speedN * 1.35 + roughness * 1.1);
   const idleRock = speedN < 0.08 ? Math.sin(t * 2.5 + x * 0.03) * 0.05 : 0;
-  const springRoll = isPlayerVehicle ? (Game.suspBodyRoll || 0) * (Math.PI / 180) * 0.35 : 0;
+  // Body roll disabled: the spring-driven lean made the car feel floaty and
+  // fought the readable, direct arcade handling that defined the original feel.
+  const springRoll = 0;
   const lean = clamp(vx / 460, -1, 1) * (0.16 + speedN * 0.16) + idleRock;
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
@@ -25908,7 +25908,11 @@ function livingRoadModeEnabled() {
   // fight a wear overlay. Everything else (classic, gauntlet, campaign,
   // timeattack, bossrush, zombie, ironthrone, wastelandrun, extraction,
   // custom, daily) is forward-scrolling and accepts the overlay cleanly.
-  return Game && Game.mode && Game.mode !== 'arena' && Game.mode !== 'winding';
+  // Disabled: the Living Road surface-decay / crack chip-damage / debris-field
+  // layer added unpredictable damage and on-road clutter that buried the clean,
+  // readable arcade run that made the game great. The road state still inits to
+  // pristine (roadCondition = 0), so all renderers simply draw a clean surface.
+  return false;
 }
 
 function livingRoadBiomeMul() {
@@ -26233,6 +26237,11 @@ function getVehicleConditionFor(vid) {
 }
 
 function applyVehicleConditionPenalty(stats) {
+  // Disabled: Vehicle Wear & Tear degraded handling/HP between runs, so the
+  // car felt inconsistent and worse over time. Returning stats unchanged keeps
+  // every run feeling tight and predictable (the original arcade contract).
+  return stats;
+  // eslint-disable-next-line no-unreachable
   if (!stats) return stats;
   const cond = getActiveVehicleCondition();
   if (cond >= 0.999) return stats;
@@ -26247,6 +26256,13 @@ function applyVehicleConditionPenalty(stats) {
 }
 
 function commitVehicleWearForRun(reason) {
+  // Disabled alongside applyVehicleConditionPenalty: condition no longer
+  // degrades, so rigs stay at full performance and the garage shows them
+  // pristine. (Repair/tune-up paths remain harmless no-ops.)
+  return;
+}
+
+function commitVehicleWearForRun_disabled(reason) {
   const p = Profile.active(); if (!p) return;
   const vid = (Game.vehicle && Game.vehicle.id) || p.activeVehicle;
   if (!vid) return;
