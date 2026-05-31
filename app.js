@@ -11283,7 +11283,20 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   const hitPunch = Math.sin(hitN * Math.PI);
   const storyScale = 1 + storyN * 0.06 * (0.5 + 0.5 * Math.sin(t * 7.5 + x * 0.01));
   const tractionSlipTilt = isPlayerVehicle ? (1 - tractionN) * clamp(vx / VEHICLE_TRACTION_VX_NORM, -1, 1) * VEHICLE_TRACTION_TILT_FACTOR : 0;
-  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + tractionSlipTilt + (opts.extraTilt || 0)) + hitPunch * 0.08;
+  // --- Player "real car" attitude ---
+  // steerN: eased steering input (-1..1) when available, else derived from
+  // lateral velocity so every mode still gets the cue.
+  const steerN = isPlayerVehicle
+    ? clamp((Game.player && Game.player.steerSmooth != null) ? Game.player.steerSmooth : (vx / 300), -1, 1)
+    : 0;
+  // Yaw the nose INTO the turn so it reads like a car cornering, not a sprite
+  // sliding flat. Combined with the bank shear applied after rotate().
+  const steerYaw = steerN * 0.13;
+  // Weight transfer: tail squats under acceleration, nose dips under braking.
+  const accelPitch = isPlayerVehicle
+    ? clamp(((Game.targetSpeed || 0) - (Game.speed || 0)) / 220, -1, 1)
+    : 0;
+  const tilt = (opts.forcedRot !== undefined ? opts.forcedRot : lean + springRoll + tractionSlipTilt + steerYaw + (opts.extraTilt || 0)) + hitPunch * 0.08;
   const wheelSpin = t * (5.5 + speedN * 30);
   const ghostAlpha = opts.ghost ? (opts.ghostAlpha || 0.6) : 1;
   const cloakFade = ((opts.cloak || (vehicle.special === 'cloak' && Game.activeAbility && Game.activeAbility.activeT > 0 && vehicle === Game.vehicle)))
@@ -11319,6 +11332,12 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
   }
 
   ctx.rotate(tilt);
+  // Player bank: skew the body so it leans INTO the corner (the classic
+  // arcade "car tipping through a turn" cue). Horizontal shear scaled by the
+  // steer signal; capped so the silhouette and wheels still read cleanly.
+  if (isPlayerVehicle && !topDown && steerN !== 0) {
+    ctx.transform(1, 0, steerN * 0.12, 1, 0, 0);
+  }
   // Slight flatten makes the chassis read as viewed from above; a tiny
   // bank-driven shear simulates the body tipping into a turn without
   // breaking the wheels' alignment.
@@ -11331,7 +11350,7 @@ function drawVehicle(x, y, vehicle, vx = 0, w = 42, h = 64, opts = {}) {
       ctx.transform(1, bank * 0.12, 0, 1 - Math.abs(bank) * 0.05, 0, 0);
     }
   }
-  ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03);
+  ctx.scale(storyScale + hitPunch * 0.04, storyScale - hitPunch * 0.03 + accelPitch * 0.05);
   ctx.globalAlpha *= ghostAlpha * cloakFade;
 
   if (!topDown) {
