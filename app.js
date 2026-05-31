@@ -3998,13 +3998,11 @@ function getClassicHillAt(distance) {
 // Render-only per-row horizontal shift (pixels). Zero at the player row,
 // quadratic ramp up to max at the horizon. Used by drawRoadClassicV2.
 function getClassicRoadShift(y) {
-  if (!Game || Game.mode !== 'classic') return 0;
-  const horizonY = H * 0.42;
-  const c = Game.classicCurveSmooth || 0;
-  if (y <= horizonY) return c * W * 0.20;
-  const tFrac = (y - horizonY) / Math.max(1, H - horizonY);
-  const wq = (1 - tFrac) * (1 - tFrac);
-  return c * wq * W * 0.20;
+  // Road is kept straight (centered) so far rows never bend away from the
+  // entities, which live in a centered top-down strip. A curved painted road
+  // over a straight entity field is exactly what made enemies read as
+  // "off the road." Curves are still felt subtly through handling, not paint.
+  return 0;
 }
 // Render-only per-row vertical hill offset (pixels). Negative = crest
 // (road sits a bit higher / horizon appears lower); positive = dip.
@@ -4018,7 +4016,15 @@ function getClassicRoadHillDy(y) {
   return -h * wq * 16;
 }
 function classicRoadPerspectiveT(tFrac) {
-  return Math.pow(clamp(tFrac, 0, 1), 1.08);
+  // The game logic (roadBounds, enemy/pickup spawn + collision) treats the road
+  // as a constant-width top-down strip. The old steep OutRun taper shrank the
+  // PAINTED road to ~8% width near the horizon while entities kept the full
+  // width, so enemies floated off the road and the car never looked planted.
+  // We now paint a near-straight wide strip (85%→100%) that matches the logic:
+  // everything sits ON the road, v2-style, and depth still reads via the
+  // per-entity perspectiveScale() size falloff and the scrolling road bands.
+  const t = clamp(tFrac, 0, 1);
+  return 0.85 + 0.15 * Math.pow(t, 0.7);
 }
 
 // === Z-based perspective helpers ===
@@ -7476,11 +7482,11 @@ function updateClassicHandling(dt, p, stats) {
   // Scaled by speed so it only bites at pace; multiplied by surface grip
   // (less push on dirt) and softened during drift (you're sliding anyway).
   const corneringMul = Game.classicDrifting ? 0.55 : 1.0;
-  // Reduced from 0.55 to 0.22: curves are a gentle guide rather than an
-  // active force. The original v2 feel had direct, predictable steering;
-  // too strong a lateral push caused unfair edge-of-road deaths that hurt
-  // the "one-more-run" motivation.
-  const lateralPush = (Game.classicCurveSmooth || 0) * (Game.speed || 0) * 0.22 * corneringMul * surfGrip * (CLASSIC_LATERAL_TRACTION_BASE + (Game.classicTractionN || 1) * CLASSIC_LATERAL_TRACTION_RANGE);
+  // Cornering push disabled: the road is now painted straight (centered) to
+  // keep enemies/pickups visibly ON the road, so an invisible curve force that
+  // shoves the car sideways would feel arbitrary. Steering is fully
+  // player-driven and direct — the original v2 contract.
+  const lateralPush = 0;
   p.vx -= lateralPush * dt;
   p.x  += p.vx * dt;
 
@@ -9513,7 +9519,11 @@ function drawRoadClassicV2() {
   // Boost slightly amplifies the lean for that hot-corner cinematic kick.
   const boostKick = (Game.classicBoostT || 0) > 0 ? 1.18 : 1.0;
   const curveHoriz = (Game.classicCurveSmooth || 0);
-  const vpX = W * 0.5 - playerLean * W * 0.055 * boostKick + curveHoriz * W * 0.10;
+  // Vanishing point stays centered: the road must share the entities' centered
+  // top-down axis so cars/pickups read as being ON the road. (playerLean /
+  // curveHoriz retained above for potential future use; intentionally not
+  // applied to the VP to keep the road and the playfield aligned.)
+  const vpX = W * 0.5;
   const hillHorizonOffset = -(Game.classicHillSmooth || 0) * 12;
   const horizonYEff = horizonY + hillHorizonOffset;
 
