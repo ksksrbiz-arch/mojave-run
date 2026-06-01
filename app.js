@@ -3915,6 +3915,47 @@ function perspectiveScale(y) {
   return 0.48 + 0.52 * Math.pow(t, 0.7);
 }
 
+// Fade-in alpha for forward-scroll entities as they cross the road horizon.
+// Returns 0 while an entity is still above the painted road (so it no longer
+// floats in the sky), then ramps to 1 over a short band so it emerges from the
+// vanishing point and grows toward the player. Arena/winding keep full alpha.
+function forwardEntryAlpha(y) {
+  if (!Game || Game.mode === 'arena' || Game.mode === 'winding') return 1;
+  const horizonY = H * 0.42;
+  if (y < horizonY) return 0;
+  const band = Math.max(1, H * 0.05);
+  return clamp((y - horizonY) / band, 0, 1);
+}
+
+// Shared "driver" steering for road-vehicle enemies (buggies, bikes). Replaces
+// the old constant-vx / pure-sine weave with goal-directed lane changes:
+// the enemy picks a target lane (sometimes toward the player), then steers
+// toward it with mass and damping so it arcs across rather than teleporting.
+function updateEnemyDriver(e, dt, opts = {}) {
+  const agile = !!opts.agile;
+  const rb = roadBounds();
+  const margin = (e.w * 0.5) + 16;
+  const lo = rb.x0 + margin, hi = rb.x1 - margin;
+  if (hi <= lo) { return; }
+  e.driveT = (e.driveT || 0) - dt;
+  if (e.targetX == null || e.driveT <= 0) {
+    // Re-pick a lane. Agile riders change lines more often and hunt the player
+    // harder; heavier cars hold a line longer and weave more loosely.
+    e.driveT = agile ? rand(0.45, 1.3) : rand(1.0, 2.6);
+    const hunt = Game.player && Math.random() < (agile ? 0.6 : 0.4);
+    e.targetX = hunt
+      ? clamp(Game.player.x + rand(-e.w, e.w), lo, hi)
+      : rand(lo, hi);
+  }
+  const accel = agile ? 9.5 : 5.5;
+  const maxV  = agile ? 230 : 155;
+  const damp  = agile ? 3.4 : 2.5;
+  e.vx = (e.vx || 0) + clamp(e.targetX - e.x, -300, 300) * accel * dt;
+  e.vx -= e.vx * Math.min(1, damp * dt);
+  e.vx = clamp(e.vx, -maxV, maxV);
+  e.x += e.vx * dt;
+}
+
 function getWindingRoadShift(y = H * 0.5) {
   if (!Game || Game.mode !== 'winding' || !Game.windingRoad) return 0;
   const wr = Game.windingRoad;
@@ -8172,9 +8213,8 @@ function update(dt) {
     }
     // movement per kind
     if (e.kind === 'bike') {
-      e.wave += e.waveSpeed * dt;
-      e.baseX += e.vx * dt;
-      e.x = e.baseX + Math.sin(e.wave) * e.waveAmp;
+      // Agile rider: hunts the player and flicks between lanes.
+      updateEnemyDriver(e, dt, { agile: true });
       e.y += (e.vy + Game.speed * 0.18) * dt;
     } else if (e.kind === 'mortar') {
       // stationary lane emplacement; scrolls with road
@@ -8211,8 +8251,10 @@ function update(dt) {
       if (e.x < dx0 + 18) { e.x = dx0 + 18; e.vx = Math.abs(e.vx); }
       if (e.x > dx1 - 18) { e.x = dx1 - 18; e.vx = -Math.abs(e.vx); }
     } else {
+      // Road vehicles (buggies, tanks, etc.) drive with intent: pick lanes
+      // and steer toward them instead of holding a fixed sideways velocity.
+      updateEnemyDriver(e, dt);
       e.y += (e.vy + Game.speed * 0.15) * dt;
-      e.x += e.vx * dt;
     }
     // road clamp (drone/zombie use their own movement logic)
     if (e.kind !== 'drone' && e.kind !== 'zombie') {
@@ -11778,6 +11820,7 @@ function drawEnemyThreatHalos() {
     ctx.fillStyle = 'rgba(255,40,40,0.18)';
     for (const e of Game.enemies) {
       if (e.kind === 'zombie' || e.kind === 'drone') continue;
+      if (forwardEntryAlpha(e.y) <= 0) continue;
       const r = Math.max(e.w, e.h) * 0.65;
       ctx.beginPath();
       ctx.ellipse(e.x, e.y + e.h * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
@@ -11787,6 +11830,7 @@ function drawEnemyThreatHalos() {
     // Full gradient halo at medium-high quality.
     for (const e of Game.enemies) {
       if (e.kind === 'zombie' || e.kind === 'drone') continue; // these have their own clear silhouettes
+      if (forwardEntryAlpha(e.y) <= 0) continue;
       const r = Math.max(e.w, e.h) * 0.65;
       const g = ctx.createRadialGradient(e.x, e.y + e.h * 0.25, r * 0.2, e.x, e.y + e.h * 0.25, r);
       g.addColorStop(0, 'rgba(255,40,40,0.45)');
@@ -12068,67 +12112,97 @@ function drawEnemy(e) {
 }
 
 function drawBike(e) {
-  const rv = {
-    id: 'enemy_bike',
-    color: { body:'#6a2010', hood:'#3a0e08', cab:'#1a0806', windshield:'#ff6464', glow:'#ff5050' },
-    base: { maxHp: e.maxHp || 1, maxV: Math.abs(e.vy || 60) * 6 },
-  };
+  // A proper motorcycle silhouette: narrow frame, two IN-LINE wheels, rider
+  // straddling the tank, splayed handlebars. Reads clearly as a bike rather
+  // than a car-with-a-rider (the old version drew a full car chassis).
   const ps = (Game.mode !== 'arena') ? perspectiveScale(e.y) : 1;
-  drawVehicle(e.x, e.y, rv, e.vx || 0, Math.max(22, e.w + 8) * ps, Math.max(34, e.h + 6) * ps, Object.assign({
-    noCosmetic: true,
-    damageRatio: e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0,
-    enemy: e,
-    extraTilt: Math.sin((Game.t || 0) * 7 + e.x * 0.02) * 0.07 + (e.fireT !== undefined && e.fireT < BIKE_FIRE_LEAN_WINDOW ? -0.09 : 0),
-    spawnAnimT: e.spawnAnimT || 0,
-    hitAnimT: e.hitAnimT || 0,
-    storyAnimT: e.storyAnimT || 0,
-  }, arenaEnemyTopDownOpts(e)));
+  const lean = clamp((e.vx || 0) / 150, -1, 1);
+  const t = Game.t || 0;
+  const damageR = e.maxHp ? (1 - clamp(e.hp / Math.max(1, e.maxHp), 0, 1)) : 0;
+  const spin = t * (5 + Math.abs(e.vy || 60) * 0.05);
+
   ctx.save();
   ctx.translate(e.x, e.y);
-  const lean = clamp((e.vx || 0) / 160, -1, 1) * 0.22;
-  ctx.rotate(lean);
-  ctx.scale(ps, ps);
-  // Rider torso — leather jacket
-  ctx.fillStyle = '#1a0c08';
-  pathRoundRect(-e.w * 0.12, -e.h * 0.55, e.w * 0.24, e.h * 0.32, 3);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(90,40,20,0.7)';
-  ctx.fillRect(-e.w * 0.1, -e.h * 0.53, e.w * 0.08, e.h * 0.15);
-  // Helmet
-  const headX = lean * 8;
-  ctx.fillStyle = '#201010';
+  // Ground contact shadow — narrow oval so it reads as a thin two-wheeler.
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
   ctx.beginPath();
-  ctx.ellipse(headX, -e.h * 0.58, e.w * 0.14, e.h * 0.12, 0, 0, Math.PI * 2);
+  ctx.ellipse(2 * ps, e.h * 0.30 * ps, e.w * 0.40 * ps, e.h * 0.16 * ps, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Goggles glow
+
+  ctx.scale(ps, ps);
+  ctx.rotate(lean * 0.16);
+
+  const W = e.w, Hh = e.h;
+  // Rear wheel (nearest the player, lower) — large and prominent.
+  drawWheelTopdown(0, Hh * 0.36, Math.max(4.5, W * 0.30), spin, '#0b0b0b', '#5e646f', '#cfd8ef');
+  // Front wheel (up the road), steers with lean.
+  ctx.save();
+  ctx.translate(lean * W * 0.12, -Hh * 0.42);
+  ctx.rotate(lean * 0.55);
+  drawWheelTopdown(0, 0, Math.max(3.5, W * 0.24), spin * 1.05, '#0b0b0b', '#5e646f', '#cfd8ef');
+  ctx.restore();
+
+  // Frame + fuel tank — narrow vertical body.
+  const frameGrad = ctx.createLinearGradient(-W * 0.18, 0, W * 0.18, 0);
+  frameGrad.addColorStop(0, '#5a1212');
+  frameGrad.addColorStop(0.5, '#9a2020');
+  frameGrad.addColorStop(1, '#5a1212');
+  ctx.fillStyle = frameGrad;
+  pathRoundRect(-W * 0.15, -Hh * 0.30, W * 0.30, Hh * 0.56, 4);
+  ctx.fill();
+  // Seat
+  ctx.fillStyle = '#121012';
+  pathRoundRect(-W * 0.12, Hh * 0.02, W * 0.24, Hh * 0.18, 3);
+  ctx.fill();
+
+  // Handlebars across the front with grips.
+  const barY = -Hh * 0.36, barX = lean * 5;
+  ctx.strokeStyle = '#26262b';
+  ctx.lineWidth = Math.max(1.4, W * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(-W * 0.34 + barX, barY);
+  ctx.lineTo(W * 0.34 + barX, barY);
+  ctx.stroke();
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(-W * 0.40 + barX, barY - Hh * 0.02, W * 0.10, Hh * 0.05);
+  ctx.fillRect(W * 0.30 + barX, barY - Hh * 0.02, W * 0.10, Hh * 0.05);
+
+  // Rider — leather torso, shoulders, helmet.
+  ctx.fillStyle = '#1c0f0a';
+  pathRoundRect(-W * 0.15, -Hh * 0.18, W * 0.30, Hh * 0.34, 5);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(95,42,22,0.65)';
+  ctx.fillRect(-W * 0.15, -Hh * 0.16, W * 0.30, Hh * 0.06);
+  const headX = lean * 5;
+  ctx.fillStyle = '#241414';
+  ctx.beginPath();
+  ctx.ellipse(headX, -Hh * 0.26, W * 0.15, Hh * 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Visor glow
   ctx.fillStyle = 'rgba(255,120,40,0.85)';
   ctx.beginPath();
-  ctx.ellipse(headX - e.w * 0.06, -e.h * 0.585, e.w * 0.040, e.h * 0.036, 0, 0, Math.PI * 2);
+  ctx.ellipse(headX, -Hh * 0.275, W * 0.10, Hh * 0.045, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(headX + e.w * 0.06, -e.h * 0.585, e.w * 0.040, e.h * 0.036, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Front fork tubes
-  ctx.strokeStyle = 'rgba(90,80,70,0.9)';
-  ctx.lineWidth = Math.max(1.2, e.w * 0.055);
-  ctx.beginPath();
-  ctx.moveTo(-e.w * 0.14, -e.h * 0.28); ctx.lineTo(-e.w * 0.20, -e.h * 0.52);
-  ctx.moveTo( e.w * 0.14, -e.h * 0.28); ctx.lineTo( e.w * 0.20, -e.h * 0.52);
-  ctx.stroke();
-  // Exhaust flame at rear
+
+  // Taillight toward the player (rear).
+  ctx.fillStyle = `rgba(255,45,45,${0.6 + 0.3 * Math.sin(t * 8)})`;
+  ctx.fillRect(-W * 0.06, Hh * 0.22, W * 0.12, Hh * 0.05);
+
+  // Exhaust flame at the rear-right.
   if (visualQualityLevel() >= 1) {
-    const exFlicker = 0.5 + 0.5 * Math.sin((Game.t || 0) * 22 + e.x * 0.1);
-    ctx.fillStyle = `rgba(255,${140 + (exFlicker * 60) | 0},30,${0.55 + exFlicker * 0.3})`;
+    const exFlicker = 0.5 + 0.5 * Math.sin(t * 22 + e.x * 0.1);
+    ctx.fillStyle = `rgba(255,${140 + (exFlicker * 60) | 0},30,${0.5 + exFlicker * 0.3})`;
     ctx.beginPath();
-    ctx.ellipse(0, e.h * 0.42, e.w * 0.08, e.h * 0.06 + exFlicker * e.h * 0.05, 0, 0, Math.PI * 2);
+    ctx.ellipse(W * 0.13, Hh * 0.34, W * 0.06, Hh * 0.05 + exFlicker * Hh * 0.04, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   if (e.elite) {
     ctx.strokeStyle = '#ffb36a';
     ctx.lineWidth = 2;
-    ctx.strokeRect(-e.w / 2 - 3, -e.h / 2 - 3, e.w + 6, e.h + 6);
+    ctx.strokeRect(-W / 2 - 3, -Hh / 2 - 3, W + 6, Hh + 6);
   }
   ctx.restore();
+
   if (e.maxHp && e.hp < e.maxHp * 0.5 && Math.random() < 0.28) {
     Game.particles.push({
       x: e.x + rand(-5, 5), y: e.y - e.h * 0.2,
@@ -14671,14 +14745,25 @@ function render() {
     drawDecor();
     drawDustDevils();
 
-    for (const o of Game.obstacles) drawObstacle(o);
+    // Forward modes: fade entities in as they cross the road horizon so they
+    // emerge from the vanishing point instead of floating in the sky band.
+    const _withEntry = (y, draw) => {
+      const a = forwardEntryAlpha(y);
+      if (a <= 0) return;
+      if (a >= 1) { draw(); return; }
+      const g = ctx.globalAlpha;
+      ctx.globalAlpha = g * a;
+      draw();
+      ctx.globalAlpha = g;
+    };
+    for (const o of Game.obstacles) _withEntry(o.y, () => drawObstacle(o));
     // Threat indicator: a soft red halo under every enemy makes them visually
     // distinct from civilians/innocents (which have a yellow warning halo)
     // and from inert wreck/barrel obstacles. Drawn before the enemy sprite so
     // it sits as a ground-level glow.
     drawEnemyThreatHalos();
-    for (const e of Game.enemies) drawEnemy(e);
-    for (const pk of Game.pickups) drawPickup(pk);
+    for (const e of Game.enemies) _withEntry(e.y, () => drawEnemy(e));
+    for (const pk of Game.pickups) _withEntry(pk.y, () => drawPickup(pk));
     if (Game.boss) drawBoss();
     drawTargetLockReticle();
     drawBullets();
