@@ -9089,12 +9089,17 @@ function drawBackground() {
     ctx.globalAlpha = 1;
   }
 
+  // Player-position parallax: the backdrop slides opposite the player's
+  // lateral position so crossing the road reveals depth. Deeper layers move
+  // less; near layers move more.
+  const parX = Game.player ? (Game.player.x - W * 0.5) : 0;
+
   // FAR mesas (deepest parallax, scrolls slowly)
   const farScroll = (Game.bgScroll * 0.0008) % 1;
   ctx.fillStyle = Game.isNight ? t.farNight : t.farDay;
   for (const peak of Game.farPeaks) {
     const x = ((peak.x - farScroll) % 1 + 1) % 1;
-    const px = x * W;
+    const px = x * W - parX * 0.03;
     const pw = peak.w * W;
     const ph = peak.h * H;
     const py = H * 0.30 - ph;
@@ -9108,33 +9113,41 @@ function drawBackground() {
     ctx.fill();
   }
 
-  // distant mountains parallax
-  ctx.fillStyle = Game.isNight ? t.mountainNight : t.mountainDay;
-  ctx.beginPath();
-  ctx.moveTo(0, H * 0.32);
-  const seed = Math.floor(Game.bgScroll * 0.05);
-  for (let i = 0; i <= 20; i++) {
-    const x = (i / 20) * W;
-    const y = H * 0.32 - 30 - Math.abs(Math.sin(i * 1.7 + seed * 0.1)) * 60;
-    ctx.lineTo(x, y);
+  // Distant mountains — continuous horizontal scroll (a ridgeline sampled at
+  // screen-x + offset translates smoothly, instead of the old per-integer
+  // re-seed that made it jump and read as static).
+  {
+    const baseY = H * 0.34;
+    const off = Game.bgScroll * 0.45 - parX * 0.06;
+    ctx.fillStyle = Game.isNight ? t.mountainNight : t.mountainDay;
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+    for (let sx = 0; sx <= W; sx += 16) {
+      const wx = (sx + off) * 0.010;
+      const ridge = Math.abs(Math.sin(wx)) * 46 + Math.abs(Math.sin(wx * 0.47 + 1.7)) * 30;
+      ctx.lineTo(sx, baseY - 16 - ridge);
+    }
+    ctx.lineTo(W, baseY); ctx.lineTo(W, baseY + H * 0.06); ctx.lineTo(0, baseY + H * 0.06);
+    ctx.closePath();
+    ctx.fill();
   }
-  ctx.lineTo(W, H * 0.32); ctx.lineTo(W, H * 0.36); ctx.lineTo(0, H * 0.36);
-  ctx.closePath();
-  ctx.fill();
 
-  // mid-distance hills (closer parallax)
-  ctx.fillStyle = Game.isNight ? t.hillsNight : t.hillsDay;
-  ctx.beginPath();
-  ctx.moveTo(0, H * 0.42);
-  const seed2 = Math.floor(Game.bgScroll * 0.15);
-  for (let i = 0; i <= 16; i++) {
-    const x = (i / 16) * W;
-    const y = H * 0.42 - 20 - Math.abs(Math.sin(i * 2.3 + seed2 * 0.15)) * 40;
-    ctx.lineTo(x, y);
+  // Mid-distance hills — faster scroll + stronger player parallax (closer = moves more).
+  {
+    const baseY = H * 0.42;
+    const off = Game.bgScroll * 1.0 - parX * 0.13;
+    ctx.fillStyle = Game.isNight ? t.hillsNight : t.hillsDay;
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+    for (let sx = 0; sx <= W; sx += 14) {
+      const wx = (sx + off) * 0.016;
+      const ridge = Math.abs(Math.sin(wx + 0.6)) * 30 + Math.abs(Math.sin(wx * 0.6 + 2.1)) * 18;
+      ctx.lineTo(sx, baseY - 10 - ridge);
+    }
+    ctx.lineTo(W, baseY); ctx.lineTo(W, baseY + H * 0.06); ctx.lineTo(0, baseY + H * 0.06);
+    ctx.closePath();
+    ctx.fill();
   }
-  ctx.lineTo(W, H * 0.42); ctx.lineTo(W, H * 0.46); ctx.lineTo(0, H * 0.46);
-  ctx.closePath();
-  ctx.fill();
 
   // Horizon atmospheric haze — softens the terrain-sky seam
   {
@@ -10071,12 +10084,15 @@ function drawClassicHorizon() {
   ctx.restore();
   // Three silhouette layers — distant mountains/cityscape, mid hills, near.
   // Each layer scrolls at a different rate and shifts with the curve.
-  const scrollFar  = (Game.bgScroll * 0.00010) % 1;
-  const scrollMid  = (Game.bgScroll * 0.00022) % 1;
-  const scrollNear = (Game.bgScroll * 0.00050) % 1;
-  _drawClassicHorizonLayer(horizonY, pal.far,  scrollFar,  curve * W * 0.06, 0,  10, 0.45, pal);
-  _drawClassicHorizonLayer(horizonY, pal.mid,  scrollMid,  curve * W * 0.10, 8,  18, 0.85, pal);
-  _drawClassicHorizonLayer(horizonY, pal.near, scrollNear, curve * W * 0.16, 18, 26, 1.00, pal);
+  // Faster differential scroll for a clearer sense of velocity, plus
+  // player-position parallax so the skyline slides as you cross the road.
+  const parX = Game.player ? (Game.player.x - W * 0.5) : 0;
+  const scrollFar  = (Game.bgScroll * 0.00032) % 1;
+  const scrollMid  = (Game.bgScroll * 0.00070) % 1;
+  const scrollNear = (Game.bgScroll * 0.00150) % 1;
+  _drawClassicHorizonLayer(horizonY, pal.far,  scrollFar,  curve * W * 0.06 - parX * 0.05, 0,  16, 0.45, pal);
+  _drawClassicHorizonLayer(horizonY, pal.mid,  scrollMid,  curve * W * 0.10 - parX * 0.10, 8,  26, 0.85, pal);
+  _drawClassicHorizonLayer(horizonY, pal.near, scrollNear, curve * W * 0.16 - parX * 0.16, 18, 38, 1.00, pal);
 }
 
 function _drawClassicHorizonLayer(horizonY, fill, scrollFrac, curveDx, yOff, peakH, alpha, pal) {
